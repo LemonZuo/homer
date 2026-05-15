@@ -15,6 +15,7 @@ import {
   Send,
   ChevronLeft,
   ChevronRight,
+  MoreHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -50,6 +51,12 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from './ui/drawer'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
 import { cn } from '../lib/utils'
 
 interface Domain {
@@ -434,12 +441,12 @@ function TaskPager({
   if (total <= TASK_PAGE_SIZES[0]) return null
   const pages = Math.ceil(total / pageSize)
   return (
-    <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
-      <span className="font-mono">
+    <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground sm:gap-3">
+      <span className="w-full font-mono sm:w-auto">
         {page} / {pages}（共 {total} 条）
       </span>
       <select
-        className="h-8 rounded-md border border-input bg-background px-2 text-[12px]"
+        className="h-9 flex-1 rounded-md border border-input bg-background px-2 text-[12px] sm:h-8 sm:flex-none"
         value={pageSize}
         onChange={(e) => onPageSizeChange(Number(e.target.value))}
       >
@@ -452,6 +459,7 @@ function TaskPager({
       <Button
         size="sm"
         variant="outline"
+        className="h-9 flex-1 sm:h-8 sm:flex-none"
         disabled={page <= 1}
         onClick={() => onGo(page - 1)}
       >
@@ -461,6 +469,7 @@ function TaskPager({
       <Button
         size="sm"
         variant="outline"
+        className="h-9 flex-1 sm:h-8 sm:flex-none"
         disabled={page >= pages}
         onClick={() => onGo(page + 1)}
       >
@@ -849,10 +858,11 @@ export default function AcmePage() {
             自动签发与续期，并上传 CAS
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
           <Button
             variant="outline"
             size="sm"
+            className="h-10 w-full sm:h-8 sm:w-auto"
             onClick={reloadAll}
             disabled={loading}
           >
@@ -866,6 +876,7 @@ export default function AcmePage() {
           <Button
             variant="outline"
             size="sm"
+            className="h-10 w-full sm:h-8 sm:w-auto"
             onClick={() => setCredDrawerOpen(true)}
           >
             <KeyRound className="mr-1.5 h-3.5 w-3.5" />
@@ -874,6 +885,7 @@ export default function AcmePage() {
           <Button
             variant="outline"
             size="sm"
+            className="h-10 w-full sm:h-8 sm:w-auto"
             onClick={() => setAccountDrawerOpen(true)}
           >
             <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
@@ -882,6 +894,7 @@ export default function AcmePage() {
           <Button
             variant="outline"
             size="sm"
+            className="h-10 w-full sm:h-8 sm:w-auto"
             onClick={() => setTargetEntryOpen(true)}
           >
             <Server className="mr-1.5 h-3.5 w-3.5" />
@@ -889,6 +902,7 @@ export default function AcmePage() {
           </Button>
           <Button
             size="sm"
+            className="col-span-2 h-10 w-full sm:col-span-1 sm:h-8 sm:w-auto"
             onClick={() => {
               setEditTarget(null)
               setEditOpen(true)
@@ -949,7 +963,7 @@ export default function AcmePage() {
                   >
                     {d.main_domain}
                   </div>
-                  <div className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                  <div className="mt-0.5 text-[12px] text-muted-foreground line-clamp-2 sm:line-clamp-none sm:truncate">
                     {accountSummary(d.account_id)} · {d.provider} · {d.enabled ? '自动续期' : '已停用'}
                   </div>
                 </div>
@@ -970,11 +984,11 @@ export default function AcmePage() {
                 {revoked && <FieldRow label="吊销" value={fmtDate(d.revoked_at)} />}
               </div>
 
-              <div className="mt-3 flex gap-2 px-4 pb-4">
+              <div className="mt-3 flex flex-col gap-2 px-4 pb-4 sm:flex-row">
                 <Button
                   size="sm"
                   variant="outline"
-                  className="flex-1"
+                  className="h-10 w-full sm:h-8 sm:flex-1"
                   onClick={() => startIssue(d)}
                   disabled={busy !== null}
                 >
@@ -985,58 +999,75 @@ export default function AcmePage() {
                   )}
                   {issueLabel}
                 </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={() => startUploadCAS(d)}
-                  disabled={busy !== null || !d.not_after || revoked}
-                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '上传当前证书到 CAS'}
-                >
-                  {uploadingCAS ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <UploadCloud className="h-3.5 w-3.5" />
-                  )}
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={() => openDeployConfigs(d)}
-                  disabled={busy !== null}
-                  title="部署配置"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={() => {
-                    setEditTarget(d)
-                    setEditOpen(true)
-                  }}
-                  disabled={busy !== null}
-                >
-                  <Edit3 className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="hover:text-destructive"
-                  onClick={() => setRevokePending(d)}
-                  disabled={busy !== null || !d.not_after || revoked}
-                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '吊销当前证书'}
-                >
-                  <Ban className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="hover:text-destructive"
-                  onClick={() => setDeletePending(d)}
-                  disabled={busy !== null}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                <div className="grid grid-cols-4 gap-2 sm:flex">
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-10 w-full sm:h-8 sm:w-8"
+                    onClick={() => startUploadCAS(d)}
+                    disabled={busy !== null || !d.not_after || revoked}
+                    title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '上传当前证书到 CAS'}
+                  >
+                    {uploadingCAS ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <UploadCloud className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-10 w-full sm:h-8 sm:w-8"
+                    onClick={() => openDeployConfigs(d)}
+                    disabled={busy !== null}
+                    title="部署配置"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-10 w-full sm:h-8 sm:w-8"
+                    onClick={() => {
+                      setEditTarget(d)
+                      setEditOpen(true)
+                    }}
+                    disabled={busy !== null}
+                    title="编辑域名"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="h-10 w-full sm:h-8 sm:w-8"
+                        disabled={busy !== null}
+                        title="更多操作"
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        disabled={!d.not_after || revoked}
+                        onSelect={() => setRevokePending(d)}
+                        className="text-rose-600 focus:text-rose-600 dark:text-rose-400 dark:focus:text-rose-400"
+                      >
+                        <Ban className="h-3.5 w-3.5" />
+                        吊销证书
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setDeletePending(d)}
+                        className="text-rose-600 focus:text-rose-600 dark:text-rose-400 dark:focus:text-rose-400"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        删除域名
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             </Card>
           )
@@ -1050,19 +1081,21 @@ export default function AcmePage() {
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[14px] font-semibold tracking-tight">任务历史</h2>
-        <TaskPager
-          page={taskPage}
-          pageSize={taskPageSize}
-          total={taskTotal}
-          onGo={(p) => void loadTasks(p)}
-          onPageSizeChange={changeTaskPageSize}
-        />
+        <div className="hidden sm:block">
+          <TaskPager
+            page={taskPage}
+            pageSize={taskPageSize}
+            total={taskTotal}
+            onGo={(p) => void loadTasks(p)}
+            onPageSizeChange={changeTaskPageSize}
+          />
+        </div>
       </div>
       <div className="space-y-2">
         {tasks.map((t) => (
           <Card
             key={t.id}
-            className="flex flex-wrap items-center gap-3 px-4 py-3 text-[12.5px]"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-[12.5px]"
           >
             <span
               className={cn(
@@ -1075,12 +1108,13 @@ export default function AcmePage() {
             <span className="font-mono">#{t.id}</span>
             <span className="font-medium">{t.main_domain}</span>
             <span className="text-muted-foreground">{KIND_LABEL[t.kind] || t.kind}</span>
-            <span className="ml-auto font-mono text-[11.5px] text-muted-foreground">
+            <span className="w-full font-mono text-[11.5px] text-muted-foreground sm:ml-auto sm:w-auto">
               {fmtDateTime(t.started_at)}
             </span>
             <Button
               size="sm"
               variant="outline"
+              className="h-9 w-full sm:h-8 sm:w-auto"
               onClick={() => setLogTaskID(t.id)}
             >
               <ScrollText className="mr-1.5 h-3.5 w-3.5" />
@@ -1624,7 +1658,7 @@ function DomainEditDialog({ open, onOpenChange, target, accounts, providers, onS
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>{target ? '编辑域名' : '新增域名'}</DialogTitle>
           <DialogDescription>
@@ -1673,7 +1707,7 @@ function DomainEditDialog({ open, onOpenChange, target, accounts, providers, onS
                 onKeyDown={onKeyDown}
                 onBlur={() => commitDraft()}
                 placeholder={domains.length === 0 ? 'example.com（回车添加，可继续添加 *.example.com）' : ''}
-                className="min-w-[160px] flex-1 bg-transparent font-mono text-[12px] outline-none placeholder:text-muted-foreground"
+                className="min-w-[120px] flex-1 bg-transparent font-mono text-[12px] outline-none placeholder:text-muted-foreground"
               />
             </div>
             {draftError && (
@@ -1721,7 +1755,7 @@ function DomainEditDialog({ open, onOpenChange, target, accounts, providers, onS
             />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>
@@ -1819,7 +1853,7 @@ function CredentialsDrawer({
           </DrawerDescription>
         </DrawerHeader>
         <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
-          <div className="flex justify-end">
+          <div className="flex justify-end [&>button]:h-10 [&>button]:w-full sm:[&>button]:h-8 sm:[&>button]:w-auto">
             <Button size="sm" onClick={onAdd}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               添加凭证
@@ -1832,7 +1866,7 @@ function CredentialsDrawer({
           ) : (
             credentials.map((c) => (
               <Card key={c.id} className="px-4 py-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <div className="font-mono text-[13px] font-medium">{c.provider}</div>
                     <div
@@ -1903,7 +1937,7 @@ function AccountsDrawer({
           </DrawerDescription>
         </DrawerHeader>
         <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
-          <div className="flex justify-end">
+          <div className="flex justify-end [&>button]:h-10 [&>button]:w-full sm:[&>button]:h-8 sm:[&>button]:w-auto">
             <Button size="sm" onClick={onAdd}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               添加账号
@@ -1916,7 +1950,7 @@ function AccountsDrawer({
           ) : (
             accounts.map((a) => (
               <Card key={a.id} className="px-4 py-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-mono text-[13px] font-medium">
@@ -2021,7 +2055,7 @@ function DeployTargetsEntryDrawer({
             <div className="space-y-2">
               {sshTargets.map((t) => (
                 <Card key={t.id} className="px-4 py-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
@@ -2076,7 +2110,7 @@ function DeployTargetsEntryDrawer({
             <div className="space-y-2">
               {safelineTargets.map((t) => (
                 <Card key={t.id} className="px-4 py-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
@@ -2191,7 +2225,7 @@ function DeployConfigsDrawer({
           </DrawerDescription>
         </DrawerHeader>
         <div className="flex-1 space-y-5 overflow-auto px-4 pb-4">
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2 [&>button]:h-10 [&>button]:flex-1 sm:[&>button]:h-8 sm:[&>button]:flex-none">
             <Button
               size="sm"
               variant="outline"
@@ -2246,7 +2280,7 @@ function DeployConfigsDrawer({
                     const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
                     return (
                       <Card key={cfg.id} className="px-4 py-3">
-                        <div className="flex items-start gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
                           <Send className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
@@ -2332,7 +2366,7 @@ function DeployConfigsDrawer({
                     const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
                     return (
                       <Card key={cfg.id} className="px-4 py-3">
-                        <div className="flex items-start gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
                           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
@@ -2464,7 +2498,7 @@ export function SSHDeployConfigsDrawer({
           </DrawerDescription>
         </DrawerHeader>
         <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2 [&>button]:h-10 [&>button]:flex-1 sm:[&>button]:h-8 sm:[&>button]:flex-none">
             <Button
               size="sm"
               variant="outline"
@@ -2503,7 +2537,7 @@ export function SSHDeployConfigsDrawer({
               const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
               return (
                 <Card key={cfg.id} className="px-4 py-3">
-                  <div className="flex items-start gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate font-mono text-[13px] font-medium">
@@ -2663,14 +2697,14 @@ function SSHDeployConfigEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>{config ? '编辑部署配置' : '新增部署配置'}</DialogTitle>
           <DialogDescription>
             {domain?.main_domain ?? '当前域名'} 的证书部署路径和部署命令，支持 {'{domain}'} 占位符
           </DialogDescription>
         </DialogHeader>
-        <div className="grid max-h-[70vh] gap-3.5 overflow-auto pr-1">
+        <div className="grid gap-3.5">
           <div className="grid gap-1.5">
             <Label htmlFor="deploy-config-name">配置名称</Label>
             <Input
@@ -2762,7 +2796,7 @@ function SSHDeployConfigEditDialog({
             <Switch id="deploy-config-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>
@@ -2836,7 +2870,7 @@ export function SafelineDeployConfigsDrawer({
           </DrawerDescription>
         </DrawerHeader>
         <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2 [&>button]:h-10 [&>button]:flex-1 sm:[&>button]:h-8 sm:[&>button]:flex-none">
             <Button
               size="sm"
               variant="outline"
@@ -2875,7 +2909,7 @@ export function SafelineDeployConfigsDrawer({
               const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
               return (
                 <Card key={cfg.id} className="px-4 py-3">
-                  <div className="flex items-start gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate font-mono text-[13px] font-medium">
@@ -3025,14 +3059,14 @@ function SafelineDeployConfigEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>{config ? '编辑雷池部署配置' : '新增雷池部署配置'}</DialogTitle>
           <DialogDescription>
             {domain?.main_domain ?? '当前域名'} 上传到雷池证书管理；cert_id 留空表示首次新增，部署成功后会自动写回
           </DialogDescription>
         </DialogHeader>
-        <div className="grid max-h-[70vh] gap-3.5 overflow-auto pr-1">
+        <div className="grid gap-3.5">
           <div className="grid gap-1.5">
             <Label htmlFor="safeline-deploy-name">配置名称</Label>
             <Input
@@ -3063,7 +3097,7 @@ function SafelineDeployConfigEditDialog({
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
             <div className="grid gap-1.5">
               <Label htmlFor="safeline-cert-id">雷池 cert_id</Label>
               <Input
@@ -3099,7 +3133,7 @@ function SafelineDeployConfigEditDialog({
             <Switch id="safeline-deploy-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>
@@ -3144,7 +3178,7 @@ export function SSHTargetsDrawer({
           </DrawerDescription>
         </DrawerHeader>
         <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
-          <div className="flex justify-end">
+          <div className="flex justify-end [&>button]:h-10 [&>button]:w-full sm:[&>button]:h-8 sm:[&>button]:w-auto">
             <Button size="sm" onClick={onAdd}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               添加机器
@@ -3157,7 +3191,7 @@ export function SSHTargetsDrawer({
           ) : (
             targets.map((t) => (
               <Card key={t.id} className="px-4 py-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-mono text-[13px] font-medium">
@@ -3291,14 +3325,14 @@ function SSHTargetEditDialog({ open, onOpenChange, target, onSaved }: SSHTargetE
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>{target ? '编辑 SSH 机器' : '新增 SSH 机器'}</DialogTitle>
           <DialogDescription>
             只保存机器连接和认证信息；证书路径和部署命令在每次部署时填写
           </DialogDescription>
         </DialogHeader>
-        <div className="grid max-h-[70vh] gap-3.5 overflow-auto pr-1">
+        <div className="grid gap-3.5">
           <div className="grid gap-1.5">
             <Label htmlFor="ssh-name">目标名称</Label>
             <Input
@@ -3310,8 +3344,8 @@ function SSHTargetEditDialog({ open, onOpenChange, target, onSaved }: SSHTargetE
               data-1p-ignore="true"
             />
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-2 grid gap-1.5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-2">
+            <div className="grid gap-1.5 sm:col-span-2">
               <Label htmlFor="ssh-host">主机</Label>
               <Input
                 id="ssh-host"
@@ -3408,7 +3442,7 @@ function SSHTargetEditDialog({ open, onOpenChange, target, onSaved }: SSHTargetE
             <Switch id="ssh-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>
@@ -3451,7 +3485,7 @@ export function SafelineTargetsDrawer({
           </DrawerDescription>
         </DrawerHeader>
         <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
-          <div className="flex justify-end">
+          <div className="flex justify-end [&>button]:h-10 [&>button]:w-full sm:[&>button]:h-8 sm:[&>button]:w-auto">
             <Button size="sm" onClick={onAdd}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               添加实例
@@ -3464,7 +3498,7 @@ export function SafelineTargetsDrawer({
           ) : (
             targets.map((t) => (
               <Card key={t.id} className="px-4 py-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-mono text-[13px] font-medium">
@@ -3581,14 +3615,14 @@ function SafelineTargetEditDialog({ open, onOpenChange, target, onSaved }: Safel
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>{target ? '编辑雷池实例' : '新增雷池实例'}</DialogTitle>
           <DialogDescription>
             地址填写管理端根地址，例如 https://waf.example.com:9443
           </DialogDescription>
         </DialogHeader>
-        <div className="grid max-h-[70vh] gap-3.5 overflow-auto pr-1">
+        <div className="grid gap-3.5">
           <div className="grid gap-1.5">
             <Label htmlFor="safeline-name">实例名称</Label>
             <Input
@@ -3635,7 +3669,7 @@ function SafelineTargetEditDialog({ open, onOpenChange, target, onSaved }: Safel
             <Switch id="safeline-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>
@@ -3726,7 +3760,7 @@ function AccountEditDialog({ open, onOpenChange, target, onSaved }: AccountEditP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>{target ? '编辑 CA 账号' : '新增 CA 账号'}</DialogTitle>
           <DialogDescription>
@@ -3814,7 +3848,7 @@ function AccountEditDialog({ open, onOpenChange, target, onSaved }: AccountEditP
             />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>
@@ -4007,7 +4041,7 @@ function CredentialEditDialog({ open, onOpenChange, target, onSaved }: Credentia
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>{target ? '编辑凭证' : '新增凭证'}</DialogTitle>
           <DialogDescription>
@@ -4081,7 +4115,7 @@ function CredentialEditDialog({ open, onOpenChange, target, onSaved }: Credentia
                   )
                 }
                 return (
-                  <div key={i} className="flex gap-2">
+                  <div key={i} className="flex flex-col gap-2 sm:flex-row">
                     <Input
                       value={pair.key}
                       onChange={(e) => updatePair(i, { key: e.target.value })}
@@ -4128,7 +4162,7 @@ function CredentialEditDialog({ open, onOpenChange, target, onSaved }: Credentia
             </div>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>
