@@ -435,11 +435,11 @@ function TaskPager({
   const pages = Math.ceil(total / pageSize)
   return (
     <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground sm:gap-3">
-      <span className="w-full font-mono sm:w-auto">
+      <span className="font-mono">
         {page} / {pages}（共 {total} 条）
       </span>
       <select
-        className="h-9 flex-1 rounded-md border border-input bg-background px-2 text-[12px] sm:h-8 sm:flex-none"
+        className="ml-auto h-8 rounded-md border border-input bg-background px-2 text-[12px] sm:ml-0"
         value={pageSize}
         onChange={(e) => onPageSizeChange(Number(e.target.value))}
       >
@@ -449,26 +449,28 @@ function TaskPager({
           </option>
         ))}
       </select>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-9 flex-1 sm:h-8 sm:flex-none"
-        disabled={page <= 1}
-        onClick={() => onGo(page - 1)}
-      >
-        <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-        上一页
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-9 flex-1 sm:h-8 sm:flex-none"
-        disabled={page >= pages}
-        onClick={() => onGo(page + 1)}
-      >
-        下一页
-        <ChevronRight className="ml-1 h-3.5 w-3.5" />
-      </Button>
+      <div className="flex w-full gap-2 sm:contents">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-9 flex-1 sm:h-8 sm:flex-none"
+          disabled={page <= 1}
+          onClick={() => onGo(page - 1)}
+        >
+          <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+          上一页
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-9 flex-1 sm:h-8 sm:flex-none"
+          disabled={page >= pages}
+          onClick={() => onGo(page + 1)}
+        >
+          下一页
+          <ChevronRight className="ml-1 h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
   )
 }
@@ -843,7 +845,7 @@ export default function AcmePage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 pb-32 pt-4 sm:px-8 sm:pt-10">
+    <div className="mx-auto max-w-5xl px-4 pb-12 pt-4 sm:px-8 sm:pb-32 sm:pt-10">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-[17px] font-semibold tracking-tight">ACME 签发</h1>
@@ -1074,7 +1076,7 @@ export default function AcmePage() {
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[14px] font-semibold tracking-tight">任务历史</h2>
-        <div className="hidden sm:block">
+        <div className="w-full sm:w-auto">
           <TaskPager
             page={taskPage}
             pageSize={taskPageSize}
@@ -1123,7 +1125,7 @@ export default function AcmePage() {
       </div>
 
       {taskTotal > TASK_PAGE_SIZES[0] && (
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 hidden justify-end sm:flex">
           <TaskPager
           page={taskPage}
           pageSize={taskPageSize}
