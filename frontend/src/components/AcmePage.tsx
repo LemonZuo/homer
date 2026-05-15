@@ -848,8 +848,11 @@ export default function AcmePage() {
     <div className="mx-auto max-w-5xl px-4 pb-12 pt-4 sm:px-8 sm:pb-32 sm:pt-10">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-[17px] font-semibold tracking-tight">ACME 签发</h1>
-          <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+          <div className="flex items-center gap-3">
+            <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
+            <h1 className="text-[28px] font-bold leading-none tracking-tight">ACME 签发</h1>
+          </div>
+          <p className="mt-2 text-[12.5px] text-muted-foreground">
             自动签发与续期，并上传 CAS
           </p>
         </div>
