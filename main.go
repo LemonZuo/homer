@@ -11,6 +11,7 @@ import (
 	"github.com/LemonZuo/homer/internal/config"
 	"github.com/LemonZuo/homer/internal/db"
 	"github.com/LemonZuo/homer/internal/handler"
+	"github.com/LemonZuo/homer/internal/notify/email"
 	"github.com/LemonZuo/homer/internal/notify/wework"
 	"github.com/LemonZuo/homer/internal/router"
 )
@@ -38,6 +39,10 @@ func main() {
 	acmeSvc := buildACMEService(gormDB, cfg, casSvc)
 	acmeHandler := handler.NewACMEHandler(acmeSvc)
 
+	bypassWeWork := wework.New(cfg.BypassWeWorkCorpID, cfg.BypassWeWorkAgentID, cfg.BypassWeWorkSecret, cfg.BypassWeWorkTagID)
+	bypassEmail := email.NewResend(cfg.ResendAPIKey, cfg.BypassEmailFrom)
+	bypassHandler := handler.NewBypassHandler(bypassWeWork, bypassEmail, cfg.BypassEmailTo, cfg.BypassSubject)
+
 	sched := startScheduler(gormDB, cfg, notifier, acmeSvc)
 	defer sched.Stop()
 
@@ -46,7 +51,7 @@ func main() {
 		log.Fatalf("sub frontend/dist: %v", err)
 	}
 
-	r := router.Setup(gormDB, notifier, cdnHandler, casHandler, acmeHandler, dist)
+	r := router.Setup(gormDB, notifier, cdnHandler, casHandler, acmeHandler, bypassHandler, dist)
 	log.Printf("server listening on %s", cfg.ListenURL())
 	if err := r.Run(cfg.ListenAddr()); err != nil {
 		log.Fatalf("run server: %v", err)

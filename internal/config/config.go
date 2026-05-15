@@ -38,6 +38,17 @@ type Config struct {
 
 	// 调度
 	BirthdayRemindCron string
+
+	// 12306Bypass 分流抢票助手 webhook 转发：独立企业微信应用 + Resend 邮件
+	BypassWeWorkCorpID  string
+	BypassWeWorkAgentID string
+	BypassWeWorkSecret  string
+	BypassWeWorkTagID   string
+
+	ResendAPIKey    string
+	BypassEmailFrom string
+	BypassEmailTo   string
+	BypassSubject   string
 }
 
 func Load() *Config {
@@ -67,6 +78,16 @@ func Load() *Config {
 		ACMERenewCron:       env("ACME_RENEW_CRON", "0 0 3 * * *"),
 
 		BirthdayRemindCron: env("BIRTHDAY_REMIND_CRON", "0 0 9 * * *"),
+
+		BypassWeWorkCorpID:  env("BYPASS_WEWORK_CORP_ID", ""),
+		BypassWeWorkAgentID: env("BYPASS_WEWORK_AGENT_ID", ""),
+		BypassWeWorkSecret:  env("BYPASS_WEWORK_SECRET", ""),
+		BypassWeWorkTagID:   env("BYPASS_WEWORK_TAG_ID", ""),
+
+		ResendAPIKey:    env("RESEND_API_KEY", ""),
+		BypassEmailFrom: env("BYPASS_EMAIL_FROM", ""),
+		BypassEmailTo:   env("BYPASS_EMAIL_TO", ""),
+		BypassSubject:   env("BYPASS_EMAIL_SUBJECT", "分流通知"),
 	}
 }
 
