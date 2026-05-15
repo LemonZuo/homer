@@ -1,20 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, UploadCloud, Loader2 } from 'lucide-react'
+import { RefreshCw, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
 import { avatarColor, getColorSet } from '../colors'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from './ui/alert-dialog'
 import { cn } from '../lib/utils'
 
 interface Domain {
@@ -27,15 +17,6 @@ interface Domain {
   sourceType: string
   sourceContent: string
   sourcePort: number
-}
-
-interface Cert {
-  certId: number
-  certName: string
-  common: string
-  issuer: string
-  fingerprint: string
-  lastTime: number
 }
 
 function statusText(s: string) {
@@ -73,20 +54,13 @@ function FieldRow({ label, value }: { label: string; value: string }) {
 
 export default function CdnPage() {
   const [domains, setDomains] = useState<Domain[]>([])
-  const [certs, setCerts] = useState<Cert[]>([])
   const [loading, setLoading] = useState(true)
-  const [deploying, setDeploying] = useState<string | null>(null)
-  const [pendingDeploy, setPendingDeploy] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [d, c] = await Promise.all([
-        api.get('/cdn/domains'),
-        api.get('/cdn/certificates'),
-      ])
-      setDomains(d.data?.data ?? [])
-      setCerts(c.data?.data ?? [])
+      const { data } = await api.get('/cdn/domains')
+      setDomains(data?.data ?? [])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载失败')
     } finally {
@@ -98,19 +72,6 @@ export default function CdnPage() {
     load()
   }, [load])
 
-  const deploy = async (certName: string) => {
-    setDeploying(certName)
-    try {
-      const { data } = await api.post('/cdn/deploy', { certName })
-      toast.success(data?.message || '已部署')
-      await load()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '部署失败')
-    } finally {
-      setDeploying(null)
-    }
-  }
-
   const cs = getColorSet('sky')
   const empty = !loading && domains.length === 0
 
@@ -120,7 +81,7 @@ export default function CdnPage() {
         <div>
           <h1 className="text-[17px] font-semibold tracking-tight">加速域名</h1>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            阿里云 CDN 域名只读视图与证书部署
+            阿里云 CDN 域名只读视图
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -141,7 +102,7 @@ export default function CdnPage() {
         </div>
       </div>
 
-      <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {domains.map((d) => {
           const online = d.domainStatus === 'online'
           const https = d.sslProtocol === 'on'
@@ -211,73 +172,6 @@ export default function CdnPage() {
         )}
       </div>
 
-      <h2 className="mb-3 text-[14px] font-semibold tracking-tight">
-        CDN 证书（点击部署到所有 HTTPS 域名）
-      </h2>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {certs.map((c) => (
-          <Card key={`${c.certId}-${c.certName}`} className="flex items-center gap-3 p-4">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-semibold">{c.certName}</div>
-              <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                {c.common || '—'} · {c.issuer || '—'}
-              </div>
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="shrink-0"
-              onClick={() => setPendingDeploy(c.certName)}
-              disabled={deploying !== null}
-            >
-              {deploying === c.certName ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <UploadCloud className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              部署
-            </Button>
-          </Card>
-        ))}
-        {!loading && certs.length === 0 && (
-          <p className="col-span-full py-8 text-center text-[12.5px] text-muted-foreground">
-            没有可用证书（或阿里云 CDN 未配置）
-          </p>
-        )}
-      </div>
-
-      <AlertDialog
-        open={!!pendingDeploy}
-        onOpenChange={(o) => {
-          if (!o) setPendingDeploy(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>部署证书到 HTTPS 域名</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将把证书{' '}
-              <span className="font-mono font-medium text-foreground">
-                {pendingDeploy}
-              </span>{' '}
-              部署到所有开启 HTTPS 的加速域名。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="!bg-primary !text-primary-foreground hover:!bg-primary/90"
-              onClick={() => {
-                const name = pendingDeploy
-                setPendingDeploy(null)
-                if (name) void deploy(name)
-              }}
-            >
-              部署
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

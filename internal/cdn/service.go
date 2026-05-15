@@ -54,16 +54,6 @@ type DomainView struct {
 	SourcePort   int32  `json:"sourcePort"`
 }
 
-// CertView CDN 证书列表项。
-type CertView struct {
-	CertID      int64  `json:"certId"`
-	CertName    string `json:"certName"`
-	Common      string `json:"common"`
-	Issuer      string `json:"issuer"`
-	Fingerprint string `json:"fingerprint"`
-	LastTime    int64  `json:"lastTime"`
-}
-
 // ListDomains 获取加速域名列表，并合并 https 证书信息补 certName。
 func (s *Service) ListDomains() ([]DomainView, error) {
 	c, err := s.client()
@@ -103,33 +93,6 @@ func (s *Service) ListDomains() ([]DomainView, error) {
 			v.SourcePort = tea.Int32Value(src.Port)
 		}
 		out = append(out, v)
-	}
-	return out, nil
-}
-
-// ListCertificates 获取 CDN 可用证书列表。
-func (s *Service) ListCertificates() ([]CertView, error) {
-	c, err := s.client()
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.DescribeCdnCertificateList(&sdk.DescribeCdnCertificateListRequest{})
-	if err != nil {
-		return nil, err
-	}
-	out := []CertView{}
-	if resp.Body == nil || resp.Body.CertificateListModel == nil || resp.Body.CertificateListModel.CertList == nil {
-		return out, nil
-	}
-	for _, ct := range resp.Body.CertificateListModel.CertList.Cert {
-		out = append(out, CertView{
-			CertID:      tea.Int64Value(ct.CertId),
-			CertName:    tea.StringValue(ct.CertName),
-			Common:      tea.StringValue(ct.Common),
-			Issuer:      tea.StringValue(ct.Issuer),
-			Fingerprint: tea.StringValue(ct.Fingerprint),
-			LastTime:    tea.Int64Value(ct.LastTime),
-		})
 	}
 	return out, nil
 }
