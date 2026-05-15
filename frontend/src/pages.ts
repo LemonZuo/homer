@@ -10,6 +10,7 @@ export interface PageDef {
 
 export const pages: PageDef[] = [
   { key: 'cdn', label: '加速域名', color: 'sky' },
+  { key: 'cas', label: '证书管理', color: 'violet' },
 ]
 
 export function getPage(key: string | undefined): PageDef | undefined {

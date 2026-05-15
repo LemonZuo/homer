@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/6tail/lunar-go v1.4.6
+	github.com/alibabacloud-go/cas-20200407/v4 v4.2.0
 	github.com/alibabacloud-go/cdn-20180510/v5 v5.2.2
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.1.16
 	github.com/alibabacloud-go/tea v1.4.0

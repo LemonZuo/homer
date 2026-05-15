@@ -7,6 +7,7 @@ import (
 
 	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/buildinfo"
+	"github.com/LemonZuo/homer/internal/cas"
 	"github.com/LemonZuo/homer/internal/cdn"
 	"github.com/LemonZuo/homer/internal/config"
 	"github.com/LemonZuo/homer/internal/db"
@@ -34,6 +35,9 @@ func main() {
 	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
 	cdnHandler := handler.NewCDNHandler(cdnSvc)
 
+	casSvc := cas.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
+	casHandler := handler.NewCASHandler(casSvc, cdnSvc)
+
 	sched := scheduler.New()
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() {
 		birthday.RunOnce(gormDB, notifier)
@@ -48,7 +52,7 @@ func main() {
 		log.Fatalf("sub frontend/dist: %v", err)
 	}
 
-	r := router.Setup(gormDB, notifier, cdnHandler, dist)
+	r := router.Setup(gormDB, notifier, cdnHandler, casHandler, dist)
 	log.Printf("server listening on %s", cfg.ListenURL())
 	if err := r.Run(cfg.ListenAddr()); err != nil {
 		log.Fatalf("run server: %v", err)

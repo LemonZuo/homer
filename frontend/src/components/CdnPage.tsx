@@ -5,6 +5,16 @@ import { api } from '../api'
 import { avatarColor, getColorSet } from '../colors'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog'
 import { cn } from '../lib/utils'
 
 interface Domain {
@@ -66,6 +76,7 @@ export default function CdnPage() {
   const [certs, setCerts] = useState<Cert[]>([])
   const [loading, setLoading] = useState(true)
   const [deploying, setDeploying] = useState<string | null>(null)
+  const [pendingDeploy, setPendingDeploy] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -88,7 +99,6 @@ export default function CdnPage() {
   }, [load])
 
   const deploy = async (certName: string) => {
-    if (!window.confirm(`确认把证书【${certName}】部署到所有 HTTPS 加速域名？`)) return
     setDeploying(certName)
     try {
       const { data } = await api.post('/cdn/deploy', { certName })
@@ -217,7 +227,7 @@ export default function CdnPage() {
               size="sm"
               variant="outline"
               className="shrink-0"
-              onClick={() => deploy(c.certName)}
+              onClick={() => setPendingDeploy(c.certName)}
               disabled={deploying !== null}
             >
               {deploying === c.certName ? (
@@ -235,6 +245,39 @@ export default function CdnPage() {
           </p>
         )}
       </div>
+
+      <AlertDialog
+        open={!!pendingDeploy}
+        onOpenChange={(o) => {
+          if (!o) setPendingDeploy(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>部署证书到 HTTPS 域名</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将把证书{' '}
+              <span className="font-mono font-medium text-foreground">
+                {pendingDeploy}
+              </span>{' '}
+              部署到所有开启 HTTPS 的加速域名。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="!bg-primary !text-primary-foreground hover:!bg-primary/90"
+              onClick={() => {
+                const name = pendingDeploy
+                setPendingDeploy(null)
+                if (name) void deploy(name)
+              }}
+            >
+              部署
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

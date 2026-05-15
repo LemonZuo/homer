@@ -27,6 +27,10 @@ type Config struct {
 	AliyunCDNAccessKeyID     string
 	AliyunCDNAccessKeySecret string
 
+	// 阿里云 CAS 数字证书管理（与 CDN 用独立 AK/SK）
+	AliyunCASAccessKeyID     string
+	AliyunCASAccessKeySecret string
+
 	// 调度
 	BirthdayRemindCron string
 }
@@ -49,6 +53,9 @@ func Load() *Config {
 
 		AliyunCDNAccessKeyID:     env("ALIYUN_CDN_ACCESS_KEY_ID", ""),
 		AliyunCDNAccessKeySecret: env("ALIYUN_CDN_ACCESS_KEY_SECRET", ""),
+
+		AliyunCASAccessKeyID:     env("ALIYUN_CAS_ACCESS_KEY_ID", ""),
+		AliyunCASAccessKeySecret: env("ALIYUN_CAS_ACCESS_KEY_SECRET", ""),
 
 		BirthdayRemindCron: env("BIRTHDAY_REMIND_CRON", "0 0 9 * * *"),
 	}
