@@ -22,9 +22,33 @@ import (
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/lego"
 	legolog "github.com/go-acme/lego/v4/log"
-	"github.com/go-acme/lego/v4/providers/dns"
+	"github.com/go-acme/lego/v4/providers/dns/alidns"
+	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
+	"github.com/go-acme/lego/v4/providers/dns/dnspod"
+	"github.com/go-acme/lego/v4/providers/dns/huaweicloud"
+	"github.com/go-acme/lego/v4/providers/dns/tencentcloud"
 	"github.com/go-acme/lego/v4/registration"
 )
+
+// newProviderByName 仅链接我们实际支持的 5 个 DNS provider，避免把 lego 全量
+// providers/dns 包（连带 AWS / Azure / GCP 等 SDK）链进二进制。新增 provider
+// 时在此 switch 与前端 PROVIDER_SCHEMAS 同步追加即可。
+func newProviderByName(name string) (challenge.Provider, error) {
+	switch name {
+	case "alidns":
+		return alidns.NewDNSProvider()
+	case "tencentcloud":
+		return tencentcloud.NewDNSProvider()
+	case "dnspod":
+		return dnspod.NewDNSProvider()
+	case "huaweicloud":
+		return huaweicloud.NewDNSProvider()
+	case "cloudflare":
+		return cloudflare.NewDNSProvider()
+	default:
+		return nil, fmt.Errorf("unsupported DNS provider %q（仅支持 alidns / tencentcloud / dnspod / huaweicloud / cloudflare）", name)
+	}
+}
 
 const (
 	// CADirLetsEncrypt 生产环境 LE。
@@ -235,7 +259,7 @@ func makeProvider(name string, store *CredentialStore) (challenge.Provider, erro
 		}
 	}()
 
-	prov, err := dns.NewDNSChallengeProviderByName(name)
+	prov, err := newProviderByName(name)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 DNS provider %s 失败：%w", name, err)
 	}

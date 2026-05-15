@@ -290,7 +290,8 @@ export function safelineConfigTitle(cfg: SafelineDeployConfig) {
   return cfg.name?.trim() || `配置 #${cfg.id}`
 }
 
-// 常用 DNS provider + 对应 lego 环境变量；完整列表见 lego 文档
+// 仅保留后端实际链接的 5 个 DNS provider；新增 provider 时需同步
+// internal/acme/lego_client.go 的 newProviderByName。
 export const PROVIDER_SCHEMAS: ProviderSchema[] = [
   {
     key: 'alidns',
@@ -319,36 +320,6 @@ export const PROVIDER_SCHEMAS: ProviderSchema[] = [
     label: 'Cloudflare (cloudflare)',
     required: ['CLOUDFLARE_DNS_API_TOKEN'],
     optional: ['CLOUDFLARE_ZONE_API_TOKEN'],
-  },
-  {
-    key: 'godaddy',
-    label: 'GoDaddy (godaddy)',
-    required: ['GODADDY_API_KEY', 'GODADDY_API_SECRET'],
-  },
-  {
-    key: 'gcore',
-    label: 'Gcore (gcore)',
-    required: ['GCORE_PERMANENT_API_TOKEN'],
-  },
-  {
-    key: 'digitalocean',
-    label: 'DigitalOcean (digitalocean)',
-    required: ['DO_AUTH_TOKEN'],
-  },
-  {
-    key: 'namecheap',
-    label: 'Namecheap (namecheap)',
-    required: ['NAMECHEAP_API_USER', 'NAMECHEAP_API_KEY'],
-  },
-  {
-    key: 'gandiv5',
-    label: 'Gandi v5 (gandiv5)',
-    required: ['GANDIV5_PERSONAL_ACCESS_TOKEN'],
-  },
-  {
-    key: 'route53',
-    label: 'AWS Route 53 (route53)',
-    required: ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION'],
   },
 ]
 
