@@ -924,6 +924,7 @@ export default function AcmePage() {
                 : { cls: 'bg-muted text-muted-foreground', text: '未签发' }
           const issuing = busy === `issue-${d.id}`
           const uploadingCAS = busy === `upload-cas-${d.id}`
+          const issueLabel = revoked || days !== null ? '重签' : '签发'
           return (
             <Card
               key={d.id}
@@ -983,7 +984,7 @@ export default function AcmePage() {
                   ) : (
                     <Play className="mr-1.5 h-3.5 w-3.5" />
                   )}
-                  签发
+                  {issueLabel}
                 </Button>
                 <Button
                   size="icon"
@@ -1010,16 +1011,6 @@ export default function AcmePage() {
                 <Button
                   size="icon"
                   variant="outline"
-                  className="hover:text-destructive"
-                  onClick={() => setRevokePending(d)}
-                  disabled={busy !== null || !d.not_after || revoked}
-                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '吊销当前证书'}
-                >
-                  <Ban className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
                   onClick={() => {
                     setEditTarget(d)
                     setEditOpen(true)
@@ -1027,6 +1018,16 @@ export default function AcmePage() {
                   disabled={busy !== null}
                 >
                   <Edit3 className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="hover:text-destructive"
+                  onClick={() => setRevokePending(d)}
+                  disabled={busy !== null || !d.not_after || revoked}
+                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '吊销当前证书'}
+                >
+                  <Ban className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   size="icon"
