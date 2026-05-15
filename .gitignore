@@ -1,0 +1,21 @@
+# 后端
+.env
+bin/
+*.log
+
+# 前端
+frontend/node_modules/
+frontend/.vite/
+
+# 前端构建产物：由 vite 输出到 frontend/dist，被 //go:embed 打入二进制；仅保留 .gitkeep 占位
+frontend/dist/*
+!frontend/dist/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
