@@ -817,7 +817,6 @@ export default function AcmePage() {
       toast.success(`已提交 ${taskIDs.length} 个部署任务`)
       await reloadTasks()
       await reloadDeployConfigs(d.id)
-      if (taskIDs.length > 0) setLogTaskID(taskIDs[0])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '提交一键部署失败')
     } finally {
