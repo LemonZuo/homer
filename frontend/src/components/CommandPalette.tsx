@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { Command } from 'cmdk'
 import { Search } from 'lucide-react'
-import { tables } from '../tables'
+import { navItems } from '../pages'
 import { getColorSet } from '../colors'
 import { cn } from '../lib/utils'
 import { Kbd } from './ui/kbd'
@@ -9,14 +9,14 @@ import { Kbd } from './ui/kbd'
 interface Props {
   open: boolean
   onClose: () => void
-  onPick: (key: string) => void
-  currentKey: string
+  onPick: (to: string) => void
+  currentTo: string
 }
 
 /**
  * Cmd/Ctrl+K 触发的命令面板：cmdk 实现 fuzzy 搜索 + 键盘导航。
  */
-export default function CommandPalette({ open, onClose, onPick, currentKey }: Props) {
+export default function CommandPalette({ open, onClose, onPick, currentTo }: Props) {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -56,14 +56,14 @@ export default function CommandPalette({ open, onClose, onPick, currentKey }: Pr
               heading="表"
               className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
             >
-              {tables.map((t) => {
+              {navItems.map((t) => {
                 const cs = getColorSet(t.color)
-                const active = t.key === currentKey
+                const active = t.to === currentTo
                 return (
                   <Command.Item
-                    key={t.key}
+                    key={t.to}
                     value={`${t.label} ${t.key}`}
-                    onSelect={() => onPick(t.key)}
+                    onSelect={() => onPick(t.to)}
                     className={cn(
                       'flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition',
                       'data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground',
@@ -86,7 +86,7 @@ export default function CommandPalette({ open, onClose, onPick, currentKey }: Pr
               <span className="mx-1">·</span>
               <Kbd>↵</Kbd> 切换
             </span>
-            <span>{tables.length} 张表</span>
+            <span>{navItems.length} 个模块</span>
           </div>
         </Command>
       </div>

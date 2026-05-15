@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { tables } from '../tables'
+import { navItems, findNavByPath } from '../pages'
 import { getColorSet } from '../colors'
 import { Check, Command as CmdIcon, LayoutGrid } from 'lucide-react'
 import { cn } from '../lib/utils'
@@ -34,11 +34,9 @@ function useAppVersion() {
   return version
 }
 
-function useCurrentTable() {
+function useCurrentNav() {
   const loc = useLocation()
-  const m = loc.pathname.match(/^\/t\/([^/]+)/)
-  const key = m?.[1]
-  return tables.find((t) => t.key === key) ?? tables[0]
+  return findNavByPath(loc.pathname) ?? navItems[0]
 }
 
 function useMediaQuery(query: string) {
@@ -61,12 +59,12 @@ export default function Layout() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const widePicker = useMediaQuery('(min-width: 430px)')
-  const current = useCurrentTable()
+  const current = useCurrentNav()
   const displayVersion = useAppVersion()
   const navigate = useNavigate()
   const currentCs = getColorSet(current.color)
   const pickerColumns = widePicker ? 3 : 2
-  const pickerTail = tables.length % pickerColumns
+  const pickerTail = navItems.length % pickerColumns
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -98,12 +96,12 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto">
-          {tables.map((t) => {
+          {navItems.map((t) => {
             const cs = getColorSet(t.color)
             return (
               <NavLink
-                key={t.key}
-                to={`/t/${t.key}`}
+                key={t.to}
+                to={t.to}
                 className={({ isActive }) =>
                   cn(
                     'group flex items-center gap-2.5 rounded-md border px-3 py-1.5 text-[13px] font-medium transition-[background-color,border-color,color,box-shadow]',
@@ -178,10 +176,10 @@ export default function Layout() {
             <DrawerTitle>切换表</DrawerTitle>
           </DrawerHeader>
           <div className="grid min-h-0 grid-cols-6 gap-2 overflow-y-auto px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            {tables.map((t, index) => {
+            {navItems.map((t, index) => {
               const cs = getColorSet(t.color)
-              const active = t.key === current.key
-              const remaining = tables.length - index
+              const active = t.to === current.to
+              const remaining = navItems.length - index
               const singleTail = pickerTail === 1 && remaining === 1
               const pairTail = pickerColumns === 3 && pickerTail === 2 && remaining <= 2
               const centered = singleTail || pairTail
@@ -194,9 +192,9 @@ export default function Layout() {
                     : 'col-span-3'
               return (
                 <button
-                  key={t.key}
+                  key={t.to}
                   onClick={() => {
-                    navigate(`/t/${t.key}`)
+                    navigate(t.to)
                     setPickerOpen(false)
                   }}
                   className={cn(
@@ -231,11 +229,11 @@ export default function Layout() {
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
-        onPick={(key) => {
-          navigate(`/t/${key}`)
+        onPick={(to) => {
+          navigate(to)
           setPaletteOpen(false)
         }}
-        currentKey={current.key}
+        currentTo={current.to}
       />
     </div>
   )

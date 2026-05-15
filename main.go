@@ -7,8 +7,10 @@ import (
 
 	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/buildinfo"
+	"github.com/LemonZuo/homer/internal/cdn"
 	"github.com/LemonZuo/homer/internal/config"
 	"github.com/LemonZuo/homer/internal/db"
+	"github.com/LemonZuo/homer/internal/handler"
 	"github.com/LemonZuo/homer/internal/notify/wework"
 	"github.com/LemonZuo/homer/internal/router"
 	"github.com/LemonZuo/homer/internal/scheduler"
@@ -29,6 +31,9 @@ func main() {
 
 	notifier := wework.New(cfg.WeWorkCorpID, cfg.WeWorkAgentID, cfg.WeWorkSecret, cfg.WeWorkTagID)
 
+	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
+	cdnHandler := handler.NewCDNHandler(cdnSvc)
+
 	sched := scheduler.New()
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() {
 		birthday.RunOnce(gormDB, notifier)
@@ -43,7 +48,7 @@ func main() {
 		log.Fatalf("sub frontend/dist: %v", err)
 	}
 
-	r := router.Setup(gormDB, notifier, dist)
+	r := router.Setup(gormDB, notifier, cdnHandler, dist)
 	log.Printf("server listening on %s", cfg.ListenURL())
 	if err := r.Run(cfg.ListenAddr()); err != nil {
 		log.Fatalf("run server: %v", err)

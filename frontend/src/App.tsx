@@ -1,7 +1,10 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import type { ReactElement } from 'react'
+import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
 import TableView from './components/TableView'
+import CdnPage from './components/CdnPage'
 import { tables } from './tables'
+import { getPage } from './pages'
 
 function Empty() {
   return (
@@ -10,6 +13,18 @@ function Empty() {
       <p className="mt-2 text-[13px]">在 <code>src/tables.ts</code> 添加业务模块。</p>
     </div>
   )
+}
+
+const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
+  cdn: () => <CdnPage />,
+}
+
+function CustomPage() {
+  const { pageKey } = useParams()
+  const def = getPage(pageKey)
+  const render = def ? PAGE_COMPONENTS[def.key] : undefined
+  if (!def || !render) return <Empty />
+  return render()
 }
 
 export default function App() {
@@ -22,6 +37,7 @@ export default function App() {
           element={first ? <Navigate to={`/t/${first}`} replace /> : <Empty />}
         />
         <Route path="t/:tableKey" element={<TableView />} />
+        <Route path="p/:pageKey" element={<CustomPage />} />
       </Route>
     </Routes>
   )

@@ -23,6 +23,10 @@ type Config struct {
 	WeWorkSecret  string
 	WeWorkTagID   string
 
+	// 阿里云 CDN（加速域名管理，与 CAS 用独立 AK/SK）
+	AliyunCDNAccessKeyID     string
+	AliyunCDNAccessKeySecret string
+
 	// 调度
 	BirthdayRemindCron string
 }
@@ -42,6 +46,9 @@ func Load() *Config {
 		WeWorkAgentID: env("WEWORK_AGENT_ID", ""),
 		WeWorkSecret:  env("WEWORK_SECRET", ""),
 		WeWorkTagID:   env("WEWORK_TAG_ID", ""),
+
+		AliyunCDNAccessKeyID:     env("ALIYUN_CDN_ACCESS_KEY_ID", ""),
+		AliyunCDNAccessKeySecret: env("ALIYUN_CDN_ACCESS_KEY_SECRET", ""),
 
 		BirthdayRemindCron: env("BIRTHDAY_REMIND_CRON", "0 0 9 * * *"),
 	}
