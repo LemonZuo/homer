@@ -901,13 +901,20 @@ func (h *ACMEHandler) deploySafelineConfigsByDomain(c *gin.Context) {
 }
 
 func (h *ACMEHandler) listTasks(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	items, err := h.svc.ListTasks(limit)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	items, total, err := h.svc.ListTasks(page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": items})
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items, "total": total, "page": page, "page_size": pageSize})
 }
 
 func (h *ACMEHandler) getTask(c *gin.Context) {

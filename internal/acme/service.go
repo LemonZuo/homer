@@ -139,16 +139,26 @@ func (s *Service) GetCertByDomain(domainID int64) (*model.ACMECert, error) {
 	return &c, nil
 }
 
-// ListTasks 任务流水（最近 N 条）。
-func (s *Service) ListTasks(limit int) ([]model.ACMEIssueTask, error) {
-	if limit <= 0 {
-		limit = 50
+// ListTasks 任务流水分页（按 id 倒序），返回当前页数据与总条数。
+func (s *Service) ListTasks(page, pageSize int) ([]model.ACMEIssueTask, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	var total int64
+	if err := s.db.Model(&model.ACMEIssueTask{}).Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
 	var items []model.ACMEIssueTask
-	if err := s.db.Order("id DESC").Limit(limit).Find(&items).Error; err != nil {
-		return nil, err
+	if err := s.db.Order("id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&items).Error; err != nil {
+		return nil, 0, err
 	}
-	return items, nil
+	return items, total, nil
 }
 
 // GetTask 单条任务详情（用于前端在 SSE 关闭后拉全量日志）。

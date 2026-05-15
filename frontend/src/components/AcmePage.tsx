@@ -13,6 +13,8 @@ import {
   UploadCloud,
   Server,
   Send,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -408,6 +410,8 @@ const KIND_LABEL: Record<string, string> = {
   deploy_safeline: '部署雷池',
 }
 
+const TASK_PAGE_SIZE = 10
+
 export default function AcmePage() {
   const [domains, setDomains] = useState<Domain[]>([])
   const [accounts, setAccounts] = useState<AcmeAccount[]>([])
@@ -416,6 +420,8 @@ export default function AcmePage() {
   const [providers, setProviders] = useState<string[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
+  const [taskPage, setTaskPage] = useState(1)
+  const [taskTotal, setTaskTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -472,7 +478,7 @@ export default function AcmePage() {
       const [d, p, t, c, a, targets] = await Promise.all([
         api.get('/acme/domains'),
         api.get('/acme/providers'),
-        api.get('/acme/tasks?limit=30'),
+        api.get(`/acme/tasks?page=1&page_size=${TASK_PAGE_SIZE}`),
         api.get('/acme/credentials'),
         api.get('/acme/accounts'),
         api.get('/acme/deploy/targets'),
@@ -481,6 +487,8 @@ export default function AcmePage() {
       setDomains(d.data?.data ?? [])
       setProviders(p.data?.data ?? [])
       setTasks(t.data?.data ?? [])
+      setTaskTotal(t.data?.total ?? 0)
+      setTaskPage(1)
       setCredentials(c.data?.data ?? [])
       setAccounts(a.data?.data ?? [])
       setSSHTargets(groupedTargets.ssh)
@@ -623,14 +631,22 @@ export default function AcmePage() {
     reloadAll()
   }, [reloadAll])
 
-  const reloadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (page: number) => {
     try {
-      const { data } = await api.get('/acme/tasks?limit=30')
+      const { data } = await api.get(
+        `/acme/tasks?page=${page}&page_size=${TASK_PAGE_SIZE}`,
+      )
       setTasks(data?.data ?? [])
+      setTaskTotal(data?.total ?? 0)
+      setTaskPage(page)
     } catch {
       /* silent */
     }
   }, [])
+
+  const reloadTasks = useCallback(async () => {
+    await loadTasks(1)
+  }, [loadTasks])
 
   const startIssue = async (d: Domain) => {
     setBusy(`issue-${d.id}`)
@@ -996,6 +1012,32 @@ export default function AcmePage() {
           </p>
         )}
       </div>
+
+      {taskTotal > TASK_PAGE_SIZE && (
+        <div className="mt-3 flex items-center justify-end gap-3 text-[12px] text-muted-foreground">
+          <span className="font-mono">
+            {taskPage} / {Math.ceil(taskTotal / TASK_PAGE_SIZE)}（共 {taskTotal} 条）
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={taskPage <= 1}
+            onClick={() => void loadTasks(taskPage - 1)}
+          >
+            <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+            上一页
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={taskPage >= Math.ceil(taskTotal / TASK_PAGE_SIZE)}
+            onClick={() => void loadTasks(taskPage + 1)}
+          >
+            下一页
+            <ChevronRight className="ml-1 h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
 
       <DomainEditDialog
         open={editOpen}
