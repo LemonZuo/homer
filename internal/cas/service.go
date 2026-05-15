@@ -100,6 +100,31 @@ func (s *Service) ListCertificates() ([]CertView, error) {
 	return out, nil
 }
 
+// UploadCertificate 上传证书到阿里云 CAS。供 ACME 模块签发完直接归档调用。
+// name 用于 CAS 内唯一命名（CAS 限制 64 字符内，且账号内唯一）；
+// cert 是 fullchain 或 cert PEM，key 是私钥 PEM。返回 CAS cert_id。
+func (s *Service) UploadCertificate(name, cert, key string) (int64, error) {
+	if name == "" || cert == "" || key == "" {
+		return 0, errors.New("UploadCertificate: name/cert/key 不能为空")
+	}
+	c, err := s.client()
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.UploadUserCertificate(&sdk.UploadUserCertificateRequest{
+		Name: tea.String(name),
+		Cert: tea.String(cert),
+		Key:  tea.String(key),
+	})
+	if err != nil {
+		return 0, err
+	}
+	if resp == nil || resp.Body == nil {
+		return 0, errors.New("UploadCertificate: 阿里云返回空 body")
+	}
+	return tea.Int64Value(resp.Body.CertId), nil
+}
+
 // DeleteCertificate 按证书 ID 删除用户证书。
 func (s *Service) DeleteCertificate(id int64) error {
 	if id <= 0 {

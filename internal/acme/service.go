@@ -1,0 +1,411 @@
+package acme
+
+import (
+	"bytes"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/LemonZuo/homer/internal/cas"
+	"github.com/LemonZuo/homer/internal/model"
+	"gorm.io/gorm"
+)
+
+// Service ACME 业务编排：域名 CRUD、签发、续期、落盘、上传 CAS、SSE 日志。
+type Service struct {
+	db           *gorm.DB
+	manager      *Manager
+	credstore    *CredentialStore
+	accountStore *AccountStore
+	cas          *cas.Service
+	hub          *SSEHub
+	dataDir      string
+	renewDays    int
+
+	issueMu sync.Mutex // 串行化签发（lego logger / env 是全局状态）
+}
+
+func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, accounts *AccountStore, casSvc *cas.Service, hub *SSEHub, dataDir string, renewDays int) *Service {
+	return &Service{db: db, manager: mgr, credstore: store, accountStore: accounts, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays}
+}
+
+func (s *Service) Hub() *SSEHub                  { return s.hub }
+func (s *Service) Credentials() *CredentialStore { return s.credstore }
+func (s *Service) Accounts() *AccountStore       { return s.accountStore }
+
+// DomainView 联查域名 + 最近一次证书（NotAfter 用于前端显示剩余天数）。
+type DomainView struct {
+	model.ACMEDomain
+	NotAfter  *time.Time `json:"not_after,omitempty"`
+	NotBefore *time.Time `json:"not_before,omitempty"`
+	CASCertID int64      `json:"cas_cert_id,omitempty"`
+	IssuedAt  *time.Time `json:"issued_at,omitempty"`
+}
+
+// ListDomains 列出所有域名（按 id 倒序），附带最近一次证书摘要。
+func (s *Service) ListDomains() ([]DomainView, error) {
+	var items []model.ACMEDomain
+	if err := s.db.Order("id DESC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	out := make([]DomainView, 0, len(items))
+	for _, d := range items {
+		v := DomainView{ACMEDomain: d}
+		var c model.ACMECert
+		if err := s.db.Where("domain_id = ?", d.ID).First(&c).Error; err == nil {
+			na := c.NotAfter
+			nb := c.NotBefore
+			ia := c.IssuedAt
+			v.NotAfter = &na
+			v.NotBefore = &nb
+			v.IssuedAt = &ia
+			v.CASCertID = c.CASCertID
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// CreateDomain 新增域名。
+func (s *Service) CreateDomain(d *model.ACMEDomain) error {
+	d.MainDomain = strings.TrimSpace(d.MainDomain)
+	d.Provider = strings.TrimSpace(d.Provider)
+	if d.MainDomain == "" || d.Provider == "" {
+		return errors.New("main_domain 与 provider 必填")
+	}
+	if _, err := s.accountStore.Get(d.AccountID); err != nil {
+		return err
+	}
+	return s.db.Create(d).Error
+}
+
+// UpdateDomain 更新域名（按 id）。
+func (s *Service) UpdateDomain(d *model.ACMEDomain) error {
+	if d.ID == 0 {
+		return errors.New("id 必填")
+	}
+	d.MainDomain = strings.TrimSpace(d.MainDomain)
+	d.Provider = strings.TrimSpace(d.Provider)
+	if d.MainDomain == "" || d.Provider == "" {
+		return errors.New("main_domain 与 provider 必填")
+	}
+	if _, err := s.accountStore.Get(d.AccountID); err != nil {
+		return err
+	}
+	return s.db.Save(d).Error
+}
+
+// DeleteDomain 删除域名及其证书/任务流水。
+func (s *Service) DeleteDomain(id int64) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("domain_id = ?", id).Delete(&model.ACMECert{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("domain_id = ?", id).Delete(&model.ACMEIssueTask{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.ACMEDomain{}, id).Error
+	})
+}
+
+// GetCertByDomain 返回最近一次签发的证书（空时 nil, nil）。
+func (s *Service) GetCertByDomain(domainID int64) (*model.ACMECert, error) {
+	var c model.ACMECert
+	if err := s.db.Where("domain_id = ?", domainID).First(&c).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+// ListTasks 任务流水（最近 N 条）。
+func (s *Service) ListTasks(limit int) ([]model.ACMEIssueTask, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var items []model.ACMEIssueTask
+	if err := s.db.Order("id DESC").Limit(limit).Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// GetTask 单条任务详情（用于前端在 SSE 关闭后拉全量日志）。
+func (s *Service) GetTask(id int64) (*model.ACMEIssueTask, error) {
+	var t model.ACMEIssueTask
+	if err := s.db.First(&t, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &t, nil
+}
+
+// IssueAsync 异步触发签发/续期；立即返回 taskID。
+// 调用方（HTTP handler）应订阅 hub.Subscribe(taskID) 拿实时日志，
+// 任务结束时 hub 关闭对应 channel，前端再拉 GET /tasks/:id 取全文。
+func (s *Service) IssueAsync(domainID int64, kind string) (int64, error) {
+	var d model.ACMEDomain
+	if err := s.db.First(&d, domainID).Error; err != nil {
+		return 0, err
+	}
+	if kind != "issue" && kind != "renew" {
+		kind = "issue"
+	}
+	task := &model.ACMEIssueTask{
+		DomainID:   d.ID,
+		MainDomain: d.MainDomain,
+		Kind:       kind,
+		Status:     "pending",
+	}
+	if err := s.db.Create(task).Error; err != nil {
+		return 0, err
+	}
+	go s.runIssue(task.ID, d)
+	return task.ID, nil
+}
+
+// runIssue 在 goroutine 里跑实际签发流程。
+func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
+	s.issueMu.Lock()
+	defer s.issueMu.Unlock()
+
+	// 标记 running
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).
+		Updates(map[string]any{"status": "running"}).Error
+
+	logBuf := &bytes.Buffer{}
+	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
+
+	logf(logw, "开始签发：%s（provider=%s）", d.MainDomain, d.Provider)
+	domains := buildDomains(d)
+	logf(logw, "目标域名：%s", strings.Join(domains, ", "))
+
+	err := func() error {
+		account, err := s.accountStore.Get(d.AccountID)
+		if err != nil {
+			return err
+		}
+		logf(logw, "ACME 账号：%s（%s）", account.Name, account.CA)
+		client, err := s.manager.newClient(optionsFromAccount(*account), logw)
+		if err != nil {
+			return fmt.Errorf("初始化 lego 失败：%w", err)
+		}
+		res, err := client.Obtain(domains, d.Provider, s.credstore)
+		if err != nil {
+			return err
+		}
+		return s.persistCert(logw, d, res.Certificate, res.PrivateKey, res.IssuerCertificate)
+	}()
+
+	finish := time.Now()
+	upd := map[string]any{
+		"finished_at": &finish,
+		"log_text":    logBuf.String(),
+	}
+	if err != nil {
+		logf(logw, "签发失败：%v", err)
+		upd["status"] = "failed"
+		upd["error_msg"] = truncate(err.Error(), 1000)
+		// 重新写一次 log_text 以包含错误
+		upd["log_text"] = logBuf.String()
+	} else {
+		logf(logw, "签发完成")
+		upd["status"] = "success"
+		upd["log_text"] = logBuf.String()
+	}
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(upd).Error
+	s.hub.Close(taskID)
+}
+
+// persistCert 落盘到 ./data/acme/certs/<domain>/，写入 acme_cert 表，并上传 CAS。
+func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, chain []byte) error {
+	notBefore, notAfter, serial := parseCertMeta(cert)
+	dir := filepath.Join(s.dataDir, "certs", d.MainDomain)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("创建证书目录失败：%w", err)
+	}
+	full := assembleFullchain(cert, chain)
+	files := map[string][]byte{
+		"cert.pem":      cert,
+		"chain.pem":     chain,
+		"fullchain.pem": full,
+		"key.pem":       key,
+	}
+	for name, data := range files {
+		mode := os.FileMode(0o644)
+		if name == "key.pem" {
+			mode = 0o600
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, mode); err != nil {
+			return fmt.Errorf("写入 %s 失败：%w", name, err)
+		}
+	}
+	logf(logw, "证书已落盘：%s", dir)
+
+	rec := &model.ACMECert{
+		DomainID:     d.ID,
+		CertPEM:      string(cert),
+		KeyPEM:       string(key),
+		ChainPEM:     string(chain),
+		FullchainPEM: string(full),
+		Serial:       serial,
+		NotBefore:    notBefore,
+		NotAfter:     notAfter,
+	}
+
+	// upsert：同一 domain 只保留最近一条
+	var existing model.ACMECert
+	if err := s.db.Where("domain_id = ?", d.ID).First(&existing).Error; err == nil {
+		rec.ID = existing.ID
+		rec.IssuedAt = time.Now()
+		if err := s.db.Save(rec).Error; err != nil {
+			return fmt.Errorf("保存证书记录失败：%w", err)
+		}
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := s.db.Create(rec).Error; err != nil {
+			return fmt.Errorf("保存证书记录失败：%w", err)
+		}
+	} else {
+		return fmt.Errorf("查询证书记录失败：%w", err)
+	}
+
+	// 上传 CAS（失败不回滚签发，仅记日志）
+	if s.cas != nil && s.cas.Configured() {
+		name := buildCASName(d.MainDomain, notAfter)
+		id, err := s.cas.UploadCertificate(name, string(full), string(key))
+		if err != nil {
+			logf(logw, "上传 CAS 失败（不影响本地证书）：%v", err)
+		} else {
+			logf(logw, "已上传 CAS：cert_id=%d, name=%s", id, name)
+			_ = s.db.Model(&model.ACMECert{}).Where("id = ?", rec.ID).
+				Update("cas_cert_id", id).Error
+		}
+	}
+	return nil
+}
+
+// RenewExpiring 由 cron 调用：扫所有 enabled 域名，剩余 ≤ renewDays 触发续期。
+// 返回触发的 taskID 列表（方便日志）。
+func (s *Service) RenewExpiring() ([]int64, error) {
+	var domains []model.ACMEDomain
+	if err := s.db.Where("enabled = ?", "1").Find(&domains).Error; err != nil {
+		return nil, err
+	}
+	threshold := time.Now().Add(time.Duration(s.renewDays) * 24 * time.Hour)
+	var taskIDs []int64
+	for _, d := range domains {
+		var cert model.ACMECert
+		err := s.db.Where("domain_id = ?", d.ID).First(&cert).Error
+		needRenew := false
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			needRenew = true // 从未签发
+		} else if err == nil && (cert.NotAfter.IsZero() || cert.NotAfter.Before(threshold)) {
+			needRenew = true
+		} else if err != nil {
+			continue
+		}
+		if !needRenew {
+			continue
+		}
+		id, err := s.IssueAsync(d.ID, "renew")
+		if err == nil {
+			taskIDs = append(taskIDs, id)
+		}
+	}
+	return taskIDs, nil
+}
+
+// ----- helpers -----
+
+func buildDomains(d model.ACMEDomain) []string {
+	out := []string{d.MainDomain}
+	for _, s := range strings.Split(d.SanDomains, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" && s != d.MainDomain {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func parseCertMeta(certPEM []byte) (time.Time, time.Time, string) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return time.Time{}, time.Time{}, ""
+	}
+	c, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return time.Time{}, time.Time{}, ""
+	}
+	return c.NotBefore, c.NotAfter, c.SerialNumber.Text(16)
+}
+
+func assembleFullchain(cert, chain []byte) []byte {
+	if len(chain) == 0 {
+		return cert
+	}
+	if bytes.Contains(cert, chain) {
+		return cert
+	}
+	buf := bytes.Buffer{}
+	buf.Write(cert)
+	if !bytes.HasSuffix(cert, []byte("\n")) {
+		buf.WriteByte('\n')
+	}
+	buf.Write(chain)
+	return buf.Bytes()
+}
+
+// buildCASName CAS 内证书命名：homer-<domain>-<notAfter date>。
+// 限制 64 字符内，去掉点号易引发 CAS 命名问题——保留点号，CAS 接受。
+func buildCASName(domain string, notAfter time.Time) string {
+	suffix := notAfter.Format("20060102")
+	name := fmt.Sprintf("homer-%s-%s", strings.ReplaceAll(domain, "*", "wildcard"), suffix)
+	if len(name) > 64 {
+		name = name[:64]
+	}
+	return name
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
+// teeWriter 把 lego 日志同时写入 buffer（最终落库）和 SSE hub（实时推送）。
+type teeWriter struct {
+	buf    *bytes.Buffer
+	hub    *SSEHub
+	taskID int64
+}
+
+func (w *teeWriter) Write(p []byte) (int, error) {
+	w.buf.Write(p)
+	// 按行拆分推送
+	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		w.hub.Publish(w.taskID, line)
+	}
+	return len(p), nil
+}
+
+func logf(w *teeWriter, format string, args ...any) {
+	line := fmt.Sprintf("["+time.Now().Format("15:04:05")+"] "+format, args...)
+	w.buf.WriteString(line)
+	w.buf.WriteByte('\n')
+	w.hub.Publish(w.taskID, line)
+}

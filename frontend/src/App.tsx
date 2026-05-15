@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import TableView from './components/TableView'
 import CdnPage from './components/CdnPage'
 import CasPage from './components/CasPage'
+import AcmePage from './components/AcmePage'
 import { tables } from './tables'
 import { getPage } from './pages'
 
@@ -19,6 +20,7 @@ function Empty() {
 const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
   cdn: () => <CdnPage />,
   cas: () => <CasPage />,
+  acme: () => <AcmePage />,
 }
 
 function CustomPage() {

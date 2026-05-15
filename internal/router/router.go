@@ -26,7 +26,7 @@ var Tables = []TableMeta{
 	{Key: "birthday", Label: "生日提醒", Path: "birthday"},
 }
 
-func Setup(db *gorm.DB, notifier *wework.Client, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, frontend fs.FS) *gin.Engine {
+func Setup(db *gorm.DB, notifier *wework.Client, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, acmeHandler *handler.ACMEHandler, frontend fs.FS) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
@@ -52,6 +52,7 @@ func Setup(db *gorm.DB, notifier *wework.Client, cdnHandler *handler.CDNHandler,
 
 	cdnHandler.Register(api)
 	casHandler.Register(api)
+	acmeHandler.Register(api)
 
 	// 前端单页：未命中 /api/* 的请求都交给 embed 出来的 dist
 	spa := web.SPAHandler(frontend)

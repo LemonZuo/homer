@@ -31,6 +31,11 @@ type Config struct {
 	AliyunCASAccessKeyID     string
 	AliyunCASAccessKeySecret string
 
+	// ACME 自动签发。CA 账号与 ZeroSSL EAB 信息存 acme_account 表。
+	ACMEDataDir         string // ./data/acme
+	ACMERenewBeforeDays int    // 剩余天数 ≤ 此值则续期
+	ACMERenewCron       string // cron 表达式
+
 	// 调度
 	BirthdayRemindCron string
 }
@@ -57,8 +62,24 @@ func Load() *Config {
 		AliyunCASAccessKeyID:     env("ALIYUN_CAS_ACCESS_KEY_ID", ""),
 		AliyunCASAccessKeySecret: env("ALIYUN_CAS_ACCESS_KEY_SECRET", ""),
 
+		ACMEDataDir:         env("ACME_DATA_DIR", "./data/acme"),
+		ACMERenewBeforeDays: envInt("ACME_RENEW_BEFORE_DAYS", 30),
+		ACMERenewCron:       env("ACME_RENEW_CRON", "0 0 3 * * *"),
+
 		BirthdayRemindCron: env("BIRTHDAY_REMIND_CRON", "0 0 9 * * *"),
 	}
+}
+
+func envInt(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n := 0
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n <= 0 {
+		return def
+	}
+	return n
 }
 
 func (c *Config) DSN() string {

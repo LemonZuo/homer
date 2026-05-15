@@ -1,6 +1,7 @@
 # 后端
 .env
 bin/
+data/
 *.log
 
 # 前端
