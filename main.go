@@ -41,11 +41,12 @@ func main() {
 
 	acmeStore := acme.NewCredentialStore(gormDB)
 	acmeAccounts := acme.NewAccountStore(gormDB)
-	acmeSSHTargets := acme.NewSSHTargetStore(gormDB)
-	acmeSSHDeploys := acme.NewSSHDeployConfigStore(gormDB)
+	acmeDeployRegistry := acme.NewDeployRegistry(acme.NewSSHDeployDriver(), acme.NewSafelineDeployDriver())
+	acmeDeployTargets := acme.NewDeployTargetStore(gormDB, acmeDeployRegistry)
+	acmeDeployConfigs := acme.NewDeployConfigStore(gormDB, acmeDeployTargets, acmeDeployRegistry)
 	acmeMgr := acme.NewManager(cfg.ACMEDataDir)
 	acmeHub := acme.NewSSEHub()
-	acmeSvc := acme.NewService(gormDB, acmeMgr, acmeStore, acmeAccounts, acmeSSHTargets, acmeSSHDeploys, casSvc, acmeHub, cfg.ACMEDataDir, cfg.ACMERenewBeforeDays)
+	acmeSvc := acme.NewService(gormDB, acmeMgr, acmeStore, acmeAccounts, acmeDeployTargets, acmeDeployConfigs, acmeDeployRegistry, casSvc, acmeHub, cfg.ACMEDataDir, cfg.ACMERenewBeforeDays)
 	acmeHandler := handler.NewACMEHandler(acmeSvc)
 
 	sched := scheduler.New()

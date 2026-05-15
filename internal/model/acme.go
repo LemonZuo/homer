@@ -32,7 +32,41 @@ type ACMEAccount struct {
 
 func (ACMEAccount) TableName() string { return "acme_account" }
 
-// ACMESSHTarget 证书远程部署目标。auth_type 支持 password / key。
+// ACMEDeployTarget 是证书部署目标的顶层抽象。
+// kind 决定 driver（ssh / safeline / ...），endpoint/auth_json/config_json 由 driver 解释。
+type ACMEDeployTarget struct {
+	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name       string    `gorm:"column:name;size:64;uniqueIndex:uk_kind_name" json:"name"`
+	Kind       string    `gorm:"column:kind;size:32;uniqueIndex:uk_kind_name;index" json:"kind"`
+	Endpoint   string    `gorm:"column:endpoint;size:512" json:"endpoint"`
+	AuthJSON   string    `gorm:"column:auth_json;type:text" json:"auth_json"`
+	ConfigJSON string    `gorm:"column:config_json;type:text" json:"config_json"`
+	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1';index" json:"enabled"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (ACMEDeployTarget) TableName() string { return "acme_deploy_target" }
+
+// ACMEDeployConfig 是“某个域名部署到某个目标”的配置。
+// config_json 是 driver 配置；state_json 存部署后回写状态，例如雷池 cert_id。
+type ACMEDeployConfig struct {
+	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
+	DomainID   int64     `gorm:"column:domain_id;index" json:"domain_id"`
+	TargetID   int64     `gorm:"column:target_id;index" json:"target_id"`
+	Kind       string    `gorm:"column:kind;size:32;index" json:"kind"`
+	Name       string    `gorm:"column:name;size:64" json:"name"`
+	ConfigJSON string    `gorm:"column:config_json;type:text" json:"config_json"`
+	StateJSON  string    `gorm:"column:state_json;type:text" json:"state_json"`
+	AutoDeploy BoolFlag  `gorm:"column:auto_deploy;type:varchar(1);default:'0'" json:"auto_deploy"`
+	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1';index" json:"enabled"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (ACMEDeployConfig) TableName() string { return "acme_deploy_config" }
+
+// ACMESSHTarget 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployTarget。
 type ACMESSHTarget struct {
 	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
 	Name       string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
@@ -48,9 +82,7 @@ type ACMESSHTarget struct {
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
-func (ACMESSHTarget) TableName() string { return "acme_ssh_target" }
-
-// ACMESSHDeployConfig 描述某个域名部署到某台 SSH 机器时使用的远端路径和命令。
+// ACMESSHDeployConfig 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployConfig。
 type ACMESSHDeployConfig struct {
 	ID            int64     `gorm:"primaryKey;column:id" json:"id"`
 	DomainID      int64     `gorm:"column:domain_id;index" json:"domain_id"`
@@ -67,7 +99,31 @@ type ACMESSHDeployConfig struct {
 	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
-func (ACMESSHDeployConfig) TableName() string { return "acme_ssh_deploy_config" }
+// ACMESafelineTarget 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployTarget。
+type ACMESafelineTarget struct {
+	ID            int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name          string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
+	BaseURL       string    `gorm:"column:base_url;size:512" json:"base_url"`
+	APIToken      string    `gorm:"column:api_token;type:text" json:"api_token"`
+	SkipTLSVerify BoolFlag  `gorm:"column:skip_tls_verify;type:varchar(1);default:'0'" json:"skip_tls_verify"`
+	Enabled       BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+// ACMESafelineDeployConfig 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployConfig。
+type ACMESafelineDeployConfig struct {
+	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
+	DomainID   int64     `gorm:"column:domain_id;index" json:"domain_id"`
+	TargetID   int64     `gorm:"column:target_id;index" json:"target_id"`
+	Name       string    `gorm:"column:name;size:64" json:"name"`
+	CertID     int64     `gorm:"column:cert_id;default:0" json:"cert_id"`
+	CertType   int       `gorm:"column:cert_type;default:2" json:"cert_type"`
+	AutoDeploy BoolFlag  `gorm:"column:auto_deploy;type:varchar(1);default:'0'" json:"auto_deploy"`
+	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
 
 // ACMEDomain 自动签发的域名配置。
 // account_id 引用 ACMEAccount.ID；provider 引用 ACMECredential.Provider。
@@ -109,7 +165,7 @@ type ACMEIssueTask struct {
 	ID         int64      `gorm:"primaryKey;column:id" json:"id"`
 	DomainID   int64      `gorm:"column:domain_id;index" json:"domain_id"`
 	MainDomain string     `gorm:"column:main_domain;size:255" json:"main_domain"`
-	Kind       string     `gorm:"column:kind;size:16" json:"kind"`           // issue | renew | revoke | upload_cas | deploy_ssh
+	Kind       string     `gorm:"column:kind;size:32" json:"kind"`           // issue | renew | revoke | upload_cas | deploy_ssh | deploy_safeline | deploy
 	Status     string     `gorm:"column:status;size:16;index" json:"status"` // pending | running | success | failed
 	StartedAt  time.Time  `gorm:"column:started_at;autoCreateTime" json:"started_at"`
 	FinishedAt *time.Time `gorm:"column:finished_at" json:"finished_at"`

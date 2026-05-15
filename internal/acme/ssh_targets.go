@@ -6,89 +6,60 @@ import (
 	"strings"
 
 	"github.com/LemonZuo/homer/internal/model"
-	"gorm.io/gorm"
 )
 
-// ErrSSHTargetNotConfigured 表示 SSH 部署目标不存在或未启用。
 var ErrSSHTargetNotConfigured = errors.New("SSH 部署目标未配置")
 
-// SSHTargetStore 管理远程 SSH 部署目标。
+// SSHTargetStore 是旧 HTTP/UI 形态的兼容层，实际读写 acme_deploy_target。
 type SSHTargetStore struct {
-	db *gorm.DB
+	targets *DeployTargetStore
 }
 
-func NewSSHTargetStore(db *gorm.DB) *SSHTargetStore {
-	return &SSHTargetStore{db: db}
+func NewSSHTargetStore(targets *DeployTargetStore) *SSHTargetStore {
+	return &SSHTargetStore{targets: targets}
 }
 
 func (s *SSHTargetStore) List() ([]model.ACMESSHTarget, error) {
-	var rows []model.ACMESSHTarget
-	if err := s.db.Order("id DESC").Find(&rows).Error; err != nil {
+	rows, err := s.targets.List(DeployKindSSH)
+	if err != nil {
 		return nil, err
 	}
-	return rows, nil
+	out := make([]model.ACMESSHTarget, 0, len(rows))
+	for _, row := range rows {
+		t, err := sshTargetFromDeployTarget(row)
+		if err != nil {
+			continue
+		}
+		out = append(out, *t)
+	}
+	return out, nil
 }
 
 func (s *SSHTargetStore) Get(id int64) (*model.ACMESSHTarget, error) {
-	if id <= 0 {
-		return nil, fmt.Errorf("%w: id=%d", ErrSSHTargetNotConfigured, id)
+	row, err := s.targets.Get(id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrSSHTargetNotConfigured, err)
 	}
-	var row model.ACMESSHTarget
-	if err := s.db.First(&row, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("%w: id=%d", ErrSSHTargetNotConfigured, id)
-		}
-		return nil, err
+	if row.Kind != DeployKindSSH {
+		return nil, fmt.Errorf("%w: id=%d 类型不是 SSH", ErrSSHTargetNotConfigured, id)
 	}
-	if !bool(row.Enabled) {
-		return nil, fmt.Errorf("%w: %s 已停用", ErrSSHTargetNotConfigured, row.Name)
-	}
-	return &row, nil
+	return sshTargetFromDeployTarget(*row)
 }
 
 func (s *SSHTargetStore) Upsert(t *model.ACMESSHTarget) (*model.ACMESSHTarget, error) {
 	if t == nil {
 		return nil, errors.New("target 不能为空")
 	}
-	normalizeSSHTarget(t)
-	if err := validateSSHTarget(*t); err != nil {
+	row := deployTargetFromSSHTarget(*t)
+	saved, err := s.targets.Upsert(&row)
+	if err != nil {
 		return nil, err
 	}
-	if t.ID == 0 {
-		if err := s.db.Create(t).Error; err != nil {
-			return nil, err
-		}
-		return t, nil
-	}
-	var existing model.ACMESSHTarget
-	if err := s.db.First(&existing, t.ID).Error; err != nil {
-		return nil, err
-	}
-	existing.Name = t.Name
-	existing.Host = t.Host
-	existing.Port = t.Port
-	existing.Username = t.Username
-	existing.AuthType = t.AuthType
-	existing.Password = t.Password
-	existing.PrivateKey = t.PrivateKey
-	existing.Passphrase = t.Passphrase
-	existing.Enabled = t.Enabled
-	if err := s.db.Save(&existing).Error; err != nil {
-		return nil, err
-	}
-	return &existing, nil
+	return sshTargetFromDeployTarget(*saved)
 }
 
 func (s *SSHTargetStore) Delete(id int64) error {
-	if id <= 0 {
-		return errors.New("id 无效")
-	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("target_id = ?", id).Delete(&model.ACMESSHDeployConfig{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&model.ACMESSHTarget{}, id).Error
-	})
+	return s.targets.Delete(id)
 }
 
 func normalizeSSHTarget(t *model.ACMESSHTarget) {

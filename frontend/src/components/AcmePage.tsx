@@ -88,6 +88,18 @@ interface Credential {
   updated_at: string
 }
 
+interface DeployTarget {
+  id: number
+  name: string
+  kind: 'ssh' | 'safeline' | string
+  endpoint: string
+  auth_json: string
+  config_json: string
+  enabled: boolean
+  created_at?: string
+  updated_at?: string
+}
+
 interface SSHTarget {
   id: number
   name: string
@@ -99,8 +111,8 @@ interface SSHTarget {
   private_key: string
   passphrase: string
   enabled: boolean
-  created_at: string
-  updated_at: string
+  created_at?: string
+  updated_at?: string
 }
 
 interface SSHDeployConfig {
@@ -113,6 +125,44 @@ interface SSHDeployConfig {
   chain_path: string
   fullchain_path: string
   deploy_command: string
+  auto_deploy: boolean
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+interface DeployConfig {
+  id: number
+  domain_id: number
+  target_id: number
+  kind: 'ssh' | 'safeline' | string
+  name: string
+  config_json: string
+  state_json: string
+  auto_deploy: boolean
+  enabled: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+interface SafelineTarget {
+  id: number
+  name: string
+  base_url: string
+  api_token: string
+  skip_tls_verify: boolean
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+interface SafelineDeployConfig {
+  id: number
+  domain_id: number
+  target_id: number
+  name: string
+  cert_id: number
+  cert_type: number
   auto_deploy: boolean
   enabled: boolean
   created_at: string
@@ -150,6 +200,170 @@ function daysUntil(s?: string | null): number | null {
   const d = new Date(s)
   if (isNaN(d.getTime())) return null
   return Math.ceil((d.getTime() - Date.now()) / 86400000)
+}
+
+function safeParseJSON(s: string): Record<string, any> {
+  try {
+    const v = JSON.parse(s || '{}')
+    return typeof v === 'object' && v !== null ? v : {}
+  } catch {
+    return {}
+  }
+}
+
+function parseSSHEndpoint(endpoint: string): { host: string; port: number } {
+  const value = endpoint.trim()
+  const match = value.match(/^(.*):(\d+)$/)
+  if (!match) return { host: value, port: 22 }
+  return { host: match[1], port: Number(match[2]) || 22 }
+}
+
+function deployTargetToSSH(t: DeployTarget): SSHTarget {
+  const auth = safeParseJSON(t.auth_json)
+  const endpoint = parseSSHEndpoint(t.endpoint)
+  return {
+    id: t.id,
+    name: t.name,
+    host: endpoint.host,
+    port: endpoint.port,
+    username: String(auth.username ?? ''),
+    auth_type: String(auth.auth_type ?? 'password'),
+    password: String(auth.password ?? ''),
+    private_key: String(auth.private_key ?? ''),
+    passphrase: String(auth.passphrase ?? ''),
+    enabled: t.enabled,
+    created_at: t.created_at ?? '',
+    updated_at: t.updated_at ?? '',
+  }
+}
+
+function deployTargetToSafeline(t: DeployTarget): SafelineTarget {
+  const auth = safeParseJSON(t.auth_json)
+  const cfg = safeParseJSON(t.config_json)
+  return {
+    id: t.id,
+    name: t.name,
+    base_url: t.endpoint,
+    api_token: String(auth.api_token ?? ''),
+    skip_tls_verify: Boolean(cfg.skip_tls_verify),
+    enabled: t.enabled,
+    created_at: t.created_at ?? '',
+    updated_at: t.updated_at ?? '',
+  }
+}
+
+function splitDeployTargets(rows: DeployTarget[]) {
+  return {
+    ssh: rows.filter((t) => t.kind === 'ssh').map(deployTargetToSSH),
+    safeline: rows.filter((t) => t.kind === 'safeline').map(deployTargetToSafeline),
+  }
+}
+
+function sshTargetToDeployTarget(t: SSHTarget): DeployTarget {
+  return {
+    id: t.id,
+    name: t.name,
+    kind: 'ssh',
+    endpoint: `${t.host}:${t.port || 22}`,
+    auth_json: JSON.stringify({
+      username: t.username,
+      auth_type: t.auth_type,
+      password: t.password,
+      private_key: t.private_key,
+      passphrase: t.passphrase,
+    }),
+    config_json: '{}',
+    enabled: t.enabled,
+  }
+}
+
+function safelineTargetToDeployTarget(t: SafelineTarget): DeployTarget {
+  return {
+    id: t.id,
+    name: t.name,
+    kind: 'safeline',
+    endpoint: t.base_url,
+    auth_json: JSON.stringify({ api_token: t.api_token }),
+    config_json: JSON.stringify({ skip_tls_verify: t.skip_tls_verify }),
+    enabled: t.enabled,
+  }
+}
+
+function deployConfigToSSH(c: DeployConfig): SSHDeployConfig {
+  const cfg = safeParseJSON(c.config_json)
+  return {
+    id: c.id,
+    domain_id: c.domain_id,
+    target_id: c.target_id,
+    name: c.name,
+    cert_path: String(cfg.cert_path ?? ''),
+    key_path: String(cfg.key_path ?? ''),
+    chain_path: String(cfg.chain_path ?? ''),
+    fullchain_path: String(cfg.fullchain_path ?? ''),
+    deploy_command: String(cfg.deploy_command ?? ''),
+    auto_deploy: c.auto_deploy,
+    enabled: c.enabled,
+    created_at: c.created_at ?? '',
+    updated_at: c.updated_at ?? '',
+  }
+}
+
+function deployConfigToSafeline(c: DeployConfig): SafelineDeployConfig {
+  const cfg = safeParseJSON(c.config_json)
+  const state = safeParseJSON(c.state_json)
+  return {
+    id: c.id,
+    domain_id: c.domain_id,
+    target_id: c.target_id,
+    name: c.name,
+    cert_id: Number(state.cert_id ?? 0) || 0,
+    cert_type: Number(cfg.cert_type ?? 2) || 2,
+    auto_deploy: c.auto_deploy,
+    enabled: c.enabled,
+    created_at: c.created_at ?? '',
+    updated_at: c.updated_at ?? '',
+  }
+}
+
+function splitDeployConfigs(rows: DeployConfig[]) {
+  return {
+    ssh: rows.filter((c) => c.kind === 'ssh').map(deployConfigToSSH),
+    safeline: rows.filter((c) => c.kind === 'safeline').map(deployConfigToSafeline),
+  }
+}
+
+function sshConfigToDeployConfig(c: SSHDeployConfig): DeployConfig {
+  return {
+    id: c.id,
+    domain_id: c.domain_id,
+    target_id: c.target_id,
+    kind: 'ssh',
+    name: c.name,
+    config_json: JSON.stringify({
+      cert_path: c.cert_path,
+      key_path: c.key_path,
+      chain_path: c.chain_path,
+      fullchain_path: c.fullchain_path,
+      deploy_command: c.deploy_command,
+    }),
+    state_json: '{}',
+    auto_deploy: c.auto_deploy,
+    enabled: c.enabled,
+  }
+}
+
+function safelineConfigToDeployConfig(c: SafelineDeployConfig): DeployConfig {
+  return {
+    id: c.id,
+    domain_id: c.domain_id,
+    target_id: c.target_id,
+    kind: 'safeline',
+    name: c.name,
+    config_json: JSON.stringify({ cert_type: c.cert_type || 2 }),
+    state_json: JSON.stringify({ cert_id: c.cert_id || 0 }),
+    auto_deploy: c.auto_deploy,
+    enabled: c.enabled,
+  }
 }
 
 function FieldRow({ label, value }: { label: string; value: string }) {
@@ -191,12 +405,14 @@ const KIND_LABEL: Record<string, string> = {
   revoke: '吊销',
   upload_cas: '上传 CAS',
   deploy_ssh: '部署 SSH',
+  deploy_safeline: '部署雷池',
 }
 
 export default function AcmePage() {
   const [domains, setDomains] = useState<Domain[]>([])
   const [accounts, setAccounts] = useState<AcmeAccount[]>([])
   const [sshTargets, setSSHTargets] = useState<SSHTarget[]>([])
+  const [safelineTargets, setSafelineTargets] = useState<SafelineTarget[]>([])
   const [providers, setProviders] = useState<string[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
@@ -213,6 +429,12 @@ export default function AcmePage() {
   const [deployEditOpen, setDeployEditOpen] = useState(false)
   const [deployEditTarget, setDeployEditTarget] = useState<SSHDeployConfig | null>(null)
   const [deployDeletePending, setDeployDeletePending] = useState<SSHDeployConfig | null>(null)
+  const [safeDeployDomain, setSafeDeployDomain] = useState<Domain | null>(null)
+  const [safeDeployConfigs, setSafeDeployConfigs] = useState<SafelineDeployConfig[]>([])
+  const [safeDeployLoading, setSafeDeployLoading] = useState(false)
+  const [safeDeployEditOpen, setSafeDeployEditOpen] = useState(false)
+  const [safeDeployEditTarget, setSafeDeployEditTarget] = useState<SafelineDeployConfig | null>(null)
+  const [safeDeployDeletePending, setSafeDeployDeletePending] = useState<SafelineDeployConfig | null>(null)
   const [logTaskID, setLogTaskID] = useState<number | null>(null)
 
   const [credDrawerOpen, setCredDrawerOpen] = useState(false)
@@ -223,10 +445,14 @@ export default function AcmePage() {
   const [accountEditOpen, setAccountEditOpen] = useState(false)
   const [accountEditTarget, setAccountEditTarget] = useState<AcmeAccount | null>(null)
   const [accountDeletePending, setAccountDeletePending] = useState<AcmeAccount | null>(null)
-  const [sshDrawerOpen, setSSHDrawerOpen] = useState(false)
+  const [targetEntryOpen, setTargetEntryOpen] = useState(false)
+  const [deployEntryDomain, setDeployEntryDomain] = useState<Domain | null>(null)
   const [sshEditOpen, setSSHEditOpen] = useState(false)
   const [sshEditTarget, setSSHEditTarget] = useState<SSHTarget | null>(null)
   const [sshDeletePending, setSSHDeletePending] = useState<SSHTarget | null>(null)
+  const [safeEditOpen, setSafeEditOpen] = useState(false)
+  const [safeEditTarget, setSafeEditTarget] = useState<SafelineTarget | null>(null)
+  const [safeDeletePending, setSafeDeletePending] = useState<SafelineTarget | null>(null)
 
   const cs = getColorSet('emerald')
   const accountSummary = useMemo(() => {
@@ -243,20 +469,22 @@ export default function AcmePage() {
   const reloadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [d, p, t, c, a, s] = await Promise.all([
+      const [d, p, t, c, a, targets] = await Promise.all([
         api.get('/acme/domains'),
         api.get('/acme/providers'),
         api.get('/acme/tasks?limit=30'),
         api.get('/acme/credentials'),
         api.get('/acme/accounts'),
-        api.get('/acme/ssh-targets'),
+        api.get('/acme/deploy/targets'),
       ])
+      const groupedTargets = splitDeployTargets(targets.data?.data ?? [])
       setDomains(d.data?.data ?? [])
       setProviders(p.data?.data ?? [])
       setTasks(t.data?.data ?? [])
       setCredentials(c.data?.data ?? [])
       setAccounts(a.data?.data ?? [])
-      setSSHTargets(s.data?.data ?? [])
+      setSSHTargets(groupedTargets.ssh)
+      setSafelineTargets(groupedTargets.safeline)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载失败')
     } finally {
@@ -286,24 +514,30 @@ export default function AcmePage() {
     }
   }, [])
 
-  const reloadSSHTargets = useCallback(async () => {
+  const reloadDeployTargets = useCallback(async () => {
     try {
-      const { data } = await api.get('/acme/ssh-targets')
-      setSSHTargets(data?.data ?? [])
+      const { data } = await api.get('/acme/deploy/targets')
+      const groupedTargets = splitDeployTargets(data?.data ?? [])
+      setSSHTargets(groupedTargets.ssh)
+      setSafelineTargets(groupedTargets.safeline)
     } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '加载 SSH 机器失败')
+      toast.error(e?.response?.data?.error || e?.message || '加载部署目标失败')
     }
   }, [])
 
-  const reloadSSHDeployConfigs = useCallback(async (domainID: number) => {
+  const reloadDeployConfigs = useCallback(async (domainID: number) => {
     setDeployConfigLoading(true)
+    setSafeDeployLoading(true)
     try {
-      const { data } = await api.get(`/acme/domains/${domainID}/ssh-deploy-configs`)
-      setDeployConfigs(data?.data ?? [])
+      const { data } = await api.get(`/acme/domains/${domainID}/deploy-configs`)
+      const groupedConfigs = splitDeployConfigs(data?.data ?? [])
+      setDeployConfigs(groupedConfigs.ssh)
+      setSafeDeployConfigs(groupedConfigs.safeline)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载部署配置失败')
     } finally {
       setDeployConfigLoading(false)
+      setSafeDeployLoading(false)
     }
   }, [])
 
@@ -338,9 +572,22 @@ export default function AcmePage() {
     if (!t) return
     setSSHDeletePending(null)
     try {
-      await api.delete(`/acme/ssh-targets/${t.id}`)
+      await api.delete(`/acme/deploy/targets/${t.id}`)
       toast.success('已删除')
-      await reloadSSHTargets()
+      await reloadDeployTargets()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+
+  const onDeleteSafelineTarget = async () => {
+    const t = safeDeletePending
+    if (!t) return
+    setSafeDeletePending(null)
+    try {
+      await api.delete(`/acme/deploy/targets/${t.id}`)
+      toast.success('已删除')
+      await reloadDeployTargets()
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '删除失败')
     }
@@ -351,9 +598,22 @@ export default function AcmePage() {
     if (!cfg) return
     setDeployDeletePending(null)
     try {
-      await api.delete(`/acme/ssh-deploy-configs/${cfg.id}`)
+      await api.delete(`/acme/deploy/configs/${cfg.id}`)
       toast.success('已删除')
-      if (deployDomain) await reloadSSHDeployConfigs(deployDomain.id)
+      if (deployEntryDomain) await reloadDeployConfigs(deployEntryDomain.id)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+
+  const onDeleteSafelineDeployConfig = async () => {
+    const cfg = safeDeployDeletePending
+    if (!cfg) return
+    setSafeDeployDeletePending(null)
+    try {
+      await api.delete(`/acme/deploy/configs/${cfg.id}`)
+      toast.success('已删除')
+      if (deployEntryDomain) await reloadDeployConfigs(deployEntryDomain.id)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '删除失败')
     }
@@ -419,15 +679,17 @@ export default function AcmePage() {
   }
 
   const openDeployConfigs = (d: Domain) => {
+    setDeployEntryDomain(d)
     setDeployDomain(d)
-    void reloadSSHDeployConfigs(d.id)
+    setSafeDeployDomain(d)
+    void reloadDeployConfigs(d.id)
   }
 
   const startDeploySSHConfig = async (cfg: SSHDeployConfig) => {
     if (!deployDomain) return
     setBusy(`deploy-ssh-config-${cfg.id}`)
     try {
-      const { data } = await api.post(`/acme/ssh-deploy-configs/${cfg.id}/deploy`)
+      const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
       const taskID = data?.data?.task_id as number
       toast.success(`已提交 SSH 部署，任务 #${taskID}`)
       await reloadTasks()
@@ -439,15 +701,33 @@ export default function AcmePage() {
     }
   }
 
-  const startDeployAllSSHConfigs = async () => {
-    const d = deployDomain
-    if (!d) return
-    setBusy(`deploy-ssh-domain-${d.id}`)
+  const startDeploySafelineConfig = async (cfg: SafelineDeployConfig) => {
+    if (!safeDeployDomain) return
+    setBusy(`deploy-safeline-config-${cfg.id}`)
     try {
-      const { data } = await api.post(`/acme/domains/${d.id}/ssh-deploy-configs/deploy`)
-      const taskIDs = (data?.data?.task_ids ?? []) as number[]
-      toast.success(`已提交 ${taskIDs.length} 个 SSH 部署任务`)
+      const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
+      const taskID = data?.data?.task_id as number
+      toast.success(`已提交雷池部署，任务 #${taskID}`)
       await reloadTasks()
+      await reloadDeployConfigs(safeDeployDomain.id)
+      setLogTaskID(taskID)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '提交雷池部署失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startDeployAllConfigs = async () => {
+    const d = deployEntryDomain
+    if (!d) return
+    setBusy(`deploy-domain-${d.id}`)
+    try {
+      const { data } = await api.post(`/acme/domains/${d.id}/deploy-configs/deploy`)
+      const taskIDs = (data?.data?.task_ids ?? []) as number[]
+      toast.success(`已提交 ${taskIDs.length} 个部署任务`)
+      await reloadTasks()
+      await reloadDeployConfigs(d.id)
       if (taskIDs.length > 0) setLogTaskID(taskIDs[0])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '提交一键部署失败')
@@ -514,10 +794,10 @@ export default function AcmePage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setSSHDrawerOpen(true)}
+            onClick={() => setTargetEntryOpen(true)}
           >
             <Server className="mr-1.5 h-3.5 w-3.5" />
-            SSH 机器
+            部署目标
           </Button>
           <Button
             size="sm"
@@ -787,6 +1067,7 @@ export default function AcmePage() {
           // 关闭后刷新任务列表，状态可能已变
           void reloadTasks()
           void reloadAll()
+          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
         }}
       />
 
@@ -834,49 +1115,90 @@ export default function AcmePage() {
         onSaved={reloadAccounts}
       />
 
-      <SSHTargetsDrawer
-        open={sshDrawerOpen}
-        onOpenChange={setSSHDrawerOpen}
-        targets={sshTargets}
-        onAdd={() => {
+      <DeployTargetsEntryDrawer
+        open={targetEntryOpen}
+        onOpenChange={setTargetEntryOpen}
+        sshTargets={sshTargets}
+        safelineTargets={safelineTargets}
+        onAddSSH={() => {
           setSSHEditTarget(null)
           setSSHEditOpen(true)
         }}
-        onEdit={(t) => {
+        onEditSSH={(t) => {
           setSSHEditTarget(t)
           setSSHEditOpen(true)
         }}
-        onDelete={(t) => setSSHDeletePending(t)}
+        onDeleteSSH={(t) => setSSHDeletePending(t)}
+        onAddSafeline={() => {
+          setSafeEditTarget(null)
+          setSafeEditOpen(true)
+        }}
+        onEditSafeline={(t) => {
+          setSafeEditTarget(t)
+          setSafeEditOpen(true)
+        }}
+        onDeleteSafeline={(t) => setSafeDeletePending(t)}
+        onTestSafeline={async (t) => {
+          try {
+            await api.post(`/acme/deploy/targets/${t.id}/test`)
+            toast.success('连接正常')
+          } catch (e: any) {
+            toast.error(e?.response?.data?.error || e?.message || '连接失败')
+          }
+        }}
       />
 
       <SSHTargetEditDialog
         open={sshEditOpen}
         onOpenChange={setSSHEditOpen}
         target={sshEditTarget}
-        onSaved={reloadSSHTargets}
+        onSaved={reloadDeployTargets}
       />
 
-      <SSHDeployConfigsDrawer
-        open={!!deployDomain}
+      <SafelineTargetEditDialog
+        open={safeEditOpen}
+        onOpenChange={setSafeEditOpen}
+        target={safeEditTarget}
+        onSaved={reloadDeployTargets}
+      />
+
+      <DeployConfigsDrawer
+        open={!!deployEntryDomain}
         onOpenChange={(o) => {
-          if (!o) setDeployDomain(null)
+          if (!o) {
+            setDeployEntryDomain(null)
+            setDeployDomain(null)
+            setSafeDeployDomain(null)
+          }
         }}
-        domain={deployDomain}
-        configs={deployConfigs}
-        targets={sshTargets}
-        loading={deployConfigLoading}
+        domain={deployEntryDomain}
+        sshConfigs={deployConfigs}
+        safelineConfigs={safeDeployConfigs}
+        sshTargets={sshTargets}
+        safelineTargets={safelineTargets}
+        loading={deployConfigLoading || safeDeployLoading}
         busy={busy}
-        onAdd={() => {
+        onAddSSH={() => {
           setDeployEditTarget(null)
           setDeployEditOpen(true)
         }}
-        onEdit={(cfg) => {
+        onEditSSH={(cfg) => {
           setDeployEditTarget(cfg)
           setDeployEditOpen(true)
         }}
-        onDelete={(cfg) => setDeployDeletePending(cfg)}
-        onDeploy={(cfg) => void startDeploySSHConfig(cfg)}
-        onDeployAll={() => void startDeployAllSSHConfigs()}
+        onDeleteSSH={(cfg) => setDeployDeletePending(cfg)}
+        onDeploySSH={(cfg) => void startDeploySSHConfig(cfg)}
+        onAddSafeline={() => {
+          setSafeDeployEditTarget(null)
+          setSafeDeployEditOpen(true)
+        }}
+        onEditSafeline={(cfg) => {
+          setSafeDeployEditTarget(cfg)
+          setSafeDeployEditOpen(true)
+        }}
+        onDeleteSafeline={(cfg) => setSafeDeployDeletePending(cfg)}
+        onDeploySafeline={(cfg) => void startDeploySafelineConfig(cfg)}
+        onDeployAll={() => void startDeployAllConfigs()}
       />
 
       <SSHDeployConfigEditDialog
@@ -886,7 +1208,18 @@ export default function AcmePage() {
         config={deployEditTarget}
         targets={sshTargets}
         onSaved={() => {
-          if (deployDomain) void reloadSSHDeployConfigs(deployDomain.id)
+          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
+        }}
+      />
+
+      <SafelineDeployConfigEditDialog
+        open={safeDeployEditOpen}
+        onOpenChange={setSafeDeployEditOpen}
+        domain={safeDeployDomain}
+        config={safeDeployEditTarget}
+        targets={safelineTargets}
+        onSaved={() => {
+          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
         }}
       />
 
@@ -915,6 +1248,30 @@ export default function AcmePage() {
       </AlertDialog>
 
       <AlertDialog
+        open={!!safeDeployDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setSafeDeployDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除雷池部署配置</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除{' '}
+              <span className="font-mono font-medium text-foreground">
+                {safeDeployDeletePending?.name || `#${safeDeployDeletePending?.id}`}
+              </span>{' '}
+              的雷池部署配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteSafelineDeployConfig}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
         open={!!sshDeletePending}
         onOpenChange={(o) => {
           if (!o) setSSHDeletePending(null)
@@ -934,6 +1291,30 @@ export default function AcmePage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={onDeleteSSHTarget}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!safeDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setSafeDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除雷池实例</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除{' '}
+              <span className="font-mono font-medium text-foreground">
+                {safeDeletePending?.name}
+              </span>{' '}
+              及其部署配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteSafelineTarget}>删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1475,6 +1856,440 @@ function AccountsDrawer({
   )
 }
 
+interface DeployTargetsEntryDrawerProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  sshTargets: SSHTarget[]
+  safelineTargets: SafelineTarget[]
+  onAddSSH: () => void
+  onEditSSH: (t: SSHTarget) => void
+  onDeleteSSH: (t: SSHTarget) => void
+  onAddSafeline: () => void
+  onEditSafeline: (t: SafelineTarget) => void
+  onDeleteSafeline: (t: SafelineTarget) => void
+  onTestSafeline: (t: SafelineTarget) => void
+}
+
+function DeployTargetsEntryDrawer({
+  open,
+  onOpenChange,
+  sshTargets,
+  safelineTargets,
+  onAddSSH,
+  onEditSSH,
+  onDeleteSSH,
+  onAddSafeline,
+  onEditSafeline,
+  onDeleteSafeline,
+  onTestSafeline,
+}: DeployTargetsEntryDrawerProps) {
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>部署目标</DrawerTitle>
+          <DrawerDescription>
+            管理证书部署时可选择的远程目标
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="flex-1 space-y-5 overflow-auto px-4 pb-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[13px] font-medium">SSH 机器</div>
+              <div className="text-[11.5px] text-muted-foreground">{sshTargets.length} 台机器</div>
+            </div>
+            <Button size="sm" onClick={onAddSSH}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加机器
+            </Button>
+          </div>
+          {sshTargets.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+              还没有 SSH 机器
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {sshTargets.map((t) => (
+                <Card key={t.id} className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-mono text-[13px] font-medium">{t.name}</span>
+                        <span
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                            t.enabled
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          {t.enabled ? '启用' : '停用'}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                        {t.username}@{t.host}:{t.port || 22} · {authLabel(t.auth_type)}
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => onEditSSH(t)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="hover:text-destructive"
+                      onClick={() => onDeleteSSH(t)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-5">
+            <div>
+              <div className="text-[13px] font-medium">雷池 WAF</div>
+              <div className="text-[11.5px] text-muted-foreground">{safelineTargets.length} 个实例</div>
+            </div>
+            <Button size="sm" onClick={onAddSafeline}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加实例
+            </Button>
+          </div>
+          {safelineTargets.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+              还没有雷池实例
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {safelineTargets.map((t) => (
+                <Card key={t.id} className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-mono text-[13px] font-medium">{t.name}</span>
+                        <span
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                            t.enabled
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          {t.enabled ? '启用' : '停用'}
+                        </span>
+                        {t.skip_tls_verify && (
+                          <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                            跳过 TLS
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                        {t.base_url}
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => onTestSafeline(t)} disabled={!t.enabled}>
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => onEditSafeline(t)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="hover:text-destructive"
+                      onClick={() => onDeleteSafeline(t)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
+interface DeployConfigsDrawerProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  domain: Domain | null
+  sshConfigs: SSHDeployConfig[]
+  safelineConfigs: SafelineDeployConfig[]
+  sshTargets: SSHTarget[]
+  safelineTargets: SafelineTarget[]
+  loading: boolean
+  busy: string | null
+  onAddSSH: () => void
+  onEditSSH: (cfg: SSHDeployConfig) => void
+  onDeleteSSH: (cfg: SSHDeployConfig) => void
+  onDeploySSH: (cfg: SSHDeployConfig) => void
+  onAddSafeline: () => void
+  onEditSafeline: (cfg: SafelineDeployConfig) => void
+  onDeleteSafeline: (cfg: SafelineDeployConfig) => void
+  onDeploySafeline: (cfg: SafelineDeployConfig) => void
+  onDeployAll: () => void
+}
+
+function DeployConfigsDrawer({
+  open,
+  onOpenChange,
+  domain,
+  sshConfigs,
+  safelineConfigs,
+  sshTargets,
+  safelineTargets,
+  loading,
+  busy,
+  onAddSSH,
+  onEditSSH,
+  onDeleteSSH,
+  onDeploySSH,
+  onAddSafeline,
+  onEditSafeline,
+  onDeleteSafeline,
+  onDeploySafeline,
+  onDeployAll,
+}: DeployConfigsDrawerProps) {
+  const revoked = domain?.cert_status === 'revoked'
+  const hasCert = Boolean(domain?.not_after)
+  const sshDeployableCount = sshConfigs.filter((cfg) => {
+    const t = targetByID(sshTargets, cfg.target_id)
+    return cfg.enabled && Boolean(t?.enabled)
+  }).length
+  const safelineDeployableCount = safelineConfigs.filter((cfg) => {
+    const t = safelineTargetByID(safelineTargets, cfg.target_id)
+    return cfg.enabled && Boolean(t?.enabled)
+  }).length
+  const deployableCount = sshDeployableCount + safelineDeployableCount
+  const deployingAll = Boolean(domain && busy === `deploy-domain-${domain.id}`)
+  const canDeployAll = hasCert && !revoked && deployableCount > 0 && busy === null
+
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>部署配置</DrawerTitle>
+          <DrawerDescription>
+            {domain?.main_domain ?? '当前域名'} 的证书部署配置
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="flex-1 space-y-5 overflow-auto px-4 pb-4">
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onDeployAll}
+              disabled={!canDeployAll}
+              title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : deployableCount === 0 ? '没有可部署的启用配置' : undefined}
+            >
+              {deployingAll ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              一键部署
+            </Button>
+            <Button size="sm" onClick={onAddSSH} disabled={sshTargets.length === 0}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加 SSH
+            </Button>
+            <Button size="sm" onClick={onAddSafeline} disabled={safelineTargets.length === 0}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加雷池
+            </Button>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              <section className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[13px] font-medium">SSH 部署</div>
+                    <div className="text-[11.5px] text-muted-foreground">
+                      写入远程文件并执行命令
+                    </div>
+                  </div>
+                </div>
+                {sshTargets.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+                    先添加 SSH 机器，再配置部署路径
+                  </p>
+                ) : sshConfigs.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+                    还没有 SSH 部署配置
+                  </p>
+                ) : (
+                  sshConfigs.map((cfg) => {
+                    const t = targetByID(sshTargets, cfg.target_id)
+                    const deploying = busy === `deploy-ssh-config-${cfg.id}`
+                    const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
+                    return (
+                      <Card key={cfg.id} className="px-4 py-3">
+                        <div className="flex items-start gap-3">
+                          <Send className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate font-mono text-[13px] font-medium">
+                                {configTitle(cfg)}
+                              </span>
+                              <span
+                                className={cn(
+                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                                  cfg.enabled
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                    : 'bg-muted text-muted-foreground',
+                                )}
+                              >
+                                {cfg.enabled ? '启用' : '停用'}
+                              </span>
+                              {cfg.auto_deploy && (
+                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                                  自动部署
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                              {targetSummary(t)}
+                            </div>
+                            <div
+                              className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
+                              title={configPrimaryPath(cfg)}
+                            >
+                              {configPrimaryPath(cfg)}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onDeploySSH(cfg)}
+                            disabled={!canDeploy}
+                            title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                          >
+                            {deploying ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Send className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => onEditSSH(cfg)}>
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="hover:text-destructive"
+                            onClick={() => onDeleteSSH(cfg)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </Card>
+                    )
+                  })
+                )}
+              </section>
+
+              <section className="space-y-2 border-t border-border pt-5">
+                <div>
+                  <div className="text-[13px] font-medium">雷池部署</div>
+                  <div className="text-[11.5px] text-muted-foreground">
+                    上传到 WAF 证书管理
+                  </div>
+                </div>
+                {safelineTargets.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+                    先添加雷池实例，再配置证书上传
+                  </p>
+                ) : safelineConfigs.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+                    还没有雷池部署配置
+                  </p>
+                ) : (
+                  safelineConfigs.map((cfg) => {
+                    const t = safelineTargetByID(safelineTargets, cfg.target_id)
+                    const deploying = busy === `deploy-safeline-config-${cfg.id}`
+                    const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
+                    return (
+                      <Card key={cfg.id} className="px-4 py-3">
+                        <div className="flex items-start gap-3">
+                          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate font-mono text-[13px] font-medium">
+                                {safelineConfigTitle(cfg)}
+                              </span>
+                              <span
+                                className={cn(
+                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                                  cfg.enabled
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                    : 'bg-muted text-muted-foreground',
+                                )}
+                              >
+                                {cfg.enabled ? '启用' : '停用'}
+                              </span>
+                              {cfg.auto_deploy && (
+                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                                  自动部署
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                              {safelineTargetSummary(t)}
+                            </div>
+                            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                              cert_id={cfg.cert_id || '新增'} · type={cfg.cert_type || 2}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onDeploySafeline(cfg)}
+                            disabled={!canDeploy}
+                            title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                          >
+                            {deploying ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => onEditSafeline(cfg)}>
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="hover:text-destructive"
+                            onClick={() => onDeleteSafeline(cfg)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </Card>
+                    )
+                  })
+                )}
+              </section>
+            </>
+          )}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
 interface SSHDeployConfigsDrawerProps {
   open: boolean
   onOpenChange: (o: boolean) => void
@@ -1507,7 +2322,7 @@ function configPrimaryPath(cfg: SSHDeployConfig) {
   return cfg.fullchain_path || cfg.cert_path || cfg.key_path || '未配置路径'
 }
 
-function SSHDeployConfigsDrawer({
+export function SSHDeployConfigsDrawer({
   open,
   onOpenChange,
   domain,
@@ -1689,7 +2504,8 @@ function SSHDeployConfigEditDialog({
 
   const save = async () => {
     if (!domain) return
-    const payload = {
+    const form = {
+      id: config?.id ?? 0,
       domain_id: domain.id,
       target_id: targetID,
       name: name.trim(),
@@ -1700,25 +2516,28 @@ function SSHDeployConfigEditDialog({
       deploy_command: deployCommand.trim(),
       auto_deploy: autoDeploy,
       enabled,
+      created_at: config?.created_at ?? '',
+      updated_at: config?.updated_at ?? '',
     }
-    if (!payload.target_id) {
+    if (!form.target_id) {
       toast.error('请选择 SSH 机器')
       return
     }
-    if (!payload.key_path) {
+    if (!form.key_path) {
       toast.error('远端 key.pem 路径必填')
       return
     }
-    if (!payload.fullchain_path && !payload.cert_path) {
+    if (!form.fullchain_path && !form.cert_path) {
       toast.error('fullchain.pem 路径和 cert.pem 路径至少填写一个')
       return
     }
+    const payload = sshConfigToDeployConfig(form)
     setSaving(true)
     try {
       if (config?.id) {
-        await api.put(`/acme/ssh-deploy-configs/${config.id}`, payload)
+        await api.put(`/acme/deploy/configs/${config.id}`, payload)
       } else {
-        await api.post(`/acme/domains/${domain.id}/ssh-deploy-configs`, payload)
+        await api.post(`/acme/domains/${domain.id}/deploy-configs`, payload)
       }
       toast.success('已保存')
       onOpenChange(false)
@@ -1847,6 +2666,343 @@ function SSHDeployConfigEditDialog({
   )
 }
 
+interface SafelineDeployConfigsDrawerProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  domain: Domain | null
+  configs: SafelineDeployConfig[]
+  targets: SafelineTarget[]
+  loading: boolean
+  busy: string | null
+  onAdd: () => void
+  onEdit: (cfg: SafelineDeployConfig) => void
+  onDelete: (cfg: SafelineDeployConfig) => void
+  onDeploy: (cfg: SafelineDeployConfig) => void
+  onDeployAll: () => void
+}
+
+function safelineTargetByID(targets: SafelineTarget[], id: number) {
+  return targets.find((t) => t.id === id)
+}
+
+function safelineTargetSummary(t?: SafelineTarget) {
+  if (!t) return '雷池实例不存在'
+  return `${t.name} · ${t.base_url}`
+}
+
+function safelineConfigTitle(cfg: SafelineDeployConfig) {
+  return cfg.name?.trim() || `配置 #${cfg.id}`
+}
+
+export function SafelineDeployConfigsDrawer({
+  open,
+  onOpenChange,
+  domain,
+  configs,
+  targets,
+  loading,
+  busy,
+  onAdd,
+  onEdit,
+  onDelete,
+  onDeploy,
+  onDeployAll,
+}: SafelineDeployConfigsDrawerProps) {
+  const revoked = domain?.cert_status === 'revoked'
+  const hasCert = Boolean(domain?.not_after)
+  const deployableCount = configs.filter((cfg) => {
+    const t = safelineTargetByID(targets, cfg.target_id)
+    return cfg.enabled && Boolean(t?.enabled)
+  }).length
+  const deployingAll = Boolean(domain && busy === `deploy-safeline-domain-${domain.id}`)
+  const canDeployAll = hasCert && !revoked && deployableCount > 0 && busy === null
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>雷池部署配置</DrawerTitle>
+          <DrawerDescription>
+            {domain?.main_domain ?? '当前域名'} 上传到雷池 WAF 证书管理的配置
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
+          <div className="flex justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onDeployAll}
+              disabled={!canDeployAll}
+              title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : deployableCount === 0 ? '没有可部署的启用配置' : undefined}
+            >
+              {deployingAll ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              一键部署
+            </Button>
+            <Button size="sm" onClick={onAdd} disabled={targets.length === 0}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加配置
+            </Button>
+          </div>
+          {targets.length === 0 ? (
+            <p className="py-8 text-center text-[12.5px] text-muted-foreground">
+              先添加雷池实例，再配置证书上传
+            </p>
+          ) : loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : configs.length === 0 ? (
+            <p className="py-8 text-center text-[12.5px] text-muted-foreground">
+              还没有雷池部署配置，点击「添加配置」开始
+            </p>
+          ) : (
+            configs.map((cfg) => {
+              const t = safelineTargetByID(targets, cfg.target_id)
+              const deploying = busy === `deploy-safeline-config-${cfg.id}`
+              const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
+              return (
+                <Card key={cfg.id} className="px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-mono text-[13px] font-medium">
+                          {safelineConfigTitle(cfg)}
+                        </span>
+                        <span
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                            cfg.enabled
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          {cfg.enabled ? '启用' : '停用'}
+                        </span>
+                        {cfg.auto_deploy && (
+                          <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                            自动部署
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                        {safelineTargetSummary(t)}
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                        cert_id={cfg.cert_id || '新增'} · type={cfg.cert_type || 2}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onDeploy(cfg)}
+                      disabled={!canDeploy}
+                      title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                    >
+                      {deploying ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => onEdit(cfg)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="hover:text-destructive"
+                      onClick={() => onDelete(cfg)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </Card>
+              )
+            })
+          )}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
+interface SafelineDeployConfigEditProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  domain: Domain | null
+  config: SafelineDeployConfig | null
+  targets: SafelineTarget[]
+  onSaved: () => void
+}
+
+function SafelineDeployConfigEditDialog({
+  open,
+  onOpenChange,
+  domain,
+  config,
+  targets,
+  onSaved,
+}: SafelineDeployConfigEditProps) {
+  const [name, setName] = useState('')
+  const [targetID, setTargetID] = useState(0)
+  const [certID, setCertID] = useState('')
+  const [certType, setCertType] = useState('2')
+  const [autoDeploy, setAutoDeploy] = useState(false)
+  const [enabled, setEnabled] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const first = targets.find((t) => t.enabled)
+    setName(config?.name ?? '')
+    setTargetID(config?.target_id ?? first?.id ?? 0)
+    setCertID(config?.cert_id ? String(config.cert_id) : '')
+    setCertType(String(config?.cert_type || 2))
+    setAutoDeploy(config?.auto_deploy ?? false)
+    setEnabled(config?.enabled ?? true)
+  }, [open, config, targets])
+
+  const save = async () => {
+    if (!domain) return
+    const certIDNum = certID.trim() ? Number(certID) : 0
+    const certTypeNum = Number(certType) || 2
+    const form = {
+      id: config?.id ?? 0,
+      domain_id: domain.id,
+      target_id: targetID,
+      name: name.trim(),
+      cert_id: certIDNum,
+      cert_type: certTypeNum,
+      auto_deploy: autoDeploy,
+      enabled,
+      created_at: config?.created_at ?? '',
+      updated_at: config?.updated_at ?? '',
+    }
+    if (!form.target_id) {
+      toast.error('请选择雷池实例')
+      return
+    }
+    if (!Number.isInteger(certIDNum) || certIDNum < 0) {
+      toast.error('雷池 cert_id 无效')
+      return
+    }
+    if (!Number.isInteger(certTypeNum) || certTypeNum <= 0) {
+      toast.error('雷池证书类型无效')
+      return
+    }
+    const payload = safelineConfigToDeployConfig(form)
+    setSaving(true)
+    try {
+      if (config?.id) {
+        await api.put(`/acme/deploy/configs/${config.id}`, payload)
+      } else {
+        await api.post(`/acme/domains/${domain.id}/deploy-configs`, payload)
+      }
+      toast.success('已保存')
+      onOpenChange(false)
+      onSaved()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const selectableTargets = targets.filter((t) => t.enabled || t.id === targetID)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{config ? '编辑雷池部署配置' : '新增雷池部署配置'}</DialogTitle>
+          <DialogDescription>
+            {domain?.main_domain ?? '当前域名'} 上传到雷池证书管理；cert_id 留空表示首次新增，部署成功后会自动写回
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid max-h-[70vh] gap-3.5 overflow-auto pr-1">
+          <div className="grid gap-1.5">
+            <Label htmlFor="safeline-deploy-name">配置名称</Label>
+            <Input
+              id="safeline-deploy-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="雷池证书"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="safeline-deploy-target">雷池实例</Label>
+            <select
+              id="safeline-deploy-target"
+              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
+              value={targetID ? String(targetID) : ''}
+              onChange={(e) => setTargetID(Number(e.target.value))}
+            >
+              {selectableTargets.length === 0 && (
+                <option value="">（暂无启用的雷池实例）</option>
+              )}
+              {selectableTargets.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.base_url})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="safeline-cert-id">雷池 cert_id</Label>
+              <Input
+                id="safeline-cert-id"
+                value={certID}
+                onChange={(e) => setCertID(e.target.value)}
+                placeholder="留空则新增"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="safeline-cert-type">证书类型</Label>
+              <select
+                id="safeline-cert-type"
+                value={certType}
+                onChange={(e) => setCertType(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
+              >
+                <option value="2">手动上传证书（2）</option>
+                <option value="1">类型 1（兼容）</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="safeline-deploy-auto">签发/续期成功后自动部署</Label>
+            <Switch id="safeline-deploy-auto" checked={autoDeploy} onChange={(v) => setAutoDeploy(v)} />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="safeline-deploy-enabled">启用</Label>
+            <Switch id="safeline-deploy-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            取消
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 interface SSHTargetsDrawerProps {
   open: boolean
   onOpenChange: (o: boolean) => void
@@ -1860,7 +3016,7 @@ function authLabel(authType: string) {
   return authType === 'key' ? '证书' : '密码'
 }
 
-function SSHTargetsDrawer({
+export function SSHTargetsDrawer({
   open,
   onOpenChange,
   targets,
@@ -1967,7 +3123,8 @@ function SSHTargetEditDialog({ open, onOpenChange, target, onSaved }: SSHTargetE
 
   const save = async () => {
     const portNum = Number(port)
-    const payload = {
+    const form = {
+      id: target?.id ?? 0,
       name: name.trim(),
       host: host.trim(),
       port: portNum,
@@ -1977,16 +3134,18 @@ function SSHTargetEditDialog({ open, onOpenChange, target, onSaved }: SSHTargetE
       private_key: privateKey.trim(),
       passphrase: passphrase.trim(),
       enabled,
+      created_at: target?.created_at ?? '',
+      updated_at: target?.updated_at ?? '',
     }
-    if (!payload.name) {
+    if (!form.name) {
       toast.error('目标名称必填')
       return
     }
-    if (!payload.host) {
+    if (!form.host) {
       toast.error('SSH 主机必填')
       return
     }
-    if (!payload.username) {
+    if (!form.username) {
       toast.error('SSH 用户名必填')
       return
     }
@@ -1994,20 +3153,21 @@ function SSHTargetEditDialog({ open, onOpenChange, target, onSaved }: SSHTargetE
       toast.error('SSH 端口无效')
       return
     }
-    if (authType === 'password' && !payload.password) {
+    if (authType === 'password' && !form.password) {
       toast.error('密码认证需要填写密码')
       return
     }
-    if (authType === 'key' && !payload.private_key) {
+    if (authType === 'key' && !form.private_key) {
       toast.error('证书模式需要填写私钥')
       return
     }
+    const payload = sshTargetToDeployTarget(form)
     setSaving(true)
     try {
       if (target?.id) {
-        await api.put(`/acme/ssh-targets/${target.id}`, payload)
+        await api.put(`/acme/deploy/targets/${target.id}`, payload)
       } else {
-        await api.post('/acme/ssh-targets', payload)
+        await api.post('/acme/deploy/targets', payload)
       }
       toast.success('已保存')
       onOpenChange(false)
@@ -2136,6 +3296,233 @@ function SSHTargetEditDialog({ open, onOpenChange, target, onSaved }: SSHTargetE
           <div className="flex items-center justify-between">
             <Label htmlFor="ssh-enabled">启用</Label>
             <Switch id="ssh-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            取消
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface SafelineTargetsDrawerProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  targets: SafelineTarget[]
+  onAdd: () => void
+  onEdit: (t: SafelineTarget) => void
+  onDelete: (t: SafelineTarget) => void
+  onTest: (t: SafelineTarget) => void
+}
+
+export function SafelineTargetsDrawer({
+  open,
+  onOpenChange,
+  targets,
+  onAdd,
+  onEdit,
+  onDelete,
+  onTest,
+}: SafelineTargetsDrawerProps) {
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>雷池 WAF</DrawerTitle>
+          <DrawerDescription>
+            配置雷池 Open API 实例；证书部署使用 X-SLCE-API-TOKEN
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
+          <div className="flex justify-end">
+            <Button size="sm" onClick={onAdd}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加实例
+            </Button>
+          </div>
+          {targets.length === 0 ? (
+            <p className="py-8 text-center text-[12.5px] text-muted-foreground">
+              还没有雷池实例，点击「添加实例」开始
+            </p>
+          ) : (
+            targets.map((t) => (
+              <Card key={t.id} className="px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-mono text-[13px] font-medium">
+                        {t.name}
+                      </span>
+                      <span
+                        className={cn(
+                          'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                          t.enabled
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {t.enabled ? '启用' : '停用'}
+                      </span>
+                      {t.skip_tls_verify && (
+                        <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                          跳过 TLS
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                      {t.base_url}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => onTest(t)} disabled={!t.enabled}>
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => onEdit(t)}>
+                    <Edit3 className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="hover:text-destructive"
+                    onClick={() => onDelete(t)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </Card>
+            ))
+          )}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
+interface SafelineTargetEditProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  target: SafelineTarget | null
+  onSaved: () => void
+}
+
+function SafelineTargetEditDialog({ open, onOpenChange, target, onSaved }: SafelineTargetEditProps) {
+  const [name, setName] = useState('')
+  const [baseURL, setBaseURL] = useState('')
+  const [apiToken, setAPIToken] = useState('')
+  const [skipTLSVerify, setSkipTLSVerify] = useState(false)
+  const [enabled, setEnabled] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setName(target?.name ?? '')
+    setBaseURL(target?.base_url ?? '')
+    setAPIToken(target?.api_token ?? '')
+    setSkipTLSVerify(target?.skip_tls_verify ?? false)
+    setEnabled(target?.enabled ?? true)
+  }, [open, target])
+
+  const save = async () => {
+    const form = {
+      id: target?.id ?? 0,
+      name: name.trim(),
+      base_url: baseURL.trim().replace(/\/+$/, ''),
+      api_token: apiToken.trim(),
+      skip_tls_verify: skipTLSVerify,
+      enabled,
+      created_at: target?.created_at ?? '',
+      updated_at: target?.updated_at ?? '',
+    }
+    if (!form.name) {
+      toast.error('实例名称必填')
+      return
+    }
+    if (!form.base_url) {
+      toast.error('雷池地址必填')
+      return
+    }
+    if (!form.api_token) {
+      toast.error('API Token 必填')
+      return
+    }
+    const payload = safelineTargetToDeployTarget(form)
+    setSaving(true)
+    try {
+      if (target?.id) {
+        await api.put(`/acme/deploy/targets/${target.id}`, payload)
+      } else {
+        await api.post('/acme/deploy/targets', payload)
+      }
+      toast.success('已保存')
+      onOpenChange(false)
+      onSaved()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{target ? '编辑雷池实例' : '新增雷池实例'}</DialogTitle>
+          <DialogDescription>
+            地址填写管理端根地址，例如 https://waf.example.com:9443
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid max-h-[70vh] gap-3.5 overflow-auto pr-1">
+          <div className="grid gap-1.5">
+            <Label htmlFor="safeline-name">实例名称</Label>
+            <Input
+              id="safeline-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="safeline-base-url">雷池地址</Label>
+            <Input
+              id="safeline-base-url"
+              value={baseURL}
+              onChange={(e) => setBaseURL(e.target.value)}
+              placeholder="https://waf.example.com:9443"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="font-mono text-[12px]"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="safeline-token">API Token</Label>
+            <Input
+              id="safeline-token"
+              type="password"
+              value={apiToken}
+              onChange={(e) => setAPIToken(e.target.value)}
+              autoComplete="new-password"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="font-mono text-[12px]"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="safeline-skip-tls">跳过 TLS 校验</Label>
+            <Switch id="safeline-skip-tls" checked={skipTLSVerify} onChange={(v) => setSkipTLSVerify(v)} />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="safeline-enabled">启用</Label>
+            <Switch id="safeline-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
           </div>
         </div>
         <DialogFooter>

@@ -23,6 +23,52 @@ func NewACMEHandler(svc *acme.Service) *ACMEHandler {
 	return &ACMEHandler{svc: svc}
 }
 
+type deployTargetPayload struct {
+	Name       string         `json:"name"`
+	Kind       string         `json:"kind"`
+	Endpoint   string         `json:"endpoint"`
+	AuthJSON   string         `json:"auth_json"`
+	ConfigJSON string         `json:"config_json"`
+	Enabled    model.BoolFlag `json:"enabled"`
+}
+
+func (p deployTargetPayload) toModel(id int64) model.ACMEDeployTarget {
+	return model.ACMEDeployTarget{
+		ID:         id,
+		Name:       p.Name,
+		Kind:       p.Kind,
+		Endpoint:   p.Endpoint,
+		AuthJSON:   p.AuthJSON,
+		ConfigJSON: p.ConfigJSON,
+		Enabled:    p.Enabled,
+	}
+}
+
+type deployConfigPayload struct {
+	DomainID   int64          `json:"domain_id"`
+	TargetID   int64          `json:"target_id"`
+	Kind       string         `json:"kind"`
+	Name       string         `json:"name"`
+	ConfigJSON string         `json:"config_json"`
+	StateJSON  string         `json:"state_json"`
+	AutoDeploy model.BoolFlag `json:"auto_deploy"`
+	Enabled    model.BoolFlag `json:"enabled"`
+}
+
+func (p deployConfigPayload) toModel(id int64) model.ACMEDeployConfig {
+	return model.ACMEDeployConfig{
+		ID:         id,
+		DomainID:   p.DomainID,
+		TargetID:   p.TargetID,
+		Kind:       p.Kind,
+		Name:       p.Name,
+		ConfigJSON: p.ConfigJSON,
+		StateJSON:  p.StateJSON,
+		AutoDeploy: p.AutoDeploy,
+		Enabled:    p.Enabled,
+	}
+}
+
 func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g := rg.Group("/acme")
 	g.GET("/providers", h.providers)
@@ -34,9 +80,25 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.POST("/ssh-targets", h.upsertSSHTarget)
 	g.PUT("/ssh-targets/:id", h.updateSSHTarget)
 	g.DELETE("/ssh-targets/:id", h.deleteSSHTarget)
+	g.GET("/safeline-targets", h.listSafelineTargets)
+	g.POST("/safeline-targets", h.upsertSafelineTarget)
+	g.PUT("/safeline-targets/:id", h.updateSafelineTarget)
+	g.DELETE("/safeline-targets/:id", h.deleteSafelineTarget)
+	g.POST("/safeline-targets/:id/test", h.testSafelineTarget)
+	g.GET("/deploy/targets", h.listDeployTargets)
+	g.POST("/deploy/targets", h.upsertDeployTarget)
+	g.PUT("/deploy/targets/:id", h.updateDeployTarget)
+	g.DELETE("/deploy/targets/:id", h.deleteDeployTarget)
+	g.POST("/deploy/targets/:id/test", h.testDeployTarget)
+	g.PUT("/deploy/configs/:id", h.updateDeployConfig)
+	g.DELETE("/deploy/configs/:id", h.deleteDeployConfig)
+	g.POST("/deploy/configs/:id/deploy", h.deployConfig)
 	g.PUT("/ssh-deploy-configs/:id", h.updateSSHDeployConfig)
 	g.DELETE("/ssh-deploy-configs/:id", h.deleteSSHDeployConfig)
 	g.POST("/ssh-deploy-configs/:id/deploy", h.deploySSHConfig)
+	g.PUT("/safeline-deploy-configs/:id", h.updateSafelineDeployConfig)
+	g.DELETE("/safeline-deploy-configs/:id", h.deleteSafelineDeployConfig)
+	g.POST("/safeline-deploy-configs/:id/deploy", h.deploySafelineConfig)
 	g.GET("/credentials", h.listCredentials)
 	g.POST("/credentials", h.upsertCredential)
 	g.DELETE("/credentials/:id", h.deleteCredential)
@@ -52,6 +114,12 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.GET("/domains/:id/ssh-deploy-configs", h.listSSHDeployConfigs)
 	g.POST("/domains/:id/ssh-deploy-configs", h.upsertSSHDeployConfig)
 	g.POST("/domains/:id/ssh-deploy-configs/deploy", h.deploySSHConfigsByDomain)
+	g.GET("/domains/:id/deploy-configs", h.listDeployConfigs)
+	g.POST("/domains/:id/deploy-configs", h.upsertDeployConfig)
+	g.POST("/domains/:id/deploy-configs/deploy", h.deployConfigsByDomain)
+	g.GET("/domains/:id/safeline-deploy-configs", h.listSafelineDeployConfigs)
+	g.POST("/domains/:id/safeline-deploy-configs", h.upsertSafelineDeployConfig)
+	g.POST("/domains/:id/safeline-deploy-configs/deploy", h.deploySafelineConfigsByDomain)
 	g.GET("/tasks", h.listTasks)
 	g.GET("/tasks/:id", h.getTask)
 	g.GET("/tasks/:id/stream", h.streamTask)
@@ -175,6 +243,245 @@ func (h *ACMEHandler) deleteSSHTarget(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
 }
 
+func (h *ACMEHandler) listSafelineTargets(c *gin.Context) {
+	items, err := h.svc.SafelineTargets().List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertSafelineTarget(c *gin.Context) {
+	var t model.ACMESafelineTarget
+	if err := c.ShouldBindJSON(&t); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	t.ID = 0
+	row, err := h.svc.SafelineTargets().Upsert(&t)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateSafelineTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var t model.ACMESafelineTarget
+	if err := c.ShouldBindJSON(&t); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	t.ID = id
+	row, err := h.svc.SafelineTargets().Upsert(&t)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteSafelineTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.SafelineTargets().Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) testSafelineTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.SafelineTargets().Test(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "连接正常"})
+}
+
+func (h *ACMEHandler) listDeployTargets(c *gin.Context) {
+	items, err := h.svc.DeployTargets().List(c.Query("kind"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertDeployTarget(c *gin.Context) {
+	var body deployTargetPayload
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	t := body.toModel(0)
+	row, err := h.svc.DeployTargets().Upsert(&t)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateDeployTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var body deployTargetPayload
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	t := body.toModel(id)
+	row, err := h.svc.DeployTargets().Upsert(&t)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteDeployTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.DeployTargets().Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) testDeployTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.DeployTargets().Test(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "连接正常"})
+}
+
+func (h *ACMEHandler) listDeployConfigs(c *gin.Context) {
+	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || domainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	items, err := h.svc.DeployConfigs().ListByDomain(domainID, c.Query("kind"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertDeployConfig(c *gin.Context) {
+	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || domainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var body deployConfigPayload
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	cfg := body.toModel(0)
+	row, err := h.svc.DeployConfigs().Upsert(domainID, &cfg)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateDeployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var body deployConfigPayload
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	cfg := body.toModel(id)
+	if cfg.DomainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain_id 无效"})
+		return
+	}
+	row, err := h.svc.DeployConfigs().Upsert(cfg.DomainID, &cfg)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteDeployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.DeployConfigs().Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) deployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskID, err := h.svc.DeployConfigTaskAsync(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
+}
+
+func (h *ACMEHandler) deployConfigsByDomain(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskIDs, err := h.svc.DeployConfigsByDomainAsync(id, c.Query("kind"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_ids": taskIDs}})
+}
+
 func (h *ACMEHandler) listSSHDeployConfigs(c *gin.Context) {
 	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || domainID <= 0 {
@@ -240,6 +547,77 @@ func (h *ACMEHandler) deleteSSHDeployConfig(c *gin.Context) {
 		return
 	}
 	if err := h.svc.SSHDeploys().Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) listSafelineDeployConfigs(c *gin.Context) {
+	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || domainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	items, err := h.svc.SafelineDeploys().ListByDomain(domainID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertSafelineDeployConfig(c *gin.Context) {
+	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || domainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var cfg model.ACMESafelineDeployConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	cfg.ID = 0
+	row, err := h.svc.SafelineDeploys().Upsert(domainID, &cfg)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateSafelineDeployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var cfg model.ACMESafelineDeployConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if cfg.DomainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain_id 无效"})
+		return
+	}
+	cfg.ID = id
+	row, err := h.svc.SafelineDeploys().Upsert(cfg.DomainID, &cfg)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteSafelineDeployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.SafelineDeploys().Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -473,6 +851,34 @@ func (h *ACMEHandler) deploySSHConfigsByDomain(c *gin.Context) {
 		return
 	}
 	taskIDs, err := h.svc.DeploySSHConfigsByDomainAsync(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_ids": taskIDs}})
+}
+
+func (h *ACMEHandler) deploySafelineConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskID, err := h.svc.DeploySafelineConfigTaskAsync(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
+}
+
+func (h *ACMEHandler) deploySafelineConfigsByDomain(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskIDs, err := h.svc.DeploySafelineConfigsByDomainAsync(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

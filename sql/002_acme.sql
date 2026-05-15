@@ -48,45 +48,47 @@ CREATE TABLE `acme_domain` (
   KEY `idx_account_id` (`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 自动签发域名';
 
+DROP TABLE IF EXISTS `acme_safeline_target`;
+DROP TABLE IF EXISTS `acme_safeline_deploy_config`;
 DROP TABLE IF EXISTS `acme_ssh_target`;
-CREATE TABLE `acme_ssh_target` (
-  `id`             BIGINT       NOT NULL AUTO_INCREMENT,
-  `name`           VARCHAR(64)  NOT NULL                COMMENT '目标名称',
-  `host`           VARCHAR(255) NOT NULL                COMMENT 'SSH 主机',
-  `port`           INT          NOT NULL DEFAULT 22     COMMENT 'SSH 端口',
-  `username`       VARCHAR(128) NOT NULL                COMMENT 'SSH 用户名',
-  `auth_type`      VARCHAR(16)  NOT NULL                COMMENT 'password | key',
-  `password`       TEXT         NOT NULL                COMMENT '密码认证使用',
-  `private_key`    TEXT         NOT NULL                COMMENT '私钥认证使用，PEM/OpenSSH 私钥',
-  `passphrase`     TEXT         NOT NULL                COMMENT '私钥口令，可空',
-  `enabled`        VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
-  `created_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_name` (`name`),
-  KEY `idx_enabled` (`enabled`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 证书 SSH 部署目标';
-
 DROP TABLE IF EXISTS `acme_ssh_deploy_config`;
-CREATE TABLE `acme_ssh_deploy_config` (
-  `id`             BIGINT       NOT NULL AUTO_INCREMENT,
-  `domain_id`      BIGINT       NOT NULL                COMMENT 'ACME 域名 ID',
-  `target_id`      BIGINT       NOT NULL                COMMENT 'SSH 机器 ID',
-  `name`           VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '部署配置名称',
-  `cert_path`      VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '远端 cert.pem 路径，可空',
-  `key_path`       VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '远端 key.pem 路径',
-  `chain_path`     VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '远端 chain.pem 路径，可空',
-  `fullchain_path` VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '远端 fullchain.pem 路径，可空',
-  `deploy_command` TEXT         NOT NULL                COMMENT '写入后执行的部署命令，可空',
-  `auto_deploy`    VARCHAR(1)   NOT NULL DEFAULT '0'    COMMENT '签发/续期成功后是否自动部署：1/0',
-  `enabled`        VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
-  `created_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+DROP TABLE IF EXISTS `acme_deploy_target`;
+CREATE TABLE `acme_deploy_target` (
+  `id`          BIGINT       NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(64)  NOT NULL                COMMENT '目标名称',
+  `kind`        VARCHAR(32)  NOT NULL                COMMENT 'ssh | safeline | ...',
+  `endpoint`    VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '目标地址；ssh 为 host:port，雷池为管理端根地址',
+  `auth_json`   TEXT         NOT NULL                COMMENT 'driver 认证配置 JSON',
+  `config_json` TEXT         NOT NULL                COMMENT 'driver 目标配置 JSON',
+  `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_kind_name` (`kind`, `name`),
+  KEY `idx_kind` (`kind`),
+  KEY `idx_enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 证书部署目标';
+
+DROP TABLE IF EXISTS `acme_deploy_config`;
+CREATE TABLE `acme_deploy_config` (
+  `id`          BIGINT      NOT NULL AUTO_INCREMENT,
+  `domain_id`   BIGINT      NOT NULL                COMMENT 'ACME 域名 ID',
+  `target_id`   BIGINT      NOT NULL                COMMENT '部署目标 ID',
+  `kind`        VARCHAR(32) NOT NULL                COMMENT 'ssh | safeline | ...',
+  `name`        VARCHAR(64) NOT NULL DEFAULT ''     COMMENT '部署配置名称',
+  `config_json` TEXT        NOT NULL                COMMENT 'driver 部署配置 JSON',
+  `state_json`  TEXT        NOT NULL                COMMENT 'driver 部署状态 JSON，如雷池 cert_id',
+  `auto_deploy` VARCHAR(1)  NOT NULL DEFAULT '0'    COMMENT '签发/续期成功后是否自动部署：1/0',
+  `enabled`     VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `created_at`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_domain_id` (`domain_id`),
   KEY `idx_target_id` (`target_id`),
+  KEY `idx_kind` (`kind`),
   KEY `idx_enabled_auto` (`enabled`, `auto_deploy`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 证书 SSH 部署配置';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 证书部署配置';
 
 DROP TABLE IF EXISTS `acme_cert`;
 CREATE TABLE `acme_cert` (
@@ -114,7 +116,7 @@ CREATE TABLE `acme_issue_task` (
   `id`           BIGINT       NOT NULL AUTO_INCREMENT,
   `domain_id`    BIGINT       NOT NULL,
   `main_domain`  VARCHAR(255) NOT NULL DEFAULT '',
-  `kind`         VARCHAR(16)  NOT NULL COMMENT 'issue | renew | revoke | upload_cas | deploy_ssh',
+  `kind`         VARCHAR(32)  NOT NULL COMMENT 'issue | renew | revoke | upload_cas | deploy_ssh | deploy_safeline | deploy',
   `status`       VARCHAR(16)  NOT NULL COMMENT 'pending | running | success | failed',
   `started_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `finished_at`  DATETIME     NULL,
