@@ -69,7 +69,7 @@ cd frontend && npm install && npm run build
 # 2. 后端构建（embed 进 bin/server，单文件分发）
 cd ..
 export PATH=/opt/module/go/go1.25.0/bin:$PATH
-go build -o bin/server .
+go build -ldflags="-s -w" -o bin/server .   # -s -w 去掉符号表/调试信息，砍 30%+ 体积
 
 # 运行
 ./bin/server   # 同时提供 /api 和 / （前端）
