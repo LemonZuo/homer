@@ -30,7 +30,3 @@ func EmptyJSON(s string) string {
 	}
 	return s
 }
-
-// 内部别名，旧代码继续用小写名；新增的子包直接用导出名。
-func jsonMarshalIndent(v any) ([]byte, error) { return JSONMarshalIndent(v) }
-func jsonUnmarshal(data []byte, v any) error  { return JSONUnmarshal(data, v) }

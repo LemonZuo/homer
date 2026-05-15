@@ -80,21 +80,6 @@ func (c *client) UpsertCert(certID int64, certType int, crt, key string) (int64,
 	return id, nil
 }
 
-func (c *client) CreateCert(certType int, crt, key string) (int64, error) {
-	body := map[string]any{
-		"type": normalizeCertType(certType),
-		"manual": map[string]string{
-			"crt": crt,
-			"key": key,
-		},
-	}
-	var id int64
-	if err := c.doJSON(http.MethodPost, "/api/open/cert", body, &id); err != nil {
-		return 0, err
-	}
-	return id, nil
-}
-
 func normalizeCertType(certType int) int {
 	if certType <= 0 {
 		return 2

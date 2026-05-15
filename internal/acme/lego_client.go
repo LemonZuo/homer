@@ -109,7 +109,7 @@ func (m *Manager) EnsureAccount(opts CAOptions) (*acmeUser, error) {
 	user := &acmeUser{email: opts.Email, key: key}
 	if data, err := os.ReadFile(regPath); err == nil && len(data) > 0 {
 		var reg registration.Resource
-		if err := jsonUnmarshal(data, &reg); err == nil && reg.URI != "" {
+		if err := JSONUnmarshal(data, &reg); err == nil && reg.URI != "" {
 			user.registration = &reg
 			m.cachedUser[cacheKey] = user
 			return user, nil
@@ -142,7 +142,7 @@ func (m *Manager) EnsureAccount(opts CAOptions) (*acmeUser, error) {
 		return nil, fmt.Errorf("注册 ACME 账号失败：%w", err)
 	}
 	user.registration = reg
-	if data, err := jsonMarshalIndent(reg); err == nil {
+	if data, err := JSONMarshalIndent(reg); err == nil {
 		_ = os.WriteFile(regPath, data, 0o600)
 	}
 	m.cachedUser[cacheKey] = user

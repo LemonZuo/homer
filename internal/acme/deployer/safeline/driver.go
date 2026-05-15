@@ -114,7 +114,7 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 		}
 	}
 	if len(updatedIDs) == 0 {
-		id, err := client.CreateCert(opts.CertType, req.Cert.FullchainPEM, req.Cert.KeyPEM)
+		id, err := client.UpsertCert(0, opts.CertType, req.Cert.FullchainPEM, req.Cert.KeyPEM)
 		if err != nil {
 			return nil, fmt.Errorf("新增雷池证书失败：%w", err)
 		}
