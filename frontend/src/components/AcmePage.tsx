@@ -410,7 +410,66 @@ const KIND_LABEL: Record<string, string> = {
   deploy_safeline: '部署雷池',
 }
 
-const TASK_PAGE_SIZE = 10
+const TASK_PAGE_SIZES = [5, 10, 20, 50, 100]
+const TASK_PAGE_SIZE_KEY = 'acme.taskPageSize'
+
+function readTaskPageSize(): number {
+  const v = Number(localStorage.getItem(TASK_PAGE_SIZE_KEY))
+  return TASK_PAGE_SIZES.includes(v) ? v : TASK_PAGE_SIZES[0]
+}
+
+function TaskPager({
+  page,
+  pageSize,
+  total,
+  onGo,
+  onPageSizeChange,
+}: {
+  page: number
+  pageSize: number
+  total: number
+  onGo: (page: number) => void
+  onPageSizeChange: (size: number) => void
+}) {
+  if (total <= TASK_PAGE_SIZES[0]) return null
+  const pages = Math.ceil(total / pageSize)
+  return (
+    <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
+      <span className="font-mono">
+        {page} / {pages}（共 {total} 条）
+      </span>
+      <select
+        className="h-8 rounded-md border border-input bg-background px-2 text-[12px]"
+        value={pageSize}
+        onChange={(e) => onPageSizeChange(Number(e.target.value))}
+      >
+        {TASK_PAGE_SIZES.map((s) => (
+          <option key={s} value={s}>
+            {s} 条/页
+          </option>
+        ))}
+      </select>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={page <= 1}
+        onClick={() => onGo(page - 1)}
+      >
+        <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+        上一页
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={page >= pages}
+        onClick={() => onGo(page + 1)}
+      >
+        下一页
+        <ChevronRight className="ml-1 h-3.5 w-3.5" />
+      </Button>
+    </div>
+  )
+}
 
 export default function AcmePage() {
   const [domains, setDomains] = useState<Domain[]>([])
@@ -422,6 +481,9 @@ export default function AcmePage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [taskPage, setTaskPage] = useState(1)
   const [taskTotal, setTaskTotal] = useState(0)
+  const [taskPageSize, setTaskPageSize] = useState(readTaskPageSize)
+  const taskPageRef = useRef(1)
+  const taskPageSizeRef = useRef(readTaskPageSize())
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -478,7 +540,7 @@ export default function AcmePage() {
       const [d, p, t, c, a, targets] = await Promise.all([
         api.get('/acme/domains'),
         api.get('/acme/providers'),
-        api.get(`/acme/tasks?page=1&page_size=${TASK_PAGE_SIZE}`),
+        api.get(`/acme/tasks?page=${taskPageRef.current}&page_size=${taskPageSizeRef.current}`),
         api.get('/acme/credentials'),
         api.get('/acme/accounts'),
         api.get('/acme/deploy/targets'),
@@ -488,7 +550,7 @@ export default function AcmePage() {
       setProviders(p.data?.data ?? [])
       setTasks(t.data?.data ?? [])
       setTaskTotal(t.data?.total ?? 0)
-      setTaskPage(1)
+      setTaskPage(taskPageRef.current)
       setCredentials(c.data?.data ?? [])
       setAccounts(a.data?.data ?? [])
       setSSHTargets(groupedTargets.ssh)
@@ -634,19 +696,30 @@ export default function AcmePage() {
   const loadTasks = useCallback(async (page: number) => {
     try {
       const { data } = await api.get(
-        `/acme/tasks?page=${page}&page_size=${TASK_PAGE_SIZE}`,
+        `/acme/tasks?page=${page}&page_size=${taskPageSizeRef.current}`,
       )
       setTasks(data?.data ?? [])
       setTaskTotal(data?.total ?? 0)
       setTaskPage(page)
+      taskPageRef.current = page
     } catch {
       /* silent */
     }
   }, [])
 
   const reloadTasks = useCallback(async () => {
-    await loadTasks(1)
+    await loadTasks(taskPageRef.current)
   }, [loadTasks])
+
+  const changeTaskPageSize = useCallback(
+    (size: number) => {
+      setTaskPageSize(size)
+      taskPageSizeRef.current = size
+      localStorage.setItem(TASK_PAGE_SIZE_KEY, String(size))
+      void loadTasks(1)
+    },
+    [loadTasks],
+  )
 
   const startIssue = async (d: Domain) => {
     setBusy(`issue-${d.id}`)
@@ -774,7 +847,7 @@ export default function AcmePage() {
         <div>
           <h1 className="text-[17px] font-semibold tracking-tight">ACME 签发</h1>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            自动签发与续期；落盘 ./data/acme/certs/&lt;domain&gt;/ 并上传 CAS，可手动重传
+            自动签发与续期，并上传 CAS
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -975,7 +1048,16 @@ export default function AcmePage() {
         )}
       </div>
 
-      <h2 className="mb-3 text-[14px] font-semibold tracking-tight">任务历史</h2>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-[14px] font-semibold tracking-tight">任务历史</h2>
+        <TaskPager
+          page={taskPage}
+          pageSize={taskPageSize}
+          total={taskTotal}
+          onGo={(p) => void loadTasks(p)}
+          onPageSizeChange={changeTaskPageSize}
+        />
+      </div>
       <div className="space-y-2">
         {tasks.map((t) => (
           <Card
@@ -1013,29 +1095,15 @@ export default function AcmePage() {
         )}
       </div>
 
-      {taskTotal > TASK_PAGE_SIZE && (
-        <div className="mt-3 flex items-center justify-end gap-3 text-[12px] text-muted-foreground">
-          <span className="font-mono">
-            {taskPage} / {Math.ceil(taskTotal / TASK_PAGE_SIZE)}（共 {taskTotal} 条）
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={taskPage <= 1}
-            onClick={() => void loadTasks(taskPage - 1)}
-          >
-            <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-            上一页
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={taskPage >= Math.ceil(taskTotal / TASK_PAGE_SIZE)}
-            onClick={() => void loadTasks(taskPage + 1)}
-          >
-            下一页
-            <ChevronRight className="ml-1 h-3.5 w-3.5" />
-          </Button>
+      {taskTotal > TASK_PAGE_SIZES[0] && (
+        <div className="mt-3 flex justify-end">
+          <TaskPager
+          page={taskPage}
+          pageSize={taskPageSize}
+          total={taskTotal}
+          onGo={(p) => void loadTasks(p)}
+          onPageSizeChange={changeTaskPageSize}
+        />
         </div>
       )}
 
