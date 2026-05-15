@@ -847,7 +847,7 @@ export default function AcmePage() {
   return (
     <div className="mx-auto max-w-5xl px-4 pb-12 pt-4 sm:px-8 sm:pb-32 sm:pt-10">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+        <div className="hidden sm:block">
           <div className="flex items-center gap-3">
             <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
             <h1 className="text-[28px] font-bold leading-none tracking-tight">ACME 签发</h1>
