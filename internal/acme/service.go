@@ -44,16 +44,6 @@ func (s *Service) Credentials() *CredentialStore     { return s.credstore }
 func (s *Service) Accounts() *AccountStore           { return s.accountStore }
 func (s *Service) DeployTargets() *DeployTargetStore { return s.deployTargets }
 func (s *Service) DeployConfigs() *DeployConfigStore { return s.deployConfigs }
-func (s *Service) SSHTargets() *SSHTargetStore       { return NewSSHTargetStore(s.deployTargets) }
-func (s *Service) SSHDeploys() *SSHDeployConfigStore {
-	return NewSSHDeployConfigStore(s.deployConfigs)
-}
-func (s *Service) SafelineTargets() *SafelineTargetStore {
-	return NewSafelineTargetStore(s.deployTargets)
-}
-func (s *Service) SafelineDeploys() *SafelineDeployConfigStore {
-	return NewSafelineDeployConfigStore(s.deployConfigs)
-}
 
 // DomainView 联查域名 + 最近一次证书（NotAfter 用于前端显示剩余天数）。
 type DomainView struct {
@@ -242,7 +232,7 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
 
 	logf(logw, "开始签发：%s（provider=%s）", d.MainDomain, d.Provider)
-	domains := buildDomains(d)
+	domains := BuildDomains(d)
 	logf(logw, "目标域名：%s", strings.Join(domains, ", "))
 
 	err := func() error {
@@ -519,8 +509,13 @@ func (s *Service) DeployConfigsByDomainAsync(domainID int64, kind string) ([]int
 	return taskIDs, nil
 }
 
-// DeploySSHTaskAsync 保留直接部署接口，内部构造成临时通用 SSH 配置。
-func (s *Service) DeploySSHTaskAsync(domainID, targetID int64, opts SSHDeployOptions) (int64, error) {
+// DeployAdHocTaskAsync 用一份临时（未持久化）部署配置直接发布当前域名最近一次证书。
+// kind 决定 driver；configJSON 是该 driver 的配置（由调用方按 driver 约定拼装）。
+func (s *Service) DeployAdHocTaskAsync(domainID, targetID int64, kind, configJSON string) (int64, error) {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind == "" {
+		return 0, errors.New("部署类型不能为空")
+	}
 	var d model.ACMEDomain
 	if err := s.db.First(&d, domainID).Error; err != nil {
 		return 0, err
@@ -528,8 +523,8 @@ func (s *Service) DeploySSHTaskAsync(domainID, targetID int64, opts SSHDeployOpt
 	cfg := model.ACMEDeployConfig{
 		DomainID:   d.ID,
 		TargetID:   targetID,
-		Kind:       DeployKindSSH,
-		ConfigJSON: mustJSON(opts),
+		Kind:       kind,
+		ConfigJSON: EmptyJSON(configJSON),
 		StateJSON:  "{}",
 		Enabled:    true,
 	}
@@ -541,10 +536,10 @@ func (s *Service) DeploySSHTaskAsync(domainID, targetID int64, opts SSHDeployOpt
 	if err != nil {
 		return 0, err
 	}
-	if target.Kind != DeployKindSSH {
-		return 0, errors.New("部署目标不是 SSH 机器")
+	if target.Kind != kind {
+		return 0, fmt.Errorf("部署目标类型 %s 与请求类型 %s 不一致", target.Kind, kind)
 	}
-	driver, err := s.deployRegistry.Get(DeployKindSSH)
+	driver, err := s.deployRegistry.Get(kind)
 	if err != nil {
 		return 0, err
 	}
@@ -554,7 +549,7 @@ func (s *Service) DeploySSHTaskAsync(domainID, targetID int64, opts SSHDeployOpt
 	task := &model.ACMEIssueTask{
 		DomainID:   d.ID,
 		MainDomain: d.MainDomain,
-		Kind:       "deploy_ssh",
+		Kind:       deployTaskKind(kind),
 		Status:     "pending",
 	}
 	if err := s.db.Create(task).Error; err != nil {
@@ -791,7 +786,8 @@ func (s *Service) RenewExpiring() ([]int64, error) {
 
 // ----- helpers -----
 
-func buildDomains(d model.ACMEDomain) []string {
+// BuildDomains 主域名 + SAN 拆成 lego.Obtain / 雷池匹配等所需的字符串切片。
+func BuildDomains(d model.ACMEDomain) []string {
 	out := []string{d.MainDomain}
 	for _, s := range strings.Split(d.SanDomains, ",") {
 		s = strings.TrimSpace(s)

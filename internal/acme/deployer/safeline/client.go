@@ -1,4 +1,4 @@
-package acme
+package acmesafeline
 
 import (
 	"bytes"
@@ -15,36 +15,36 @@ import (
 	"github.com/LemonZuo/homer/internal/model"
 )
 
-type safelineClient struct {
+type client struct {
 	baseURL string
 	token   string
 	http    *http.Client
 }
 
-type safelineResponse struct {
+type response struct {
 	Data json.RawMessage `json:"data"`
 	Err  any             `json:"err"`
 	Msg  string          `json:"msg"`
 }
 
-type safelineCertList struct {
-	Nodes []safelineCertItem `json:"nodes"`
-	Total int                `json:"total"`
+type certList struct {
+	Nodes []certItem `json:"nodes"`
+	Total int        `json:"total"`
 }
 
-type safelineCertItem struct {
+type certItem struct {
 	ID          int64    `json:"id"`
 	Domains     []string `json:"domains"`
 	Issuer      string   `json:"issuer"`
 	ValidBefore string   `json:"valid_before"`
 }
 
-func newSafelineClient(target model.ACMESafelineTarget) *safelineClient {
+func newClient(target model.ACMESafelineTarget) *client {
 	transport := &http.Transport{}
 	if bool(target.SkipTLSVerify) {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // 雷池常见自签证书部署场景。
 	}
-	return &safelineClient{
+	return &client{
 		baseURL: strings.TrimRight(target.BaseURL, "/"),
 		token:   target.APIToken,
 		http: &http.Client{
@@ -54,17 +54,17 @@ func newSafelineClient(target model.ACMESafelineTarget) *safelineClient {
 	}
 }
 
-func (c *safelineClient) ListCerts() (*safelineCertList, error) {
-	var out safelineCertList
+func (c *client) ListCerts() (*certList, error) {
+	var out certList
 	if err := c.doJSON(http.MethodGet, "/api/open/cert", nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *safelineClient) UpsertCert(certID int64, certType int, crt, key string) (int64, error) {
+func (c *client) UpsertCert(certID int64, certType int, crt, key string) (int64, error) {
 	body := map[string]any{
-		"type": normalizeSafelineCertType(certType),
+		"type": normalizeCertType(certType),
 		"manual": map[string]string{
 			"crt": crt,
 			"key": key,
@@ -80,9 +80,9 @@ func (c *safelineClient) UpsertCert(certID int64, certType int, crt, key string)
 	return id, nil
 }
 
-func (c *safelineClient) CreateCert(certType int, crt, key string) (int64, error) {
+func (c *client) CreateCert(certType int, crt, key string) (int64, error) {
 	body := map[string]any{
-		"type": normalizeSafelineCertType(certType),
+		"type": normalizeCertType(certType),
 		"manual": map[string]string{
 			"crt": crt,
 			"key": key,
@@ -95,14 +95,14 @@ func (c *safelineClient) CreateCert(certType int, crt, key string) (int64, error
 	return id, nil
 }
 
-func normalizeSafelineCertType(certType int) int {
+func normalizeCertType(certType int) int {
 	if certType <= 0 {
 		return 2
 	}
 	return certType
 }
 
-func (c *safelineClient) doJSON(method, path string, body any, out any) error {
+func (c *client) doJSON(method, path string, body any, out any) error {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -132,7 +132,7 @@ func (c *safelineClient) doJSON(method, path string, body any, out any) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("雷池 API HTTP %d：%s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
-	var wrap safelineResponse
+	var wrap response
 	if err := json.Unmarshal(data, &wrap); err != nil {
 		return fmt.Errorf("解析雷池响应失败：%w", err)
 	}
@@ -147,7 +147,7 @@ func (c *safelineClient) doJSON(method, path string, body any, out any) error {
 		return nil
 	}
 	if p, ok := out.(*int64); ok {
-		id, err := decodeSafelineID(wrap.Data)
+		id, err := decodeID(wrap.Data)
 		if err != nil {
 			return err
 		}
@@ -160,7 +160,7 @@ func (c *safelineClient) doJSON(method, path string, body any, out any) error {
 	return json.Unmarshal(wrap.Data, out)
 }
 
-func decodeSafelineID(data json.RawMessage) (int64, error) {
+func decodeID(data json.RawMessage) (int64, error) {
 	var n int64
 	if err := json.Unmarshal(data, &n); err == nil {
 		return n, nil

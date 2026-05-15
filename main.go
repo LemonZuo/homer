@@ -6,6 +6,8 @@ import (
 	"log"
 
 	"github.com/LemonZuo/homer/internal/acme"
+	acmesafeline "github.com/LemonZuo/homer/internal/acme/deployer/safeline"
+	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
 	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/buildinfo"
 	"github.com/LemonZuo/homer/internal/cas"
@@ -41,7 +43,7 @@ func main() {
 
 	acmeStore := acme.NewCredentialStore(gormDB)
 	acmeAccounts := acme.NewAccountStore(gormDB)
-	acmeDeployRegistry := acme.NewDeployRegistry(acme.NewSSHDeployDriver(), acme.NewSafelineDeployDriver())
+	acmeDeployRegistry := acme.NewDeployRegistry(acmessh.NewDriver(), acmesafeline.NewDriver())
 	acmeDeployTargets := acme.NewDeployTargetStore(gormDB, acmeDeployRegistry)
 	acmeDeployConfigs := acme.NewDeployConfigStore(gormDB, acmeDeployTargets, acmeDeployRegistry)
 	acmeMgr := acme.NewManager(cfg.ACMEDataDir)

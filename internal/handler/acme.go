@@ -9,6 +9,9 @@ import (
 	"strconv"
 
 	"github.com/LemonZuo/homer/internal/acme"
+	acmesafeline "github.com/LemonZuo/homer/internal/acme/deployer/safeline"
+	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
+	acmeproviders "github.com/LemonZuo/homer/internal/acme/providers"
 	"github.com/LemonZuo/homer/internal/model"
 
 	"github.com/gin-gonic/gin"
@@ -16,11 +19,21 @@ import (
 
 // ACMEHandler ACME 自动签发接口。
 type ACMEHandler struct {
-	svc *acme.Service
+	svc             *acme.Service
+	sshTargets      *acmessh.TargetStore
+	sshDeploys      *acmessh.DeployConfigStore
+	safelineTargets *acmesafeline.TargetStore
+	safelineDeploys *acmesafeline.DeployConfigStore
 }
 
 func NewACMEHandler(svc *acme.Service) *ACMEHandler {
-	return &ACMEHandler{svc: svc}
+	return &ACMEHandler{
+		svc:             svc,
+		sshTargets:      acmessh.NewTargetStore(svc.DeployTargets()),
+		sshDeploys:      acmessh.NewDeployConfigStore(svc.DeployConfigs()),
+		safelineTargets: acmesafeline.NewTargetStore(svc.DeployTargets()),
+		safelineDeploys: acmesafeline.NewDeployConfigStore(svc.DeployConfigs()),
+	}
 }
 
 type deployTargetPayload struct {
@@ -187,7 +200,7 @@ func (h *ACMEHandler) deleteAccount(c *gin.Context) {
 }
 
 func (h *ACMEHandler) listSSHTargets(c *gin.Context) {
-	items, err := h.svc.SSHTargets().List()
+	items, err := h.sshTargets.List()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -202,7 +215,7 @@ func (h *ACMEHandler) upsertSSHTarget(c *gin.Context) {
 		return
 	}
 	t.ID = 0
-	row, err := h.svc.SSHTargets().Upsert(&t)
+	row, err := h.sshTargets.Upsert(&t)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -222,7 +235,7 @@ func (h *ACMEHandler) updateSSHTarget(c *gin.Context) {
 		return
 	}
 	t.ID = id
-	row, err := h.svc.SSHTargets().Upsert(&t)
+	row, err := h.sshTargets.Upsert(&t)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -236,7 +249,7 @@ func (h *ACMEHandler) deleteSSHTarget(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
 		return
 	}
-	if err := h.svc.SSHTargets().Delete(id); err != nil {
+	if err := h.sshTargets.Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -244,7 +257,7 @@ func (h *ACMEHandler) deleteSSHTarget(c *gin.Context) {
 }
 
 func (h *ACMEHandler) listSafelineTargets(c *gin.Context) {
-	items, err := h.svc.SafelineTargets().List()
+	items, err := h.safelineTargets.List()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -259,7 +272,7 @@ func (h *ACMEHandler) upsertSafelineTarget(c *gin.Context) {
 		return
 	}
 	t.ID = 0
-	row, err := h.svc.SafelineTargets().Upsert(&t)
+	row, err := h.safelineTargets.Upsert(&t)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -279,7 +292,7 @@ func (h *ACMEHandler) updateSafelineTarget(c *gin.Context) {
 		return
 	}
 	t.ID = id
-	row, err := h.svc.SafelineTargets().Upsert(&t)
+	row, err := h.safelineTargets.Upsert(&t)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -293,7 +306,7 @@ func (h *ACMEHandler) deleteSafelineTarget(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
 		return
 	}
-	if err := h.svc.SafelineTargets().Delete(id); err != nil {
+	if err := h.safelineTargets.Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -306,7 +319,7 @@ func (h *ACMEHandler) testSafelineTarget(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
 		return
 	}
-	if err := h.svc.SafelineTargets().Test(id); err != nil {
+	if err := h.safelineTargets.Test(id); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -488,7 +501,7 @@ func (h *ACMEHandler) listSSHDeployConfigs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
 		return
 	}
-	items, err := h.svc.SSHDeploys().ListByDomain(domainID)
+	items, err := h.sshDeploys.ListByDomain(domainID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -508,7 +521,7 @@ func (h *ACMEHandler) upsertSSHDeployConfig(c *gin.Context) {
 		return
 	}
 	cfg.ID = 0
-	row, err := h.svc.SSHDeploys().Upsert(domainID, &cfg)
+	row, err := h.sshDeploys.Upsert(domainID, &cfg)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -532,7 +545,7 @@ func (h *ACMEHandler) updateSSHDeployConfig(c *gin.Context) {
 		return
 	}
 	cfg.ID = id
-	row, err := h.svc.SSHDeploys().Upsert(cfg.DomainID, &cfg)
+	row, err := h.sshDeploys.Upsert(cfg.DomainID, &cfg)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -546,7 +559,7 @@ func (h *ACMEHandler) deleteSSHDeployConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
 		return
 	}
-	if err := h.svc.SSHDeploys().Delete(id); err != nil {
+	if err := h.sshDeploys.Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -559,7 +572,7 @@ func (h *ACMEHandler) listSafelineDeployConfigs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
 		return
 	}
-	items, err := h.svc.SafelineDeploys().ListByDomain(domainID)
+	items, err := h.safelineDeploys.ListByDomain(domainID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -579,7 +592,7 @@ func (h *ACMEHandler) upsertSafelineDeployConfig(c *gin.Context) {
 		return
 	}
 	cfg.ID = 0
-	row, err := h.svc.SafelineDeploys().Upsert(domainID, &cfg)
+	row, err := h.safelineDeploys.Upsert(domainID, &cfg)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -603,7 +616,7 @@ func (h *ACMEHandler) updateSafelineDeployConfig(c *gin.Context) {
 		return
 	}
 	cfg.ID = id
-	row, err := h.svc.SafelineDeploys().Upsert(cfg.DomainID, &cfg)
+	row, err := h.safelineDeploys.Upsert(cfg.DomainID, &cfg)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -617,7 +630,7 @@ func (h *ACMEHandler) deleteSafelineDeployConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
 		return
 	}
-	if err := h.svc.SafelineDeploys().Delete(id); err != nil {
+	if err := h.safelineDeploys.Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -647,10 +660,10 @@ func (h *ACMEHandler) upsertCredential(c *gin.Context) {
 	if !body.SkipCheck {
 		envs := map[string]string{}
 		_ = json.Unmarshal([]byte(body.EnvsJSON), &envs)
-		switch err := acme.Validate(body.Provider, envs); {
+		switch err := acmeproviders.Validate(body.Provider, envs); {
 		case err == nil:
 			// 校验通过，继续保存
-		case errors.Is(err, acme.ErrNoValidator):
+		case errors.Is(err, acmeproviders.ErrNoValidator):
 			// 未注册深度校验的 provider，允许保存，但带提示给前端
 			warn = err.Error()
 		default:
@@ -816,13 +829,14 @@ func (h *ACMEHandler) deploySSH(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	taskID, err := h.svc.DeploySSHTaskAsync(id, body.TargetID, acme.SSHDeployOptions{
+	configJSON := acme.MustJSON(acmessh.DeployOptions{
 		CertPath:      body.CertPath,
 		KeyPath:       body.KeyPath,
 		ChainPath:     body.ChainPath,
 		FullchainPath: body.FullchainPath,
 		DeployCommand: body.DeployCommand,
 	})
+	taskID, err := h.svc.DeployAdHocTaskAsync(id, body.TargetID, acme.DeployKindSSH, configJSON)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

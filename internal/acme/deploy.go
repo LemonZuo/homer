@@ -328,11 +328,3 @@ func deployConfigName(c model.ACMEDeployConfig) string {
 	}
 	return fmt.Sprintf("#%d", c.ID)
 }
-
-func mustJSON(v any) string {
-	data, err := jsonMarshalIndent(v)
-	if err != nil {
-		return "{}"
-	}
-	return string(data)
-}

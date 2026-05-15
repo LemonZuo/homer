@@ -1,4 +1,7 @@
-package acme
+// Package acmessh 是 ACME 证书的 SSH 部署 driver 实现。
+// 与 safeline 子包平行：core（internal/acme）只持有 DeployDriver 接口与通用 store，
+// 具体 driver 拆到各自子包，互不影响。
+package acmessh
 
 import (
 	"bytes"
@@ -11,13 +14,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LemonZuo/homer/internal/acme"
 	"github.com/LemonZuo/homer/internal/model"
 	"golang.org/x/crypto/ssh"
 )
 
-type SSHDeployDriver struct{}
+// Driver 实现 acme.DeployDriver，把证书写到远端 SSH 机器并执行部署命令。
+type Driver struct{}
 
-type SSHTargetAuth struct {
+// TargetAuth 是 acme_deploy_target.auth_json 在 SSH 场景下的结构。
+type TargetAuth struct {
 	Username   string `json:"username"`
 	AuthType   string `json:"auth_type"`
 	Password   string `json:"password"`
@@ -25,31 +31,29 @@ type SSHTargetAuth struct {
 	Passphrase string `json:"passphrase"`
 }
 
-type SSHDeployTargetConfig struct{}
+func NewDriver() *Driver { return &Driver{} }
 
-func NewSSHDeployDriver() *SSHDeployDriver { return &SSHDeployDriver{} }
+func (d *Driver) Kind() string  { return acme.DeployKindSSH }
+func (d *Driver) Label() string { return "SSH 机器" }
 
-func (d *SSHDeployDriver) Kind() string  { return DeployKindSSH }
-func (d *SSHDeployDriver) Label() string { return "SSH 机器" }
-
-func (d *SSHDeployDriver) ValidateTarget(target model.ACMEDeployTarget) error {
-	t, err := sshTargetFromDeployTarget(target)
+func (d *Driver) ValidateTarget(target model.ACMEDeployTarget) error {
+	t, err := targetFromDeployTarget(target)
 	if err != nil {
 		return err
 	}
-	return validateSSHTarget(*t)
+	return validateTarget(*t)
 }
 
-func (d *SSHDeployDriver) ValidateConfig(_ model.ACMEDeployTarget, cfg model.ACMEDeployConfig) error {
-	opts, err := sshDeployOptionsFromGenericConfig(cfg, "")
+func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, cfg model.ACMEDeployConfig) error {
+	opts, err := optionsFromGenericConfig(cfg, "")
 	if err != nil {
 		return err
 	}
 	return opts.validate()
 }
 
-func (d *SSHDeployDriver) TestTarget(_ context.Context, target model.ACMEDeployTarget) error {
-	t, err := sshTargetFromDeployTarget(target)
+func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) error {
+	t, err := targetFromDeployTarget(target)
 	if err != nil {
 		return err
 	}
@@ -71,27 +75,27 @@ func (d *SSHDeployDriver) TestTarget(_ context.Context, target model.ACMEDeployT
 	return client.Close()
 }
 
-func (d *SSHDeployDriver) Deploy(_ context.Context, req DeployRequest) (*DeployResult, error) {
-	target, err := sshTargetFromDeployTarget(req.Target)
+func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
+	target, err := targetFromDeployTarget(req.Target)
 	if err != nil {
 		return nil, err
 	}
-	opts, err := sshDeployOptionsFromGenericConfig(req.Config, req.Domain.MainDomain)
+	opts, err := optionsFromGenericConfig(req.Config, req.Domain.MainDomain)
 	if err != nil {
 		return nil, err
 	}
 	if req.Logf != nil {
-		req.Logf("SSH 目标：%s", sshTargetSummary(*target))
+		req.Logf("SSH 目标：%s", targetSummary(*target))
 	}
-	if err := deployCertViaSSH(nil, *target, req.Cert, opts); err != nil {
+	if err := deployCert(req.Logf, *target, req.Cert, opts); err != nil {
 		return nil, err
 	}
-	return &DeployResult{}, nil
+	return &acme.DeployResult{}, nil
 }
 
-// SSHDeployOptions 描述一次部署的远端路径和部署后命令。
+// DeployOptions 描述一次部署的远端路径和部署后命令。
 // 支持在路径和命令里使用 {domain} 占位符。
-type SSHDeployOptions struct {
+type DeployOptions struct {
 	Domain        string `json:"-"`
 	CertPath      string `json:"cert_path"`
 	KeyPath       string `json:"key_path"`
@@ -100,7 +104,7 @@ type SSHDeployOptions struct {
 	DeployCommand string `json:"deploy_command"`
 }
 
-func (o *SSHDeployOptions) normalize() {
+func (o *DeployOptions) normalize() {
 	o.CertPath = strings.TrimSpace(o.CertPath)
 	o.KeyPath = strings.TrimSpace(o.KeyPath)
 	o.ChainPath = strings.TrimSpace(o.ChainPath)
@@ -108,7 +112,7 @@ func (o *SSHDeployOptions) normalize() {
 	o.DeployCommand = strings.TrimSpace(o.DeployCommand)
 }
 
-func (o SSHDeployOptions) validate() error {
+func (o DeployOptions) validate() error {
 	if strings.TrimSpace(o.KeyPath) == "" {
 		return errors.New("远端 key.pem 路径不能为空")
 	}
@@ -118,12 +122,12 @@ func (o SSHDeployOptions) validate() error {
 	return nil
 }
 
-func sshTargetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget, error) {
-	auth := SSHTargetAuth{}
-	if err := jsonUnmarshal([]byte(emptyJSON(target.AuthJSON)), &auth); err != nil {
+func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget, error) {
+	auth := TargetAuth{}
+	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.AuthJSON)), &auth); err != nil {
 		return nil, fmt.Errorf("解析 SSH 认证配置失败：%w", err)
 	}
-	host, port, err := splitSSHEndpoint(target.Endpoint)
+	host, port, err := splitEndpoint(target.Endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -141,18 +145,18 @@ func sshTargetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTar
 		CreatedAt:  target.CreatedAt,
 		UpdatedAt:  target.UpdatedAt,
 	}
-	normalizeSSHTarget(out)
+	normalizeTarget(out)
 	return out, nil
 }
 
-func deployTargetFromSSHTarget(t model.ACMESSHTarget) model.ACMEDeployTarget {
-	normalizeSSHTarget(&t)
+func deployTargetFromTarget(t model.ACMESSHTarget) model.ACMEDeployTarget {
+	normalizeTarget(&t)
 	return model.ACMEDeployTarget{
 		ID:       t.ID,
 		Name:     t.Name,
-		Kind:     DeployKindSSH,
+		Kind:     acme.DeployKindSSH,
 		Endpoint: net.JoinHostPort(t.Host, strconv.Itoa(t.Port)),
-		AuthJSON: mustJSON(SSHTargetAuth{
+		AuthJSON: acme.MustJSON(TargetAuth{
 			Username:   t.Username,
 			AuthType:   t.AuthType,
 			Password:   t.Password,
@@ -166,9 +170,9 @@ func deployTargetFromSSHTarget(t model.ACMESSHTarget) model.ACMEDeployTarget {
 	}
 }
 
-func sshDeployOptionsFromGenericConfig(cfg model.ACMEDeployConfig, domain string) (SSHDeployOptions, error) {
-	var opts SSHDeployOptions
-	if err := jsonUnmarshal([]byte(emptyJSON(cfg.ConfigJSON)), &opts); err != nil {
+func optionsFromGenericConfig(cfg model.ACMEDeployConfig, domain string) (DeployOptions, error) {
+	var opts DeployOptions
+	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(cfg.ConfigJSON)), &opts); err != nil {
 		return opts, fmt.Errorf("解析 SSH 部署配置失败：%w", err)
 	}
 	opts.Domain = domain
@@ -176,15 +180,15 @@ func sshDeployOptionsFromGenericConfig(cfg model.ACMEDeployConfig, domain string
 	return opts, nil
 }
 
-func genericConfigFromSSHDeployConfig(cfg model.ACMESSHDeployConfig) model.ACMEDeployConfig {
-	normalizeSSHDeployConfig(&cfg)
+func genericConfigFromDeployConfig(cfg model.ACMESSHDeployConfig) model.ACMEDeployConfig {
+	normalizeDeployConfig(&cfg)
 	return model.ACMEDeployConfig{
 		ID:       cfg.ID,
 		DomainID: cfg.DomainID,
 		TargetID: cfg.TargetID,
-		Kind:     DeployKindSSH,
+		Kind:     acme.DeployKindSSH,
 		Name:     cfg.Name,
-		ConfigJSON: mustJSON(SSHDeployOptions{
+		ConfigJSON: acme.MustJSON(DeployOptions{
 			CertPath:      cfg.CertPath,
 			KeyPath:       cfg.KeyPath,
 			ChainPath:     cfg.ChainPath,
@@ -199,8 +203,8 @@ func genericConfigFromSSHDeployConfig(cfg model.ACMESSHDeployConfig) model.ACMED
 	}
 }
 
-func sshDeployConfigFromGenericConfig(cfg model.ACMEDeployConfig) model.ACMESSHDeployConfig {
-	opts, _ := sshDeployOptionsFromGenericConfig(cfg, "")
+func deployConfigFromGenericConfig(cfg model.ACMEDeployConfig) model.ACMESSHDeployConfig {
+	opts, _ := optionsFromGenericConfig(cfg, "")
 	return model.ACMESSHDeployConfig{
 		ID:            cfg.ID,
 		DomainID:      cfg.DomainID,
@@ -218,7 +222,7 @@ func sshDeployConfigFromGenericConfig(cfg model.ACMEDeployConfig) model.ACMESSHD
 	}
 }
 
-func splitSSHEndpoint(endpoint string) (string, int, error) {
+func splitEndpoint(endpoint string) (string, int, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return "", 0, errors.New("SSH 主机不能为空")
@@ -242,18 +246,11 @@ func splitSSHEndpoint(endpoint string) (string, int, error) {
 	return endpoint, 22, nil
 }
 
-func sshTargetSummary(t model.ACMESSHTarget) string {
+func targetSummary(t model.ACMESSHTarget) string {
 	return fmt.Sprintf("%s@%s:%d", t.Username, t.Host, t.Port)
 }
 
-func emptyJSON(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "{}"
-	}
-	return s
-}
-
-func deployCertViaSSH(logw *teeWriter, target model.ACMESSHTarget, cert model.ACMECert, opts SSHDeployOptions) error {
+func deployCert(logf func(string, ...any), target model.ACMESSHTarget, cert model.ACMECert, opts DeployOptions) error {
 	opts.normalize()
 	if err := opts.validate(); err != nil {
 		return err
@@ -269,8 +266,8 @@ func deployCertViaSSH(logw *teeWriter, target model.ACMESSHTarget, cert model.AC
 		Timeout:         15 * time.Second,
 	}
 	addr := fmt.Sprintf("%s:%d", target.Host, target.Port)
-	if logw != nil {
-		logf(logw, "连接 SSH：%s@%s", target.Username, addr)
+	if logf != nil {
+		logf("连接 SSH：%s@%s", target.Username, addr)
 	}
 	client, err := ssh.Dial("tcp", addr, cfg)
 	if err != nil {
@@ -284,10 +281,10 @@ func deployCertViaSSH(logw *teeWriter, target model.ACMESSHTarget, cert model.AC
 		data  string
 		mode  string
 	}{
-		{label: "cert.pem", path: renderSSHDeployTemplate(opts.CertPath, opts.Domain), data: cert.CertPEM, mode: "0644"},
-		{label: "chain.pem", path: renderSSHDeployTemplate(opts.ChainPath, opts.Domain), data: cert.ChainPEM, mode: "0644"},
-		{label: "fullchain.pem", path: renderSSHDeployTemplate(opts.FullchainPath, opts.Domain), data: cert.FullchainPEM, mode: "0644"},
-		{label: "key.pem", path: renderSSHDeployTemplate(opts.KeyPath, opts.Domain), data: cert.KeyPEM, mode: "0600"},
+		{label: "cert.pem", path: renderTemplate(opts.CertPath, opts.Domain), data: cert.CertPEM, mode: "0644"},
+		{label: "chain.pem", path: renderTemplate(opts.ChainPath, opts.Domain), data: cert.ChainPEM, mode: "0644"},
+		{label: "fullchain.pem", path: renderTemplate(opts.FullchainPath, opts.Domain), data: cert.FullchainPEM, mode: "0644"},
+		{label: "key.pem", path: renderTemplate(opts.KeyPath, opts.Domain), data: cert.KeyPEM, mode: "0600"},
 	}
 	for _, f := range files {
 		if strings.TrimSpace(f.path) == "" {
@@ -299,19 +296,19 @@ func deployCertViaSSH(logw *teeWriter, target model.ACMESSHTarget, cert model.AC
 		if err := writeRemoteFile(client, f.path, []byte(f.data), f.mode); err != nil {
 			return fmt.Errorf("写入远端 %s 失败：%w", f.path, err)
 		}
-		if logw != nil {
-			logf(logw, "已写入远端文件：%s", f.path)
+		if logf != nil {
+			logf("已写入远端文件：%s", f.path)
 		}
 	}
 
-	cmd := renderSSHDeployTemplate(opts.DeployCommand, opts.Domain)
+	cmd := renderTemplate(opts.DeployCommand, opts.Domain)
 	if strings.TrimSpace(cmd) != "" {
-		if logw != nil {
-			logf(logw, "执行部署命令：%s", cmd)
+		if logf != nil {
+			logf("执行部署命令：%s", cmd)
 		}
 		out, err := runRemoteCommand(client, cmd, nil)
-		if logw != nil && strings.TrimSpace(out) != "" {
-			logf(logw, "命令输出：\n%s", strings.TrimSpace(out))
+		if logf != nil && strings.TrimSpace(out) != "" {
+			logf("命令输出：\n%s", strings.TrimSpace(out))
 		}
 		if err != nil {
 			return fmt.Errorf("部署命令执行失败：%w", err)
@@ -320,7 +317,7 @@ func deployCertViaSSH(logw *teeWriter, target model.ACMESSHTarget, cert model.AC
 	return nil
 }
 
-func renderSSHDeployTemplate(s, domain string) string {
+func renderTemplate(s, domain string) string {
 	return strings.ReplaceAll(s, "{domain}", domain)
 }
 
@@ -375,4 +372,57 @@ func runRemoteCommand(client *ssh.Client, cmd string, stdin []byte) (string, err
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+func normalizeTarget(t *model.ACMESSHTarget) {
+	t.Name = strings.TrimSpace(t.Name)
+	t.Host = strings.TrimSpace(t.Host)
+	t.Username = strings.TrimSpace(t.Username)
+	t.AuthType = strings.ToLower(strings.TrimSpace(t.AuthType))
+	t.Password = strings.TrimSpace(t.Password)
+	t.PrivateKey = strings.TrimSpace(t.PrivateKey)
+	t.Passphrase = strings.TrimSpace(t.Passphrase)
+	if t.Port <= 0 {
+		t.Port = 22
+	}
+	if t.AuthType == "" {
+		t.AuthType = "password"
+	}
+}
+
+func validateTarget(t model.ACMESSHTarget) error {
+	if t.Name == "" {
+		return errors.New("目标名称不能为空")
+	}
+	if t.Host == "" {
+		return errors.New("SSH 主机不能为空")
+	}
+	if t.Username == "" {
+		return errors.New("SSH 用户名不能为空")
+	}
+	if t.Port <= 0 || t.Port > 65535 {
+		return errors.New("SSH 端口无效")
+	}
+	switch t.AuthType {
+	case "password":
+		if t.Password == "" {
+			return errors.New("密码认证需要填写密码")
+		}
+	case "key":
+		if t.PrivateKey == "" {
+			return errors.New("证书模式需要填写私钥")
+		}
+	default:
+		return errors.New("认证方式仅支持 password / key")
+	}
+	return nil
+}
+
+func normalizeDeployConfig(c *model.ACMESSHDeployConfig) {
+	c.Name = strings.TrimSpace(c.Name)
+	c.CertPath = strings.TrimSpace(c.CertPath)
+	c.KeyPath = strings.TrimSpace(c.KeyPath)
+	c.ChainPath = strings.TrimSpace(c.ChainPath)
+	c.FullchainPath = strings.TrimSpace(c.FullchainPath)
+	c.DeployCommand = strings.TrimSpace(c.DeployCommand)
 }
