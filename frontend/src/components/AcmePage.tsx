@@ -15,7 +15,6 @@ import {
   Send,
   ChevronLeft,
   ChevronRight,
-  MoreHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -51,12 +50,6 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from './ui/drawer'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu'
 import { cn } from '../lib/utils'
 
 interface Domain {
@@ -902,7 +895,7 @@ export default function AcmePage() {
           </Button>
           <Button
             size="sm"
-            className="col-span-2 h-10 w-full sm:col-span-1 sm:h-8 sm:w-auto"
+            className="hidden h-10 w-full sm:inline-flex sm:h-8 sm:w-auto"
             onClick={() => {
               setEditTarget(null)
               setEditOpen(true)
@@ -913,6 +906,18 @@ export default function AcmePage() {
           </Button>
         </div>
       </div>
+
+      <Button
+        size="icon"
+        onClick={() => {
+          setEditTarget(null)
+          setEditOpen(true)
+        }}
+        className="fixed bottom-[calc(env(safe-area-inset-bottom)+6rem)] right-5 z-30 h-12 w-12 rounded-full shadow-lg active:scale-95 sm:hidden"
+        aria-label="新增域名"
+      >
+        <Plus className="h-5 w-5" />
+      </Button>
 
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {domains.map((d) => {
@@ -984,11 +989,11 @@ export default function AcmePage() {
                 {revoked && <FieldRow label="吊销" value={fmtDate(d.revoked_at)} />}
               </div>
 
-              <div className="mt-3 flex flex-col gap-2 px-4 pb-4 sm:flex-row">
+              <div className="mt-3 grid grid-cols-3 gap-2 px-4 pb-4 sm:flex sm:gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-10 w-full sm:h-8 sm:flex-1"
+                  className="h-9 sm:h-8 sm:flex-1"
                   onClick={() => startIssue(d)}
                   disabled={busy !== null}
                 >
@@ -999,75 +1004,63 @@ export default function AcmePage() {
                   )}
                   {issueLabel}
                 </Button>
-                <div className="grid grid-cols-4 gap-2 sm:flex">
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    className="h-10 w-full sm:h-8 sm:w-8"
-                    onClick={() => startUploadCAS(d)}
-                    disabled={busy !== null || !d.not_after || revoked}
-                    title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '上传当前证书到 CAS'}
-                  >
-                    {uploadingCAS ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <UploadCloud className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    className="h-10 w-full sm:h-8 sm:w-8"
-                    onClick={() => openDeployConfigs(d)}
-                    disabled={busy !== null}
-                    title="部署配置"
-                  >
-                    <Send className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    className="h-10 w-full sm:h-8 sm:w-8"
-                    onClick={() => {
-                      setEditTarget(d)
-                      setEditOpen(true)
-                    }}
-                    disabled={busy !== null}
-                    title="编辑域名"
-                  >
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        className="h-10 w-full sm:h-8 sm:w-8"
-                        disabled={busy !== null}
-                        title="更多操作"
-                      >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        disabled={!d.not_after || revoked}
-                        onSelect={() => setRevokePending(d)}
-                        className="text-rose-600 focus:text-rose-600 dark:text-rose-400 dark:focus:text-rose-400"
-                      >
-                        <Ban className="h-3.5 w-3.5" />
-                        吊销证书
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => setDeletePending(d)}
-                        className="text-rose-600 focus:text-rose-600 dark:text-rose-400 dark:focus:text-rose-400"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        删除域名
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-9 w-full sm:h-8 sm:w-8"
+                  onClick={() => startUploadCAS(d)}
+                  disabled={busy !== null || !d.not_after || revoked}
+                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '上传当前证书到 CAS'}
+                >
+                  {uploadingCAS ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-9 w-full sm:h-8 sm:w-8"
+                  onClick={() => openDeployConfigs(d)}
+                  disabled={busy !== null}
+                  title="部署配置"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-9 w-full sm:h-8 sm:w-8"
+                  onClick={() => {
+                    setEditTarget(d)
+                    setEditOpen(true)
+                  }}
+                  disabled={busy !== null}
+                  title="编辑域名"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-9 w-full hover:text-destructive sm:h-8 sm:w-8"
+                  onClick={() => setRevokePending(d)}
+                  disabled={busy !== null || !d.not_after || revoked}
+                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '吊销当前证书'}
+                >
+                  <Ban className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-9 w-full hover:text-destructive sm:h-8 sm:w-8"
+                  onClick={() => setDeletePending(d)}
+                  disabled={busy !== null}
+                  title="删除域名"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
             </Card>
           )
