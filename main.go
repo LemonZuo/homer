@@ -5,10 +5,6 @@ import (
 	"io/fs"
 	"log"
 
-	"github.com/LemonZuo/homer/internal/acme"
-	acmesafeline "github.com/LemonZuo/homer/internal/acme/deployer/safeline"
-	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
-	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/buildinfo"
 	"github.com/LemonZuo/homer/internal/cas"
 	"github.com/LemonZuo/homer/internal/cdn"
@@ -17,7 +13,6 @@ import (
 	"github.com/LemonZuo/homer/internal/handler"
 	"github.com/LemonZuo/homer/internal/notify/wework"
 	"github.com/LemonZuo/homer/internal/router"
-	"github.com/LemonZuo/homer/internal/scheduler"
 )
 
 //go:embed all:frontend/dist
@@ -36,40 +31,14 @@ func main() {
 	notifier := wework.New(cfg.WeWorkCorpID, cfg.WeWorkAgentID, cfg.WeWorkSecret, cfg.WeWorkTagID)
 
 	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
-	cdnHandler := handler.NewCDNHandler(cdnSvc)
-
 	casSvc := cas.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
-	casHandler := handler.NewCASHandler(casSvc, cdnSvc)
 
-	acmeStore := acme.NewCredentialStore(gormDB)
-	acmeAccounts := acme.NewAccountStore(gormDB)
-	acmeDeployRegistry := acme.NewDeployRegistry(acmessh.NewDriver(), acmesafeline.NewDriver())
-	acmeDeployTargets := acme.NewDeployTargetStore(gormDB, acmeDeployRegistry)
-	acmeDeployConfigs := acme.NewDeployConfigStore(gormDB, acmeDeployTargets, acmeDeployRegistry)
-	acmeMgr := acme.NewManager(cfg.ACMEDataDir)
-	acmeHub := acme.NewSSEHub()
-	acmeSvc := acme.NewService(gormDB, acmeMgr, acmeStore, acmeAccounts, acmeDeployTargets, acmeDeployConfigs, acmeDeployRegistry, casSvc, acmeHub, cfg.ACMEDataDir, cfg.ACMERenewBeforeDays)
+	cdnHandler := handler.NewCDNHandler(cdnSvc)
+	casHandler := handler.NewCASHandler(casSvc, cdnSvc)
+	acmeSvc := buildACMEService(gormDB, cfg, casSvc)
 	acmeHandler := handler.NewACMEHandler(acmeSvc)
 
-	sched := scheduler.New()
-	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() {
-		birthday.RunOnce(gormDB, notifier)
-	}); err != nil {
-		log.Fatalf("register birthday task: %v", err)
-	}
-	if err := sched.Register("acme-renew", cfg.ACMERenewCron, func() {
-		ids, err := acmeSvc.RenewExpiring()
-		if err != nil {
-			log.Printf("acme renew scan: %v", err)
-			return
-		}
-		if len(ids) > 0 {
-			log.Printf("acme renew 触发：%v", ids)
-		}
-	}); err != nil {
-		log.Fatalf("register acme-renew task: %v", err)
-	}
-	sched.Start()
+	sched := startScheduler(gormDB, cfg, notifier, acmeSvc)
 	defer sched.Stop()
 
 	dist, err := fs.Sub(frontendFS, "frontend/dist")
