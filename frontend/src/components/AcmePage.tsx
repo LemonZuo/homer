@@ -1268,6 +1268,14 @@ export default function AcmePage() {
           setSSHEditOpen(true)
         }}
         onDeleteSSH={(t) => setSSHDeletePending(t)}
+        onTestSSH={async (t) => {
+          try {
+            await api.post(`/acme/ssh-targets/${t.id}/test`)
+            toast.success('连接正常')
+          } catch (e: any) {
+            toast.error(e?.response?.data?.error || e?.message || '连接失败')
+          }
+        }}
         onAddSafeline={() => {
           setSafeEditTarget(null)
           setSafeEditOpen(true)
@@ -1871,17 +1879,19 @@ function CredentialsDrawer({
                       {Object.keys(safeParseEnvs(c.envs_json)).join(', ') || '（空）'}
                     </div>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => onEdit(c)}>
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="hover:text-destructive"
-                    onClick={() => onDelete(c)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex gap-2 sm:contents">
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEdit(c)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 hover:text-destructive sm:flex-none"
+                      onClick={() => onDelete(c)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ))
@@ -1974,17 +1984,19 @@ function AccountsDrawer({
                       </div>
                     )}
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => onEdit(a)}>
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="hover:text-destructive"
-                    onClick={() => onDelete(a)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex gap-2 sm:contents">
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEdit(a)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 hover:text-destructive sm:flex-none"
+                      onClick={() => onDelete(a)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ))
@@ -2003,6 +2015,7 @@ interface DeployTargetsEntryDrawerProps {
   onAddSSH: () => void
   onEditSSH: (t: SSHTarget) => void
   onDeleteSSH: (t: SSHTarget) => void
+  onTestSSH: (t: SSHTarget) => void
   onAddSafeline: () => void
   onEditSafeline: (t: SafelineTarget) => void
   onDeleteSafeline: (t: SafelineTarget) => void
@@ -2017,6 +2030,7 @@ function DeployTargetsEntryDrawer({
   onAddSSH,
   onEditSSH,
   onDeleteSSH,
+  onTestSSH,
   onAddSafeline,
   onEditSafeline,
   onDeleteSafeline,
@@ -2070,17 +2084,22 @@ function DeployTargetsEntryDrawer({
                         {t.username}@{t.host}:{t.port || 22} · {authLabel(t.auth_type)}
                       </div>
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => onEditSSH(t)}>
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="hover:text-destructive"
-                      onClick={() => onDeleteSSH(t)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-2 sm:contents">
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTestSSH(t)} disabled={!t.enabled}>
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSSH(t)}>
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 hover:text-destructive sm:flex-none"
+                        onClick={() => onDeleteSSH(t)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               ))}
@@ -2130,20 +2149,22 @@ function DeployTargetsEntryDrawer({
                         {t.base_url}
                       </div>
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => onTestSafeline(t)} disabled={!t.enabled}>
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => onEditSafeline(t)}>
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="hover:text-destructive"
-                      onClick={() => onDeleteSafeline(t)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-2 sm:contents">
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTestSafeline(t)} disabled={!t.enabled}>
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSafeline(t)}>
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 hover:text-destructive sm:flex-none"
+                        onClick={() => onDeleteSafeline(t)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               ))}
@@ -2308,30 +2329,33 @@ function DeployConfigsDrawer({
                               {configPrimaryPath(cfg)}
                             </div>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => onDeploySSH(cfg)}
-                            disabled={!canDeploy}
-                            title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
-                          >
-                            {deploying ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Send className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => onEditSSH(cfg)}>
-                            <Edit3 className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="hover:text-destructive"
-                            onClick={() => onDeleteSSH(cfg)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <div className="flex gap-2 sm:contents">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 sm:flex-none"
+                              onClick={() => onDeploySSH(cfg)}
+                              disabled={!canDeploy}
+                              title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                            >
+                              {deploying ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Send className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSSH(cfg)}>
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 hover:text-destructive sm:flex-none"
+                              onClick={() => onDeleteSSH(cfg)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </div>
                       </Card>
                     )
@@ -2391,30 +2415,33 @@ function DeployConfigsDrawer({
                               cert_id={cfg.cert_id || '新增'} · type={cfg.cert_type || 2}
                             </div>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => onDeploySafeline(cfg)}
-                            disabled={!canDeploy}
-                            title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
-                          >
-                            {deploying ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <ShieldCheck className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => onEditSafeline(cfg)}>
-                            <Edit3 className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="hover:text-destructive"
-                            onClick={() => onDeleteSafeline(cfg)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <div className="flex gap-2 sm:contents">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 sm:flex-none"
+                              onClick={() => onDeploySafeline(cfg)}
+                              disabled={!canDeploy}
+                              title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                            >
+                              {deploying ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ShieldCheck className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSafeline(cfg)}>
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 hover:text-destructive sm:flex-none"
+                              onClick={() => onDeleteSafeline(cfg)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </div>
                       </Card>
                     )
@@ -2564,30 +2591,33 @@ export function SSHDeployConfigsDrawer({
                         {configPrimaryPath(cfg)}
                       </div>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onDeploy(cfg)}
-                      disabled={!canDeploy}
-                      title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
-                    >
-                      {deploying ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Send className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => onEdit(cfg)}>
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="hover:text-destructive"
-                      onClick={() => onDelete(cfg)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-2 sm:contents">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 sm:flex-none"
+                        onClick={() => onDeploy(cfg)}
+                        disabled={!canDeploy}
+                        title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                      >
+                        {deploying ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEdit(cfg)}>
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 hover:text-destructive sm:flex-none"
+                        onClick={() => onDelete(cfg)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               )
@@ -2933,30 +2963,33 @@ export function SafelineDeployConfigsDrawer({
                         cert_id={cfg.cert_id || '新增'} · type={cfg.cert_type || 2}
                       </div>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onDeploy(cfg)}
-                      disabled={!canDeploy}
-                      title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
-                    >
-                      {deploying ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => onEdit(cfg)}>
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="hover:text-destructive"
-                      onClick={() => onDelete(cfg)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex gap-2 sm:contents">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 sm:flex-none"
+                        onClick={() => onDeploy(cfg)}
+                        disabled={!canDeploy}
+                        title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                      >
+                        {deploying ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEdit(cfg)}>
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 hover:text-destructive sm:flex-none"
+                        onClick={() => onDelete(cfg)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </Card>
               )
@@ -3207,17 +3240,19 @@ export function SSHTargetsDrawer({
                       {t.username}@{t.host}:{t.port || 22} · {authLabel(t.auth_type)}
                     </div>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => onEdit(t)}>
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="hover:text-destructive"
-                    onClick={() => onDelete(t)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex gap-2 sm:contents">
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEdit(t)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 hover:text-destructive sm:flex-none"
+                      onClick={() => onDelete(t)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ))
@@ -3519,20 +3554,22 @@ export function SafelineTargetsDrawer({
                       {t.base_url}
                     </div>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => onTest(t)} disabled={!t.enabled}>
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => onEdit(t)}>
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="hover:text-destructive"
-                    onClick={() => onDelete(t)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex gap-2 sm:contents">
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTest(t)} disabled={!t.enabled}>
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEdit(t)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 hover:text-destructive sm:flex-none"
+                      onClick={() => onDelete(t)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ))

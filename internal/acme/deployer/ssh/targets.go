@@ -1,6 +1,7 @@
 package acmessh
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -60,4 +61,8 @@ func (s *TargetStore) Upsert(t *model.ACMESSHTarget) (*model.ACMESSHTarget, erro
 
 func (s *TargetStore) Delete(id int64) error {
 	return s.targets.Delete(id)
+}
+
+func (s *TargetStore) Test(id int64) error {
+	return s.targets.Test(context.Background(), id)
 }

@@ -93,6 +93,7 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.POST("/ssh-targets", h.upsertSSHTarget)
 	g.PUT("/ssh-targets/:id", h.updateSSHTarget)
 	g.DELETE("/ssh-targets/:id", h.deleteSSHTarget)
+	g.POST("/ssh-targets/:id/test", h.testSSHTarget)
 	g.GET("/safeline-targets", h.listSafelineTargets)
 	g.POST("/safeline-targets", h.upsertSafelineTarget)
 	g.PUT("/safeline-targets/:id", h.updateSafelineTarget)
@@ -254,6 +255,19 @@ func (h *ACMEHandler) deleteSSHTarget(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) testSSHTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.sshTargets.Test(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "连接正常"})
 }
 
 func (h *ACMEHandler) listSafelineTargets(c *gin.Context) {
