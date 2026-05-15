@@ -5,6 +5,9 @@ import (
 	"strings"
 
 	"github.com/LemonZuo/homer/internal/buildinfo"
+	"github.com/LemonZuo/homer/internal/handler"
+	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/notify/wework"
 	"github.com/LemonZuo/homer/internal/web"
 
 	"github.com/gin-contrib/cors"
@@ -19,10 +22,11 @@ type TableMeta struct {
 	Path  string `json:"path"`
 }
 
-// Tables 后续按需添加（证书、域名、提醒等）
-var Tables = []TableMeta{}
+var Tables = []TableMeta{
+	{Key: "birthday", Label: "生日提醒", Path: "birthday"},
+}
 
-func Setup(_ *gorm.DB, frontend fs.FS) *gin.Engine {
+func Setup(db *gorm.DB, notifier *wework.Client, frontend fs.FS) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
@@ -43,8 +47,8 @@ func Setup(_ *gorm.DB, frontend fs.FS) *gin.Engine {
 		})
 	})
 
-	// TODO: 后续在这里注册各业务模块的路由
-	// handler.NewCRUD[model.XXX](db).Register(api, "/xxx")
+	handler.NewCRUD[model.BirthdayRemind](db).Register(api, "/birthday")
+	api.POST("/birthday/:id/notify", handler.BirthdayNotify(db, notifier))
 
 	// 前端单页：未命中 /api/* 的请求都交给 embed 出来的 dist
 	spa := web.SPAHandler(frontend)

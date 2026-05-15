@@ -5,10 +5,13 @@ import (
 	"io/fs"
 	"log"
 
+	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/buildinfo"
 	"github.com/LemonZuo/homer/internal/config"
 	"github.com/LemonZuo/homer/internal/db"
+	"github.com/LemonZuo/homer/internal/notify/wework"
 	"github.com/LemonZuo/homer/internal/router"
+	"github.com/LemonZuo/homer/internal/scheduler"
 )
 
 //go:embed all:frontend/dist
@@ -24,12 +27,23 @@ func main() {
 		log.Fatalf("connect db: %v", err)
 	}
 
+	notifier := wework.New(cfg.WeWorkCorpID, cfg.WeWorkAgentID, cfg.WeWorkSecret, cfg.WeWorkTagID)
+
+	sched := scheduler.New()
+	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() {
+		birthday.RunOnce(gormDB, notifier)
+	}); err != nil {
+		log.Fatalf("register birthday task: %v", err)
+	}
+	sched.Start()
+	defer sched.Stop()
+
 	dist, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
 		log.Fatalf("sub frontend/dist: %v", err)
 	}
 
-	r := router.Setup(gormDB, dist)
+	r := router.Setup(gormDB, notifier, dist)
 	log.Printf("server listening on %s", cfg.ListenURL())
 	if err := r.Run(cfg.ListenAddr()); err != nil {
 		log.Fatalf("run server: %v", err)

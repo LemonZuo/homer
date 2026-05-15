@@ -1,3 +1,88 @@
 package model
 
-// 业务模型留空，后续按需添加（证书、域名、提醒等）。
+import (
+	"database/sql/driver"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/LemonZuo/homer/internal/chinesedate"
+	"gorm.io/gorm"
+)
+
+// BoolFlag 桥接老库的 varchar("0"/"1") 与前端 / Go 侧的 bool。
+//   - DB 读写：通过 Scan / Value，物理列保持 varchar
+//   - JSON：序列化为 true / false，便于前端 Switch 控件直接使用
+type BoolFlag bool
+
+func (b *BoolFlag) Scan(v any) error {
+	switch s := v.(type) {
+	case nil:
+		*b = false
+	case bool:
+		*b = BoolFlag(s)
+	case []byte:
+		*b = BoolFlag(string(s) == "1")
+	case string:
+		*b = BoolFlag(s == "1")
+	case int64:
+		*b = BoolFlag(s != 0)
+	default:
+		return fmt.Errorf("BoolFlag: unsupported scan type %T", v)
+	}
+	return nil
+}
+
+func (b BoolFlag) Value() (driver.Value, error) {
+	if b {
+		return "1", nil
+	}
+	return "0", nil
+}
+
+func (b BoolFlag) MarshalJSON() ([]byte, error) {
+	if b {
+		return []byte("true"), nil
+	}
+	return []byte("false"), nil
+}
+
+func (b *BoolFlag) UnmarshalJSON(data []byte) error {
+	s := strings.TrimSpace(string(data))
+	switch s {
+	case "true", "1", `"1"`, `"true"`:
+		*b = true
+	case "false", "0", `"0"`, `"false"`, "null", `""`:
+		*b = false
+	default:
+		return fmt.Errorf("BoolFlag: invalid json value %s", s)
+	}
+	return nil
+}
+
+// BirthdayRemind 复用老 ruoyi 表 sys_birthday_remind 的字段结构。
+// 公历日期由用户输入，chinese_birthday / zodiac 在 BeforeSave 钩子自动计算。
+type BirthdayRemind struct {
+	ID              int      `gorm:"primaryKey;column:remind_id" json:"id"`
+	Name            string   `gorm:"column:remind_name;size:30" json:"name"`
+	Birthday        string   `gorm:"column:remind_birthday;size:10" json:"birthday"`
+	ChineseBirthday string   `gorm:"column:remind_chinese_birthday;size:30" json:"chinese_birthday"`
+	Zodiac          string   `gorm:"column:remind_zodiac;size:30" json:"zodiac"`
+	IsRemind        BoolFlag `gorm:"column:is_remind;type:varchar(1);default:'1'" json:"is_remind"`
+}
+
+func (BirthdayRemind) TableName() string { return "sys_birthday_remind" }
+
+// BeforeSave 在 Create / Update 时自动根据公历生日回填 chinese_birthday 与 zodiac。
+func (b *BirthdayRemind) BeforeSave(_ *gorm.DB) error {
+	if b.Birthday == "" {
+		return nil
+	}
+	t, err := time.ParseInLocation("2006-01-02", b.Birthday, time.Local)
+	if err != nil {
+		return err
+	}
+	b.ChineseBirthday = chinesedate.LunarString(t)
+	b.Zodiac = chinesedate.Zodiac(t)
+	return nil
+}

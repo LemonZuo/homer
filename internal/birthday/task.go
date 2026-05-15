@@ -1,0 +1,41 @@
+package birthday
+
+import (
+	"log"
+	"time"
+
+	"github.com/LemonZuo/homer/internal/chinesedate"
+	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/notify/wework"
+
+	"gorm.io/gorm"
+)
+
+// 与老 Java 实现保持一致：提前 15/10/5/3/2/1/0 天各提醒一次。
+var offsets = []int{15, 10, 5, 3, 2, 1, 0}
+
+// RunOnce 执行一次扫描；通常由 scheduler 每天调用一次。
+// 对每个偏移日，匹配 chinese_birthday 命中且 is_remind='1' 的记录，逐条推送。
+// 推送文案统一通过 BuildMessage 生成，与手动触发一致。
+func RunOnce(db *gorm.DB, notifier *wework.Client) {
+	if notifier == nil || !notifier.Enabled() {
+		log.Print("birthday: wework not configured, skip")
+		return
+	}
+	today := time.Now()
+	for _, d := range offsets {
+		target := today.AddDate(0, 0, d)
+		lunar := chinesedate.LunarString(target)
+		var items []model.BirthdayRemind
+		if err := db.Where("is_remind = ? AND remind_chinese_birthday = ?", "1", lunar).Find(&items).Error; err != nil {
+			log.Printf("birthday query offset=%d: %v", d, err)
+			continue
+		}
+		for _, it := range items {
+			msg := BuildMessage(&it)
+			if err := notifier.SendText(msg); err != nil {
+				log.Printf("birthday send %q: %v", it.Name, err)
+			}
+		}
+	}
+}

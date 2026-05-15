@@ -1,18 +1,29 @@
 import { useState } from 'react'
-import { Copy, Check, Pencil, Trash2 } from 'lucide-react'
+import { Copy, Check, Pencil, Trash2, Bell, Send, RefreshCw, Download, Loader2 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
-import type { TableDef } from '../tables'
+import { api } from '../api'
+import type { RecordActionIcon, TableDef } from '../tables'
 import { avatarColor, getColorSet } from '../colors'
 import { cn } from '../lib/utils'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
+import { Switch } from './ui/switch'
 
 interface Props {
   record: Record<string, any>
   def: TableDef
   onEdit: () => void
   onDelete: () => void
+  onQuickToggle?: (key: string, value: boolean) => void | Promise<void>
+}
+
+const ACTION_ICONS: Record<RecordActionIcon, LucideIcon> = {
+  bell: Bell,
+  send: Send,
+  refresh: RefreshCw,
+  download: Download,
 }
 
 function pickFirst(r: Record<string, any>, keys: string[]): string {
@@ -23,8 +34,9 @@ function pickFirst(r: Record<string, any>, keys: string[]): string {
   return ''
 }
 
-export default function RecordCard({ record, def, onEdit, onDelete }: Props) {
+export default function RecordCard({ record, def, onEdit, onDelete, onQuickToggle }: Props) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [runningAction, setRunningAction] = useState<string | null>(null)
 
   const title = pickFirst(record, def.titleKeys) || '(无标题)'
   const subtitle = def.subtitleKeys
@@ -35,6 +47,7 @@ export default function RecordCard({ record, def, onEdit, onDelete }: Props) {
   const avatarBg = avatarColor(title)
   const avatar = title.charAt(0).toUpperCase()
   const cs = getColorSet(def.color)
+  const allowCopy = !def.noCopy
 
   const copy = async (key: string, val: any) => {
     if (val === undefined || val === null) return
@@ -44,6 +57,19 @@ export default function RecordCard({ record, def, onEdit, onDelete }: Props) {
       setTimeout(() => setCopied((c) => (c === key ? null : c)), 1200)
     } catch {
       toast.error('复制失败')
+    }
+  }
+
+  const runAction = async (action: NonNullable<TableDef['recordActions']>[number]) => {
+    if (action.confirm && !window.confirm(action.confirm)) return
+    setRunningAction(action.key)
+    try {
+      const { data } = await api.post(`/${def.path}/${record.id}/${action.path}`)
+      toast.success(data?.message || action.successToast || '已执行')
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '执行失败')
+    } finally {
+      setRunningAction(null)
     }
   }
 
@@ -75,6 +101,31 @@ export default function RecordCard({ record, def, onEdit, onDelete }: Props) {
           )}
         </div>
         <div className="flex shrink-0 gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+          {def.recordActions?.map((action) => {
+            const Icon = ACTION_ICONS[action.icon]
+            const running = runningAction === action.key
+            return (
+              <Tooltip key={action.key}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => runAction(action)}
+                    disabled={running}
+                    aria-label={action.label}
+                  >
+                    {running ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Icon className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{action.label}</TooltipContent>
+              </Tooltip>
+            )
+          })}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -109,12 +160,23 @@ export default function RecordCard({ record, def, onEdit, onDelete }: Props) {
       <div className="mt-3 space-y-0 px-4 pb-3">
         {def.fields.map((f) => {
           const v = record[f.key]
-          const empty = v === undefined || v === null || String(v).trim() === ''
+          const isSwitch = f.type === 'switch'
+          const empty = !isSwitch && (v === undefined || v === null || String(v).trim() === '')
           const s = empty ? '' : String(v)
+          const canCopy = allowCopy && !isSwitch && !empty
           return (
             <div key={f.key} className="group/row flex items-center gap-3 py-1 text-[12.5px]">
               <span className="w-14 shrink-0 text-muted-foreground">{f.label}</span>
-              {empty ? (
+              {isSwitch ? (
+                <div className="flex flex-1 min-w-0 items-center justify-end">
+                  <Switch
+                    checked={Boolean(v)}
+                    onChange={(next) => onQuickToggle?.(f.key, next)}
+                    disabled={!onQuickToggle}
+                    size="sm"
+                  />
+                </div>
+              ) : empty ? (
                 <span className="flex-1 min-w-0 text-muted-foreground/70">—</span>
               ) : (
                 <span
@@ -124,7 +186,7 @@ export default function RecordCard({ record, def, onEdit, onDelete }: Props) {
                   {s}
                 </span>
               )}
-              {!empty && (
+              {canCopy && (
                 <button
                   type="button"
                   onClick={() => copy(f.key, v)}

@@ -16,6 +16,15 @@ type Config struct {
 	DBName     string
 	DBCharset  string
 	ServerPort string
+
+	// 企业微信通知（生日提醒等使用）
+	WeWorkCorpID  string
+	WeWorkAgentID string
+	WeWorkSecret  string
+	WeWorkTagID   string
+
+	// 调度
+	BirthdayRemindCron string
 }
 
 func Load() *Config {
@@ -28,6 +37,13 @@ func Load() *Config {
 		DBName:     env("DB_NAME", ""),
 		DBCharset:  env("DB_CHARSET", "utf8mb4"),
 		ServerPort: normalizePort(env("SERVER_PORT", "8081")),
+
+		WeWorkCorpID:  env("WEWORK_CORP_ID", ""),
+		WeWorkAgentID: env("WEWORK_AGENT_ID", ""),
+		WeWorkSecret:  env("WEWORK_SECRET", ""),
+		WeWorkTagID:   env("WEWORK_TAG_ID", ""),
+
+		BirthdayRemindCron: env("BIRTHDAY_REMIND_CRON", "0 0 9 * * *"),
 	}
 }
 

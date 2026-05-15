@@ -90,6 +90,18 @@ export default function TableView() {
     await load()
   }
 
+  const onQuickToggle = async (r: Record<string, any>, key: string, value: boolean) => {
+    if (!def) return
+    const updated = { ...r, [key]: value }
+    setRecords((prev) => prev.map((x) => (x.id === r.id ? updated : x)))
+    try {
+      await api.put(`/${def.path}/${r.id}`, updated)
+    } catch {
+      // 回滚
+      setRecords((prev) => prev.map((x) => (x.id === r.id ? r : x)))
+    }
+  }
+
   return (
     <div className="mx-auto max-w-5xl px-4 pb-32 pt-4 sm:pt-10 sm:px-8">
       {/* 桌面端 header */}
@@ -172,6 +184,7 @@ export default function TableView() {
                 def={def}
                 onEdit={() => onEdit(r)}
                 onDelete={() => setPendingDelete(r)}
+                onQuickToggle={(key, value) => onQuickToggle(r, key, value)}
               />
             </motion.div>
           ))}
