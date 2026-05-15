@@ -198,6 +198,11 @@ func (c *Client) Obtain(domains []string, provider string, store *CredentialStor
 	return c.lego.Certificate.Obtain(req)
 }
 
+// Revoke 向当前 CA 吊销 PEM 编码证书。
+func (c *Client) Revoke(cert []byte) error {
+	return c.lego.Certificate.Revoke(cert)
+}
+
 // makeProvider 在加锁状态下临时 setenv 后构造 provider，然后还原。
 func makeProvider(name string, store *CredentialStore) (challenge.Provider, error) {
 	envs, err := store.Get(name)

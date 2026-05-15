@@ -39,6 +39,8 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.DELETE("/domains/:id", h.deleteDomain)
 	g.GET("/domains/:id/cert", h.domainCert)
 	g.POST("/domains/:id/issue", h.issue)
+	g.POST("/domains/:id/revoke", h.revoke)
+	g.POST("/domains/:id/upload-cas", h.uploadCAS)
 	g.GET("/tasks", h.listTasks)
 	g.GET("/tasks/:id", h.getTask)
 	g.GET("/tasks/:id/stream", h.streamTask)
@@ -244,6 +246,34 @@ func (h *ACMEHandler) issue(c *gin.Context) {
 		kind = "issue"
 	}
 	taskID, err := h.svc.IssueAsync(id, kind)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
+}
+
+func (h *ACMEHandler) revoke(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskID, err := h.svc.RevokeAsync(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
+}
+
+func (h *ACMEHandler) uploadCAS(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskID, err := h.svc.UploadCASTaskAsync(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

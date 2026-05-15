@@ -60,10 +60,13 @@ CREATE TABLE `acme_cert` (
   `not_before`     DATETIME   NULL,
   `not_after`      DATETIME   NULL,
   `cas_cert_id`    BIGINT     NOT NULL DEFAULT 0 COMMENT '上传到阿里云 CAS 后的 cert_id；0=未上传',
+  `status`         VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active | revoked',
+  `revoked_at`     DATETIME   NULL,
   `issued_at`      DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_domain_id` (`domain_id`),
-  KEY `idx_not_after` (`not_after`)
+  KEY `idx_not_after` (`not_after`),
+  KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发的证书';
 
 DROP TABLE IF EXISTS `acme_issue_task`;
@@ -71,7 +74,7 @@ CREATE TABLE `acme_issue_task` (
   `id`           BIGINT       NOT NULL AUTO_INCREMENT,
   `domain_id`    BIGINT       NOT NULL,
   `main_domain`  VARCHAR(255) NOT NULL DEFAULT '',
-  `kind`         VARCHAR(16)  NOT NULL COMMENT 'issue | renew',
+  `kind`         VARCHAR(16)  NOT NULL COMMENT 'issue | renew | revoke | upload_cas',
   `status`       VARCHAR(16)  NOT NULL COMMENT 'pending | running | success | failed',
   `started_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `finished_at`  DATETIME     NULL,

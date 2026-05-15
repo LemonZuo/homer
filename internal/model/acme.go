@@ -49,17 +49,19 @@ func (ACMEDomain) TableName() string { return "acme_domain" }
 
 // ACMECert 一次签发产物。每个域名只保留最近一条；续期时直接 upsert。
 type ACMECert struct {
-	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
-	DomainID     int64     `gorm:"column:domain_id;uniqueIndex" json:"domain_id"`
-	CertPEM      string    `gorm:"column:cert_pem;type:mediumtext" json:"-"`
-	KeyPEM       string    `gorm:"column:key_pem;type:mediumtext" json:"-"`
-	ChainPEM     string    `gorm:"column:chain_pem;type:mediumtext" json:"-"`
-	FullchainPEM string    `gorm:"column:fullchain_pem;type:mediumtext" json:"-"`
-	Serial       string    `gorm:"column:serial;size:128" json:"serial"`
-	NotBefore    time.Time `gorm:"column:not_before" json:"not_before"`
-	NotAfter     time.Time `gorm:"column:not_after" json:"not_after"`
-	CASCertID    int64     `gorm:"column:cas_cert_id" json:"cas_cert_id"`
-	IssuedAt     time.Time `gorm:"column:issued_at;autoCreateTime" json:"issued_at"`
+	ID           int64      `gorm:"primaryKey;column:id" json:"id"`
+	DomainID     int64      `gorm:"column:domain_id;uniqueIndex" json:"domain_id"`
+	CertPEM      string     `gorm:"column:cert_pem;type:mediumtext" json:"-"`
+	KeyPEM       string     `gorm:"column:key_pem;type:mediumtext" json:"-"`
+	ChainPEM     string     `gorm:"column:chain_pem;type:mediumtext" json:"-"`
+	FullchainPEM string     `gorm:"column:fullchain_pem;type:mediumtext" json:"-"`
+	Serial       string     `gorm:"column:serial;size:128" json:"serial"`
+	NotBefore    time.Time  `gorm:"column:not_before" json:"not_before"`
+	NotAfter     time.Time  `gorm:"column:not_after" json:"not_after"`
+	CASCertID    int64      `gorm:"column:cas_cert_id" json:"cas_cert_id"`
+	Status       string     `gorm:"column:status;size:16" json:"status"` // active | revoked
+	RevokedAt    *time.Time `gorm:"column:revoked_at" json:"revoked_at"`
+	IssuedAt     time.Time  `gorm:"column:issued_at;autoCreateTime" json:"issued_at"`
 }
 
 func (ACMECert) TableName() string { return "acme_cert" }
@@ -70,7 +72,7 @@ type ACMEIssueTask struct {
 	ID         int64      `gorm:"primaryKey;column:id" json:"id"`
 	DomainID   int64      `gorm:"column:domain_id;index" json:"domain_id"`
 	MainDomain string     `gorm:"column:main_domain;size:255" json:"main_domain"`
-	Kind       string     `gorm:"column:kind;size:16" json:"kind"`           // issue | renew
+	Kind       string     `gorm:"column:kind;size:16" json:"kind"`           // issue | renew | revoke | upload_cas
 	Status     string     `gorm:"column:status;size:16;index" json:"status"` // pending | running | success | failed
 	StartedAt  time.Time  `gorm:"column:started_at;autoCreateTime" json:"started_at"`
 	FinishedAt *time.Time `gorm:"column:finished_at" json:"finished_at"`

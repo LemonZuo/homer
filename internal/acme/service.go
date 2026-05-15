@@ -42,10 +42,12 @@ func (s *Service) Accounts() *AccountStore       { return s.accountStore }
 // DomainView 联查域名 + 最近一次证书（NotAfter 用于前端显示剩余天数）。
 type DomainView struct {
 	model.ACMEDomain
-	NotAfter  *time.Time `json:"not_after,omitempty"`
-	NotBefore *time.Time `json:"not_before,omitempty"`
-	CASCertID int64      `json:"cas_cert_id,omitempty"`
-	IssuedAt  *time.Time `json:"issued_at,omitempty"`
+	NotAfter   *time.Time `json:"not_after,omitempty"`
+	NotBefore  *time.Time `json:"not_before,omitempty"`
+	CASCertID  int64      `json:"cas_cert_id,omitempty"`
+	CertStatus string     `json:"cert_status,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	IssuedAt   *time.Time `json:"issued_at,omitempty"`
 }
 
 // ListDomains 列出所有域名（按 id 倒序），附带最近一次证书摘要。
@@ -66,6 +68,8 @@ func (s *Service) ListDomains() ([]DomainView, error) {
 			v.NotBefore = &nb
 			v.IssuedAt = &ia
 			v.CASCertID = c.CASCertID
+			v.CertStatus = c.Status
+			v.RevokedAt = c.RevokedAt
 		}
 		out = append(out, v)
 	}
@@ -174,6 +178,38 @@ func (s *Service) IssueAsync(domainID int64, kind string) (int64, error) {
 	return task.ID, nil
 }
 
+// RevokeAsync 异步吊销当前域名最近一次证书。
+func (s *Service) RevokeAsync(domainID int64) (int64, error) {
+	var d model.ACMEDomain
+	if err := s.db.First(&d, domainID).Error; err != nil {
+		return 0, err
+	}
+	cert, err := s.GetCertByDomain(domainID)
+	if err != nil {
+		return 0, err
+	}
+	if cert == nil {
+		return 0, errors.New("当前域名还没有可吊销的证书")
+	}
+	if cert.Status == "revoked" {
+		return 0, errors.New("当前证书已吊销")
+	}
+	if strings.TrimSpace(cert.CertPEM) == "" {
+		return 0, errors.New("当前证书内容为空，无法吊销")
+	}
+	task := &model.ACMEIssueTask{
+		DomainID:   d.ID,
+		MainDomain: d.MainDomain,
+		Kind:       "revoke",
+		Status:     "pending",
+	}
+	if err := s.db.Create(task).Error; err != nil {
+		return 0, err
+	}
+	go s.runRevoke(task.ID, d, *cert)
+	return task.ID, nil
+}
+
 // runIssue 在 goroutine 里跑实际签发流程。
 func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 	s.issueMu.Lock()
@@ -227,6 +263,68 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 	s.hub.Close(taskID)
 }
 
+// runRevoke 在 goroutine 里向 CA 吊销当前证书。
+func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECert) {
+	s.issueMu.Lock()
+	defer s.issueMu.Unlock()
+
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).
+		Updates(map[string]any{"status": "running"}).Error
+
+	logBuf := &bytes.Buffer{}
+	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
+
+	logf(logw, "开始吊销证书：%s", d.MainDomain)
+	if cert.Serial != "" {
+		logf(logw, "证书序列号：%s", cert.Serial)
+	}
+
+	err := func() error {
+		account, err := s.accountStore.Get(d.AccountID)
+		if err != nil {
+			return err
+		}
+		logf(logw, "ACME 账号：%s（%s）", account.Name, account.CA)
+		client, err := s.manager.newClient(optionsFromAccount(*account), logw)
+		if err != nil {
+			return fmt.Errorf("初始化 lego 失败：%w", err)
+		}
+		if err := client.Revoke([]byte(cert.CertPEM)); err != nil {
+			return fmt.Errorf("吊销证书失败：%w", err)
+		}
+		now := time.Now()
+		if err := s.db.Model(&model.ACMECert{}).Where("id = ?", cert.ID).Updates(map[string]any{
+			"status":     "revoked",
+			"revoked_at": &now,
+		}).Error; err != nil {
+			return fmt.Errorf("更新证书吊销状态失败：%w", err)
+		}
+		logf(logw, "证书已被 CA 接受吊销")
+		if cert.CASCertID > 0 {
+			logf(logw, "注意：已上传的 CAS 证书 cert_id=%d 不会自动删除，CDN 也不会自动切换", cert.CASCertID)
+		}
+		return nil
+	}()
+
+	finish := time.Now()
+	upd := map[string]any{
+		"finished_at": &finish,
+		"log_text":    logBuf.String(),
+	}
+	if err != nil {
+		logf(logw, "吊销失败：%v", err)
+		upd["status"] = "failed"
+		upd["error_msg"] = truncate(err.Error(), 1000)
+		upd["log_text"] = logBuf.String()
+	} else {
+		logf(logw, "吊销完成")
+		upd["status"] = "success"
+		upd["log_text"] = logBuf.String()
+	}
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(upd).Error
+	s.hub.Close(taskID)
+}
+
 // persistCert 落盘到 ./data/acme/certs/<domain>/，写入 acme_cert 表，并上传 CAS。
 func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, chain []byte) error {
 	notBefore, notAfter, serial := parseCertMeta(cert)
@@ -261,6 +359,8 @@ func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, ch
 		Serial:       serial,
 		NotBefore:    notBefore,
 		NotAfter:     notAfter,
+		Status:       "active",
+		RevokedAt:    nil,
 	}
 
 	// upsert：同一 domain 只保留最近一条
@@ -279,9 +379,9 @@ func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, ch
 		return fmt.Errorf("查询证书记录失败：%w", err)
 	}
 
-	// 上传 CAS（失败不回滚签发，仅记日志）
+	// 自动上传 CAS（失败不回滚签发，仅记日志）。前端仍保留手动上传按钮，方便补传或重传。
 	if s.cas != nil && s.cas.Configured() {
-		name := buildCASName(d.MainDomain, notAfter)
+		name := buildCASName(time.Now())
 		id, err := s.cas.UploadCertificate(name, string(full), string(key))
 		if err != nil {
 			logf(logw, "上传 CAS 失败（不影响本地证书）：%v", err)
@@ -291,7 +391,91 @@ func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, ch
 				Update("cas_cert_id", id).Error
 		}
 	}
+
 	return nil
+}
+
+// UploadCASTaskAsync 异步把当前域名最近一次证书上传到 CAS。
+func (s *Service) UploadCASTaskAsync(domainID int64) (int64, error) {
+	var d model.ACMEDomain
+	if err := s.db.First(&d, domainID).Error; err != nil {
+		return 0, err
+	}
+	cert, err := s.GetCertByDomain(domainID)
+	if err != nil {
+		return 0, err
+	}
+	if cert == nil {
+		return 0, errors.New("当前域名还没有可上传的证书")
+	}
+	if cert.Status == "revoked" {
+		return 0, errors.New("当前证书已吊销，不能上传 CAS")
+	}
+	if strings.TrimSpace(cert.FullchainPEM) == "" || strings.TrimSpace(cert.KeyPEM) == "" {
+		return 0, errors.New("当前证书内容不完整，无法上传 CAS")
+	}
+	if s.cas == nil || !s.cas.Configured() {
+		return 0, errors.New("阿里云 CAS 未配置")
+	}
+	task := &model.ACMEIssueTask{
+		DomainID:   d.ID,
+		MainDomain: d.MainDomain,
+		Kind:       "upload_cas",
+		Status:     "pending",
+	}
+	if err := s.db.Create(task).Error; err != nil {
+		return 0, err
+	}
+	go s.runUploadCAS(task.ID, d, *cert)
+	return task.ID, nil
+}
+
+func (s *Service) runUploadCAS(taskID int64, d model.ACMEDomain, cert model.ACMECert) {
+	s.issueMu.Lock()
+	defer s.issueMu.Unlock()
+
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).
+		Updates(map[string]any{"status": "running"}).Error
+
+	logBuf := &bytes.Buffer{}
+	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
+
+	logf(logw, "开始上传 CAS：%s", d.MainDomain)
+
+	err := func() error {
+		if s.cas == nil || !s.cas.Configured() {
+			return errors.New("阿里云 CAS 未配置")
+		}
+		name := buildCASName(time.Now())
+		id, err := s.cas.UploadCertificate(name, cert.FullchainPEM, cert.KeyPEM)
+		if err != nil {
+			return fmt.Errorf("上传 CAS 失败：%w", err)
+		}
+		logf(logw, "已上传 CAS：cert_id=%d, name=%s", id, name)
+		if err := s.db.Model(&model.ACMECert{}).Where("id = ?", cert.ID).
+			Update("cas_cert_id", id).Error; err != nil {
+			return fmt.Errorf("更新 CAS cert_id 失败：%w", err)
+		}
+		return nil
+	}()
+
+	finish := time.Now()
+	upd := map[string]any{
+		"finished_at": &finish,
+		"log_text":    logBuf.String(),
+	}
+	if err != nil {
+		logf(logw, "上传 CAS 失败：%v", err)
+		upd["status"] = "failed"
+		upd["error_msg"] = truncate(err.Error(), 1000)
+		upd["log_text"] = logBuf.String()
+	} else {
+		logf(logw, "上传 CAS 完成")
+		upd["status"] = "success"
+		upd["log_text"] = logBuf.String()
+	}
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(upd).Error
+	s.hub.Close(taskID)
 }
 
 // RenewExpiring 由 cron 调用：扫所有 enabled 域名，剩余 ≤ renewDays 触发续期。
@@ -366,15 +550,9 @@ func assembleFullchain(cert, chain []byte) []byte {
 	return buf.Bytes()
 }
 
-// buildCASName CAS 内证书命名：homer-<domain>-<notAfter date>。
-// 限制 64 字符内，去掉点号易引发 CAS 命名问题——保留点号，CAS 接受。
-func buildCASName(domain string, notAfter time.Time) string {
-	suffix := notAfter.Format("20060102")
-	name := fmt.Sprintf("homer-%s-%s", strings.ReplaceAll(domain, "*", "wildcard"), suffix)
-	if len(name) > 64 {
-		name = name[:64]
-	}
-	return name
+// buildCASName CAS 内证书命名：<timestamp>。
+func buildCASName(ts time.Time) string {
+	return ts.Format("20060102150405")
 }
 
 func truncate(s string, n int) string {

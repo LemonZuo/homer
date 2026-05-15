@@ -9,6 +9,8 @@ import {
   ScrollText,
   KeyRound,
   ShieldCheck,
+  Ban,
+  UploadCloud,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -57,6 +59,8 @@ interface Domain {
   not_before?: string
   not_after?: string
   cas_cert_id?: number
+  cert_status?: string
+  revoked_at?: string
   issued_at?: string
 }
 
@@ -147,6 +151,13 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '失败',
 }
 
+const KIND_LABEL: Record<string, string> = {
+  issue: '签发',
+  renew: '续期',
+  revoke: '吊销',
+  upload_cas: '上传 CAS',
+}
+
 export default function AcmePage() {
   const [domains, setDomains] = useState<Domain[]>([])
   const [accounts, setAccounts] = useState<AcmeAccount[]>([])
@@ -159,6 +170,7 @@ export default function AcmePage() {
   const [editOpen, setEditOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Domain | null>(null)
   const [deletePending, setDeletePending] = useState<Domain | null>(null)
+  const [revokePending, setRevokePending] = useState<Domain | null>(null)
   const [logTaskID, setLogTaskID] = useState<number | null>(null)
 
   const [credDrawerOpen, setCredDrawerOpen] = useState(false)
@@ -280,6 +292,37 @@ export default function AcmePage() {
     }
   }
 
+  const startRevoke = async (d: Domain) => {
+    setRevokePending(null)
+    setBusy(`revoke-${d.id}`)
+    try {
+      const { data } = await api.post(`/acme/domains/${d.id}/revoke`)
+      const taskID = data?.data?.task_id as number
+      toast.success(`已提交吊销，任务 #${taskID}`)
+      await reloadTasks()
+      setLogTaskID(taskID)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '提交吊销失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startUploadCAS = async (d: Domain) => {
+    setBusy(`upload-cas-${d.id}`)
+    try {
+      const { data } = await api.post(`/acme/domains/${d.id}/upload-cas`)
+      const taskID = data?.data?.task_id as number
+      toast.success(`已提交上传 CAS，任务 #${taskID}`)
+      await reloadTasks()
+      setLogTaskID(taskID)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '提交上传 CAS 失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const onDelete = async () => {
     const d = deletePending
     if (!d) return
@@ -302,7 +345,7 @@ export default function AcmePage() {
         <div>
           <h1 className="text-[17px] font-semibold tracking-tight">ACME 签发</h1>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            自动签发与续期；落盘 ./data/acme/certs/&lt;domain&gt;/ 并上传 CAS
+            自动签发与续期；落盘 ./data/acme/certs/&lt;domain&gt;/ 并上传 CAS，可手动重传
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -351,9 +394,12 @@ export default function AcmePage() {
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {domains.map((d) => {
           const days = daysUntil(d.not_after)
+          const revoked = d.cert_status === 'revoked'
           const expiring = days !== null && days <= 30
           const expired = days !== null && days <= 0
-          const certBadge = expired
+          const certBadge = revoked
+            ? { cls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', text: '已吊销' }
+            : expired
             ? { cls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', text: '已过期' }
             : expiring
               ? {
@@ -367,6 +413,7 @@ export default function AcmePage() {
                   }
                 : { cls: 'bg-muted text-muted-foreground', text: '未签发' }
           const issuing = busy === `issue-${d.id}`
+          const uploadingCAS = busy === `upload-cas-${d.id}`
           return (
             <Card
               key={d.id}
@@ -410,10 +457,7 @@ export default function AcmePage() {
                 <FieldRow label="SAN" value={d.san_domains} />
                 <FieldRow label="到期" value={fmtDate(d.not_after)} />
                 <FieldRow label="签发" value={fmtDate(d.issued_at)} />
-                <FieldRow
-                  label="CAS"
-                  value={d.cas_cert_id ? `cert_id ${d.cas_cert_id}` : ''}
-                />
+                {revoked && <FieldRow label="吊销" value={fmtDate(d.revoked_at)} />}
               </div>
 
               <div className="mt-3 flex gap-2 px-4 pb-4">
@@ -430,6 +474,29 @@ export default function AcmePage() {
                     <Play className="mr-1.5 h-3.5 w-3.5" />
                   )}
                   签发
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => startUploadCAS(d)}
+                  disabled={busy !== null || !d.not_after || revoked}
+                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '上传当前证书到 CAS'}
+                >
+                  {uploadingCAS ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="hover:text-destructive"
+                  onClick={() => setRevokePending(d)}
+                  disabled={busy !== null || !d.not_after || revoked}
+                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '吊销当前证书'}
+                >
+                  <Ban className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   size="sm"
@@ -479,7 +546,7 @@ export default function AcmePage() {
             </span>
             <span className="font-mono">#{t.id}</span>
             <span className="font-medium">{t.main_domain}</span>
-            <span className="text-muted-foreground">{t.kind}</span>
+            <span className="text-muted-foreground">{KIND_LABEL[t.kind] || t.kind}</span>
             <span className="ml-auto font-mono text-[11.5px] text-muted-foreground">
               {fmtDateTime(t.started_at)}
             </span>
@@ -529,6 +596,36 @@ export default function AcmePage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={onDelete}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!revokePending}
+        onOpenChange={(o) => {
+          if (!o) setRevokePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>吊销当前证书</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将向 CA 吊销{' '}
+              <span className="font-mono font-medium text-foreground">
+                {revokePending?.main_domain}
+              </span>{' '}
+              当前证书。吊销不可逆，且不会自动删除 CAS 证书或切换 CDN 配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (revokePending) void startRevoke(revokePending)
+              }}
+            >
+              吊销
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
