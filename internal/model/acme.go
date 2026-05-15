@@ -50,6 +50,25 @@ type ACMESSHTarget struct {
 
 func (ACMESSHTarget) TableName() string { return "acme_ssh_target" }
 
+// ACMESSHDeployConfig 描述某个域名部署到某台 SSH 机器时使用的远端路径和命令。
+type ACMESSHDeployConfig struct {
+	ID            int64     `gorm:"primaryKey;column:id" json:"id"`
+	DomainID      int64     `gorm:"column:domain_id;index" json:"domain_id"`
+	TargetID      int64     `gorm:"column:target_id;index" json:"target_id"`
+	Name          string    `gorm:"column:name;size:64" json:"name"`
+	CertPath      string    `gorm:"column:cert_path;size:512" json:"cert_path"`
+	KeyPath       string    `gorm:"column:key_path;size:512" json:"key_path"`
+	ChainPath     string    `gorm:"column:chain_path;size:512" json:"chain_path"`
+	FullchainPath string    `gorm:"column:fullchain_path;size:512" json:"fullchain_path"`
+	DeployCommand string    `gorm:"column:deploy_command;type:text" json:"deploy_command"`
+	AutoDeploy    BoolFlag  `gorm:"column:auto_deploy;type:varchar(1);default:'0'" json:"auto_deploy"`
+	Enabled       BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (ACMESSHDeployConfig) TableName() string { return "acme_ssh_deploy_config" }
+
 // ACMEDomain 自动签发的域名配置。
 // account_id 引用 ACMEAccount.ID；provider 引用 ACMECredential.Provider。
 type ACMEDomain struct {

@@ -34,6 +34,9 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.POST("/ssh-targets", h.upsertSSHTarget)
 	g.PUT("/ssh-targets/:id", h.updateSSHTarget)
 	g.DELETE("/ssh-targets/:id", h.deleteSSHTarget)
+	g.PUT("/ssh-deploy-configs/:id", h.updateSSHDeployConfig)
+	g.DELETE("/ssh-deploy-configs/:id", h.deleteSSHDeployConfig)
+	g.POST("/ssh-deploy-configs/:id/deploy", h.deploySSHConfig)
 	g.GET("/credentials", h.listCredentials)
 	g.POST("/credentials", h.upsertCredential)
 	g.DELETE("/credentials/:id", h.deleteCredential)
@@ -46,6 +49,9 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.POST("/domains/:id/revoke", h.revoke)
 	g.POST("/domains/:id/upload-cas", h.uploadCAS)
 	g.POST("/domains/:id/deploy-ssh", h.deploySSH)
+	g.GET("/domains/:id/ssh-deploy-configs", h.listSSHDeployConfigs)
+	g.POST("/domains/:id/ssh-deploy-configs", h.upsertSSHDeployConfig)
+	g.POST("/domains/:id/ssh-deploy-configs/deploy", h.deploySSHConfigsByDomain)
 	g.GET("/tasks", h.listTasks)
 	g.GET("/tasks/:id", h.getTask)
 	g.GET("/tasks/:id/stream", h.streamTask)
@@ -163,6 +169,77 @@ func (h *ACMEHandler) deleteSSHTarget(c *gin.Context) {
 		return
 	}
 	if err := h.svc.SSHTargets().Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) listSSHDeployConfigs(c *gin.Context) {
+	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || domainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	items, err := h.svc.SSHDeploys().ListByDomain(domainID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertSSHDeployConfig(c *gin.Context) {
+	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || domainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var cfg model.ACMESSHDeployConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	cfg.ID = 0
+	row, err := h.svc.SSHDeploys().Upsert(domainID, &cfg)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateSSHDeployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var cfg model.ACMESSHDeployConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if cfg.DomainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain_id 无效"})
+		return
+	}
+	cfg.ID = id
+	row, err := h.svc.SSHDeploys().Upsert(cfg.DomainID, &cfg)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteSSHDeployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.SSHDeploys().Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -373,6 +450,34 @@ func (h *ACMEHandler) deploySSH(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
+}
+
+func (h *ACMEHandler) deploySSHConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskID, err := h.svc.DeploySSHConfigTaskAsync(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
+}
+
+func (h *ACMEHandler) deploySSHConfigsByDomain(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskIDs, err := h.svc.DeploySSHConfigsByDomainAsync(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_ids": taskIDs}})
 }
 
 func (h *ACMEHandler) listTasks(c *gin.Context) {

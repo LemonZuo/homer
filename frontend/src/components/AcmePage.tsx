@@ -103,6 +103,22 @@ interface SSHTarget {
   updated_at: string
 }
 
+interface SSHDeployConfig {
+  id: number
+  domain_id: number
+  target_id: number
+  name: string
+  cert_path: string
+  key_path: string
+  chain_path: string
+  fullchain_path: string
+  deploy_command: string
+  auto_deploy: boolean
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
 interface Task {
   id: number
   domain_id: number
@@ -191,13 +207,12 @@ export default function AcmePage() {
   const [editTarget, setEditTarget] = useState<Domain | null>(null)
   const [deletePending, setDeletePending] = useState<Domain | null>(null)
   const [revokePending, setRevokePending] = useState<Domain | null>(null)
-  const [deployPending, setDeployPending] = useState<Domain | null>(null)
-  const [deployTargetID, setDeployTargetID] = useState<number>(0)
-  const [deployFullchainPath, setDeployFullchainPath] = useState('')
-  const [deployKeyPath, setDeployKeyPath] = useState('')
-  const [deployCertPath, setDeployCertPath] = useState('')
-  const [deployChainPath, setDeployChainPath] = useState('')
-  const [deployCommand, setDeployCommand] = useState('')
+  const [deployDomain, setDeployDomain] = useState<Domain | null>(null)
+  const [deployConfigs, setDeployConfigs] = useState<SSHDeployConfig[]>([])
+  const [deployConfigLoading, setDeployConfigLoading] = useState(false)
+  const [deployEditOpen, setDeployEditOpen] = useState(false)
+  const [deployEditTarget, setDeployEditTarget] = useState<SSHDeployConfig | null>(null)
+  const [deployDeletePending, setDeployDeletePending] = useState<SSHDeployConfig | null>(null)
   const [logTaskID, setLogTaskID] = useState<number | null>(null)
 
   const [credDrawerOpen, setCredDrawerOpen] = useState(false)
@@ -280,6 +295,18 @@ export default function AcmePage() {
     }
   }, [])
 
+  const reloadSSHDeployConfigs = useCallback(async (domainID: number) => {
+    setDeployConfigLoading(true)
+    try {
+      const { data } = await api.get(`/acme/domains/${domainID}/ssh-deploy-configs`)
+      setDeployConfigs(data?.data ?? [])
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '加载部署配置失败')
+    } finally {
+      setDeployConfigLoading(false)
+    }
+  }, [])
+
   const onDeleteCredential = async () => {
     const c = credDeletePending
     if (!c) return
@@ -314,6 +341,19 @@ export default function AcmePage() {
       await api.delete(`/acme/ssh-targets/${t.id}`)
       toast.success('已删除')
       await reloadSSHTargets()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+
+  const onDeleteSSHDeployConfig = async () => {
+    const cfg = deployDeletePending
+    if (!cfg) return
+    setDeployDeletePending(null)
+    try {
+      await api.delete(`/acme/ssh-deploy-configs/${cfg.id}`)
+      toast.success('已删除')
+      if (deployDomain) await reloadSSHDeployConfigs(deployDomain.id)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '删除失败')
     }
@@ -378,49 +418,39 @@ export default function AcmePage() {
     }
   }
 
-  const openDeploySSH = (d: Domain) => {
-    const first = sshTargets.find((t) => t.enabled)
-    setDeployPending(d)
-    setDeployTargetID(first?.id ?? 0)
-    setDeployFullchainPath(`/etc/nginx/ssl/{domain}/fullchain.pem`)
-    setDeployKeyPath(`/etc/nginx/ssl/{domain}/key.pem`)
-    setDeployCertPath('')
-    setDeployChainPath('')
-    setDeployCommand('nginx -t && systemctl reload nginx')
+  const openDeployConfigs = (d: Domain) => {
+    setDeployDomain(d)
+    void reloadSSHDeployConfigs(d.id)
   }
 
-  const startDeploySSH = async () => {
-    const d = deployPending
-    if (!d) return
-    if (!deployTargetID) {
-      toast.error('请选择 SSH 机器')
-      return
-    }
-    if (!deployKeyPath.trim()) {
-      toast.error('远端 key.pem 路径必填')
-      return
-    }
-    if (!deployFullchainPath.trim() && !deployCertPath.trim()) {
-      toast.error('fullchain.pem 路径和 cert.pem 路径至少填写一个')
-      return
-    }
-    setDeployPending(null)
-    setBusy(`deploy-ssh-${d.id}`)
+  const startDeploySSHConfig = async (cfg: SSHDeployConfig) => {
+    if (!deployDomain) return
+    setBusy(`deploy-ssh-config-${cfg.id}`)
     try {
-      const { data } = await api.post(`/acme/domains/${d.id}/deploy-ssh`, {
-        target_id: deployTargetID,
-        fullchain_path: deployFullchainPath.trim(),
-        key_path: deployKeyPath.trim(),
-        cert_path: deployCertPath.trim(),
-        chain_path: deployChainPath.trim(),
-        deploy_command: deployCommand.trim(),
-      })
+      const { data } = await api.post(`/acme/ssh-deploy-configs/${cfg.id}/deploy`)
       const taskID = data?.data?.task_id as number
       toast.success(`已提交 SSH 部署，任务 #${taskID}`)
       await reloadTasks()
       setLogTaskID(taskID)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '提交 SSH 部署失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startDeployAllSSHConfigs = async () => {
+    const d = deployDomain
+    if (!d) return
+    setBusy(`deploy-ssh-domain-${d.id}`)
+    try {
+      const { data } = await api.post(`/acme/domains/${d.id}/ssh-deploy-configs/deploy`)
+      const taskIDs = (data?.data?.task_ids ?? []) as number[]
+      toast.success(`已提交 ${taskIDs.length} 个 SSH 部署任务`)
+      await reloadTasks()
+      if (taskIDs.length > 0) setLogTaskID(taskIDs[0])
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '提交一键部署失败')
     } finally {
       setBusy(null)
     }
@@ -525,7 +555,6 @@ export default function AcmePage() {
                 : { cls: 'bg-muted text-muted-foreground', text: '未签发' }
           const issuing = busy === `issue-${d.id}`
           const uploadingCAS = busy === `upload-cas-${d.id}`
-          const deployingSSH = busy === `deploy-ssh-${d.id}`
           return (
             <Card
               key={d.id}
@@ -603,15 +632,11 @@ export default function AcmePage() {
                 <Button
                   size="icon"
                   variant="outline"
-                  onClick={() => openDeploySSH(d)}
-                  disabled={busy !== null || !d.not_after || revoked}
-                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '部署当前证书到 SSH 机器'}
+                  onClick={() => openDeployConfigs(d)}
+                  disabled={busy !== null}
+                  title="部署配置"
                 >
-                  {deployingSSH ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Send className="h-3.5 w-3.5" />
-                  )}
+                  <Send className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   size="icon"
@@ -755,107 +780,6 @@ export default function AcmePage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
-        open={!!deployPending}
-        onOpenChange={(o) => {
-          if (!o) setDeployPending(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>部署到 SSH 机器</AlertDialogTitle>
-            <AlertDialogDescription>
-              选择目标机器后，会通过 SSH 写入当前证书文件并执行部署命令。路径和命令支持 {'{domain}'} 占位符。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="grid max-h-[62vh] gap-3 overflow-auto py-1 pr-1">
-            <div className="grid gap-1.5">
-              <Label htmlFor="deploy-ssh-target">目标机器</Label>
-              <select
-                id="deploy-ssh-target"
-                className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
-                value={deployTargetID ? String(deployTargetID) : ''}
-                onChange={(e) => setDeployTargetID(Number(e.target.value))}
-              >
-                {sshTargets.filter((t) => t.enabled).length === 0 && (
-                  <option value="">（暂无启用的 SSH 机器）</option>
-                )}
-                {sshTargets
-                  .filter((t) => t.enabled)
-                  .map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} ({t.username}@{t.host}:{t.port || 22})
-                    </option>
-                  ))}
-              </select>
-            </div>
-            <div className="grid gap-2">
-              <Label>远端路径</Label>
-              <Input
-                value={deployFullchainPath}
-                onChange={(e) => setDeployFullchainPath(e.target.value)}
-                placeholder="/etc/nginx/ssl/{domain}/fullchain.pem"
-                autoComplete="off"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                className="font-mono text-[12px]"
-              />
-              <Input
-                value={deployKeyPath}
-                onChange={(e) => setDeployKeyPath(e.target.value)}
-                placeholder="/etc/nginx/ssl/{domain}/key.pem（必填）"
-                autoComplete="off"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                className="font-mono text-[12px]"
-              />
-              <Input
-                value={deployCertPath}
-                onChange={(e) => setDeployCertPath(e.target.value)}
-                placeholder="/etc/nginx/ssl/{domain}/cert.pem（可选）"
-                autoComplete="off"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                className="font-mono text-[12px]"
-              />
-              <Input
-                value={deployChainPath}
-                onChange={(e) => setDeployChainPath(e.target.value)}
-                placeholder="/etc/nginx/ssl/{domain}/chain.pem（可选）"
-                autoComplete="off"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                className="font-mono text-[12px]"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="deploy-ssh-command">部署命令（可选）</Label>
-              <Textarea
-                id="deploy-ssh-command"
-                value={deployCommand}
-                onChange={(e) => setDeployCommand(e.target.value)}
-                placeholder="nginx -t && systemctl reload nginx"
-                autoComplete="off"
-                data-lpignore="true"
-                data-1p-ignore="true"
-                className="font-mono text-[12px]"
-              />
-            </div>
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault()
-                void startDeploySSH()
-              }}
-            >
-              部署
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <LogDrawer
         taskID={logTaskID}
         onClose={() => {
@@ -931,6 +855,64 @@ export default function AcmePage() {
         target={sshEditTarget}
         onSaved={reloadSSHTargets}
       />
+
+      <SSHDeployConfigsDrawer
+        open={!!deployDomain}
+        onOpenChange={(o) => {
+          if (!o) setDeployDomain(null)
+        }}
+        domain={deployDomain}
+        configs={deployConfigs}
+        targets={sshTargets}
+        loading={deployConfigLoading}
+        busy={busy}
+        onAdd={() => {
+          setDeployEditTarget(null)
+          setDeployEditOpen(true)
+        }}
+        onEdit={(cfg) => {
+          setDeployEditTarget(cfg)
+          setDeployEditOpen(true)
+        }}
+        onDelete={(cfg) => setDeployDeletePending(cfg)}
+        onDeploy={(cfg) => void startDeploySSHConfig(cfg)}
+        onDeployAll={() => void startDeployAllSSHConfigs()}
+      />
+
+      <SSHDeployConfigEditDialog
+        open={deployEditOpen}
+        onOpenChange={setDeployEditOpen}
+        domain={deployDomain}
+        config={deployEditTarget}
+        targets={sshTargets}
+        onSaved={() => {
+          if (deployDomain) void reloadSSHDeployConfigs(deployDomain.id)
+        }}
+      />
+
+      <AlertDialog
+        open={!!deployDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setDeployDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除部署配置</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除{' '}
+              <span className="font-mono font-medium text-foreground">
+                {deployDeletePending?.name || `#${deployDeletePending?.id}`}
+              </span>{' '}
+              的 SSH 部署配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteSSHDeployConfig}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={!!sshDeletePending}
@@ -1490,6 +1472,378 @@ function AccountsDrawer({
         </div>
       </DrawerContent>
     </Drawer>
+  )
+}
+
+interface SSHDeployConfigsDrawerProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  domain: Domain | null
+  configs: SSHDeployConfig[]
+  targets: SSHTarget[]
+  loading: boolean
+  busy: string | null
+  onAdd: () => void
+  onEdit: (cfg: SSHDeployConfig) => void
+  onDelete: (cfg: SSHDeployConfig) => void
+  onDeploy: (cfg: SSHDeployConfig) => void
+  onDeployAll: () => void
+}
+
+function targetByID(targets: SSHTarget[], id: number) {
+  return targets.find((t) => t.id === id)
+}
+
+function targetSummary(t?: SSHTarget) {
+  if (!t) return 'SSH 机器不存在'
+  return `${t.name} · ${t.username}@${t.host}:${t.port || 22}`
+}
+
+function configTitle(cfg: SSHDeployConfig) {
+  return cfg.name?.trim() || `配置 #${cfg.id}`
+}
+
+function configPrimaryPath(cfg: SSHDeployConfig) {
+  return cfg.fullchain_path || cfg.cert_path || cfg.key_path || '未配置路径'
+}
+
+function SSHDeployConfigsDrawer({
+  open,
+  onOpenChange,
+  domain,
+  configs,
+  targets,
+  loading,
+  busy,
+  onAdd,
+  onEdit,
+  onDelete,
+  onDeploy,
+  onDeployAll,
+}: SSHDeployConfigsDrawerProps) {
+  const revoked = domain?.cert_status === 'revoked'
+  const hasCert = Boolean(domain?.not_after)
+  const deployableCount = configs.filter((cfg) => {
+    const t = targetByID(targets, cfg.target_id)
+    return cfg.enabled && Boolean(t?.enabled)
+  }).length
+  const deployingAll = Boolean(domain && busy === `deploy-ssh-domain-${domain.id}`)
+  const canDeployAll = hasCert && !revoked && deployableCount > 0 && busy === null
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>部署配置</DrawerTitle>
+          <DrawerDescription>
+            {domain?.main_domain ?? '当前域名'} 的 SSH 部署路径、命令和自动部署策略
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
+          <div className="flex justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onDeployAll}
+              disabled={!canDeployAll}
+              title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : deployableCount === 0 ? '没有可部署的启用配置' : undefined}
+            >
+              {deployingAll ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              一键部署
+            </Button>
+            <Button size="sm" onClick={onAdd} disabled={targets.length === 0}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加配置
+            </Button>
+          </div>
+          {targets.length === 0 ? (
+            <p className="py-8 text-center text-[12.5px] text-muted-foreground">
+              先添加 SSH 机器，再配置部署路径
+            </p>
+          ) : loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : configs.length === 0 ? (
+            <p className="py-8 text-center text-[12.5px] text-muted-foreground">
+              还没有部署配置，点击「添加配置」开始
+            </p>
+          ) : (
+            configs.map((cfg) => {
+              const t = targetByID(targets, cfg.target_id)
+              const deploying = busy === `deploy-ssh-config-${cfg.id}`
+              const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
+              return (
+                <Card key={cfg.id} className="px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-mono text-[13px] font-medium">
+                          {configTitle(cfg)}
+                        </span>
+                        <span
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                            cfg.enabled
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          {cfg.enabled ? '启用' : '停用'}
+                        </span>
+                        {cfg.auto_deploy && (
+                          <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                            自动部署
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                        {targetSummary(t)}
+                      </div>
+                      <div
+                        className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
+                        title={configPrimaryPath(cfg)}
+                      >
+                        {configPrimaryPath(cfg)}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onDeploy(cfg)}
+                      disabled={!canDeploy}
+                      title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                    >
+                      {deploying ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Send className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => onEdit(cfg)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="hover:text-destructive"
+                      onClick={() => onDelete(cfg)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </Card>
+              )
+            })
+          )}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
+interface SSHDeployConfigEditProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  domain: Domain | null
+  config: SSHDeployConfig | null
+  targets: SSHTarget[]
+  onSaved: () => void
+}
+
+function SSHDeployConfigEditDialog({
+  open,
+  onOpenChange,
+  domain,
+  config,
+  targets,
+  onSaved,
+}: SSHDeployConfigEditProps) {
+  const [name, setName] = useState('')
+  const [targetID, setTargetID] = useState(0)
+  const [fullchainPath, setFullchainPath] = useState('')
+  const [keyPath, setKeyPath] = useState('')
+  const [certPath, setCertPath] = useState('')
+  const [chainPath, setChainPath] = useState('')
+  const [deployCommand, setDeployCommand] = useState('')
+  const [autoDeploy, setAutoDeploy] = useState(false)
+  const [enabled, setEnabled] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const first = targets.find((t) => t.enabled)
+    setName(config?.name ?? '')
+    setTargetID(config?.target_id ?? first?.id ?? 0)
+    setFullchainPath(config?.fullchain_path ?? '/etc/nginx/ssl/{domain}/fullchain.pem')
+    setKeyPath(config?.key_path ?? '/etc/nginx/ssl/{domain}/key.pem')
+    setCertPath(config?.cert_path ?? '')
+    setChainPath(config?.chain_path ?? '')
+    setDeployCommand(config?.deploy_command ?? 'nginx -t && systemctl reload nginx')
+    setAutoDeploy(config?.auto_deploy ?? false)
+    setEnabled(config?.enabled ?? true)
+  }, [open, config, targets])
+
+  const save = async () => {
+    if (!domain) return
+    const payload = {
+      domain_id: domain.id,
+      target_id: targetID,
+      name: name.trim(),
+      fullchain_path: fullchainPath.trim(),
+      key_path: keyPath.trim(),
+      cert_path: certPath.trim(),
+      chain_path: chainPath.trim(),
+      deploy_command: deployCommand.trim(),
+      auto_deploy: autoDeploy,
+      enabled,
+    }
+    if (!payload.target_id) {
+      toast.error('请选择 SSH 机器')
+      return
+    }
+    if (!payload.key_path) {
+      toast.error('远端 key.pem 路径必填')
+      return
+    }
+    if (!payload.fullchain_path && !payload.cert_path) {
+      toast.error('fullchain.pem 路径和 cert.pem 路径至少填写一个')
+      return
+    }
+    setSaving(true)
+    try {
+      if (config?.id) {
+        await api.put(`/acme/ssh-deploy-configs/${config.id}`, payload)
+      } else {
+        await api.post(`/acme/domains/${domain.id}/ssh-deploy-configs`, payload)
+      }
+      toast.success('已保存')
+      onOpenChange(false)
+      onSaved()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const selectableTargets = targets.filter((t) => t.enabled || t.id === targetID)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{config ? '编辑部署配置' : '新增部署配置'}</DialogTitle>
+          <DialogDescription>
+            {domain?.main_domain ?? '当前域名'} 的证书部署路径和部署命令，支持 {'{domain}'} 占位符
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid max-h-[70vh] gap-3.5 overflow-auto pr-1">
+          <div className="grid gap-1.5">
+            <Label htmlFor="deploy-config-name">配置名称</Label>
+            <Input
+              id="deploy-config-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="nginx 主站"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="deploy-config-target">SSH 机器</Label>
+            <select
+              id="deploy-config-target"
+              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
+              value={targetID ? String(targetID) : ''}
+              onChange={(e) => setTargetID(Number(e.target.value))}
+            >
+              {selectableTargets.length === 0 && (
+                <option value="">（暂无启用的 SSH 机器）</option>
+              )}
+              {selectableTargets.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.username}@{t.host}:{t.port || 22})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-2">
+            <Label>远端路径</Label>
+            <Input
+              value={fullchainPath}
+              onChange={(e) => setFullchainPath(e.target.value)}
+              placeholder="/etc/nginx/ssl/{domain}/fullchain.pem"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="font-mono text-[12px]"
+            />
+            <Input
+              value={keyPath}
+              onChange={(e) => setKeyPath(e.target.value)}
+              placeholder="/etc/nginx/ssl/{domain}/key.pem（必填）"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="font-mono text-[12px]"
+            />
+            <Input
+              value={certPath}
+              onChange={(e) => setCertPath(e.target.value)}
+              placeholder="/etc/nginx/ssl/{domain}/cert.pem（可选）"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="font-mono text-[12px]"
+            />
+            <Input
+              value={chainPath}
+              onChange={(e) => setChainPath(e.target.value)}
+              placeholder="/etc/nginx/ssl/{domain}/chain.pem（可选）"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="font-mono text-[12px]"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="deploy-config-command">部署命令（可选）</Label>
+            <Textarea
+              id="deploy-config-command"
+              value={deployCommand}
+              onChange={(e) => setDeployCommand(e.target.value)}
+              placeholder="nginx -t && systemctl reload nginx"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="font-mono text-[12px]"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="deploy-config-auto">签发/续期成功后自动部署</Label>
+            <Switch id="deploy-config-auto" checked={autoDeploy} onChange={(v) => setAutoDeploy(v)} />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="deploy-config-enabled">启用</Label>
+            <Switch id="deploy-config-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            取消
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

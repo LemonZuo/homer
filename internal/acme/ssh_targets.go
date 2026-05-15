@@ -83,7 +83,12 @@ func (s *SSHTargetStore) Delete(id int64) error {
 	if id <= 0 {
 		return errors.New("id 无效")
 	}
-	return s.db.Delete(&model.ACMESSHTarget{}, id).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("target_id = ?", id).Delete(&model.ACMESSHDeployConfig{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.ACMESSHTarget{}, id).Error
+	})
 }
 
 func normalizeSSHTarget(t *model.ACMESSHTarget) {
