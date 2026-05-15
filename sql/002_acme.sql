@@ -48,6 +48,25 @@ CREATE TABLE `acme_domain` (
   KEY `idx_account_id` (`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 自动签发域名';
 
+DROP TABLE IF EXISTS `acme_ssh_target`;
+CREATE TABLE `acme_ssh_target` (
+  `id`             BIGINT       NOT NULL AUTO_INCREMENT,
+  `name`           VARCHAR(64)  NOT NULL                COMMENT '目标名称',
+  `host`           VARCHAR(255) NOT NULL                COMMENT 'SSH 主机',
+  `port`           INT          NOT NULL DEFAULT 22     COMMENT 'SSH 端口',
+  `username`       VARCHAR(128) NOT NULL                COMMENT 'SSH 用户名',
+  `auth_type`      VARCHAR(16)  NOT NULL                COMMENT 'password | key',
+  `password`       TEXT         NOT NULL                COMMENT '密码认证使用',
+  `private_key`    TEXT         NOT NULL                COMMENT '私钥认证使用，PEM/OpenSSH 私钥',
+  `passphrase`     TEXT         NOT NULL                COMMENT '私钥口令，可空',
+  `enabled`        VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `created_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_name` (`name`),
+  KEY `idx_enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 证书 SSH 部署目标';
+
 DROP TABLE IF EXISTS `acme_cert`;
 CREATE TABLE `acme_cert` (
   `id`             BIGINT     NOT NULL AUTO_INCREMENT,
@@ -74,7 +93,7 @@ CREATE TABLE `acme_issue_task` (
   `id`           BIGINT       NOT NULL AUTO_INCREMENT,
   `domain_id`    BIGINT       NOT NULL,
   `main_domain`  VARCHAR(255) NOT NULL DEFAULT '',
-  `kind`         VARCHAR(16)  NOT NULL COMMENT 'issue | renew | revoke | upload_cas',
+  `kind`         VARCHAR(16)  NOT NULL COMMENT 'issue | renew | revoke | upload_cas | deploy_ssh',
   `status`       VARCHAR(16)  NOT NULL COMMENT 'pending | running | success | failed',
   `started_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `finished_at`  DATETIME     NULL,

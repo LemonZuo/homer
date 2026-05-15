@@ -23,6 +23,7 @@ type Service struct {
 	manager      *Manager
 	credstore    *CredentialStore
 	accountStore *AccountStore
+	sshTargets   *SSHTargetStore
 	cas          *cas.Service
 	hub          *SSEHub
 	dataDir      string
@@ -31,13 +32,14 @@ type Service struct {
 	issueMu sync.Mutex // 串行化签发（lego logger / env 是全局状态）
 }
 
-func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, accounts *AccountStore, casSvc *cas.Service, hub *SSEHub, dataDir string, renewDays int) *Service {
-	return &Service{db: db, manager: mgr, credstore: store, accountStore: accounts, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays}
+func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, accounts *AccountStore, sshTargets *SSHTargetStore, casSvc *cas.Service, hub *SSEHub, dataDir string, renewDays int) *Service {
+	return &Service{db: db, manager: mgr, credstore: store, accountStore: accounts, sshTargets: sshTargets, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays}
 }
 
 func (s *Service) Hub() *SSEHub                  { return s.hub }
 func (s *Service) Credentials() *CredentialStore { return s.credstore }
 func (s *Service) Accounts() *AccountStore       { return s.accountStore }
+func (s *Service) SSHTargets() *SSHTargetStore   { return s.sshTargets }
 
 // DomainView 联查域名 + 最近一次证书（NotAfter 用于前端显示剩余天数）。
 type DomainView struct {
@@ -430,6 +432,44 @@ func (s *Service) UploadCASTaskAsync(domainID int64) (int64, error) {
 	return task.ID, nil
 }
 
+// DeploySSHTaskAsync 异步把当前域名最近一次证书部署到远程 SSH 目标。
+func (s *Service) DeploySSHTaskAsync(domainID, targetID int64, opts SSHDeployOptions) (int64, error) {
+	var d model.ACMEDomain
+	if err := s.db.First(&d, domainID).Error; err != nil {
+		return 0, err
+	}
+	opts.Domain = d.MainDomain
+	opts.normalize()
+	if err := opts.validate(); err != nil {
+		return 0, err
+	}
+	cert, err := s.GetCertByDomain(domainID)
+	if err != nil {
+		return 0, err
+	}
+	if cert == nil {
+		return 0, errors.New("当前域名还没有可部署的证书")
+	}
+	if cert.Status == "revoked" {
+		return 0, errors.New("当前证书已吊销，不能部署")
+	}
+	target, err := s.sshTargets.Get(targetID)
+	if err != nil {
+		return 0, err
+	}
+	task := &model.ACMEIssueTask{
+		DomainID:   d.ID,
+		MainDomain: d.MainDomain,
+		Kind:       "deploy_ssh",
+		Status:     "pending",
+	}
+	if err := s.db.Create(task).Error; err != nil {
+		return 0, err
+	}
+	go s.runDeploySSH(task.ID, d, *cert, *target, opts)
+	return task.ID, nil
+}
+
 func (s *Service) runUploadCAS(taskID int64, d model.ACMEDomain, cert model.ACMECert) {
 	s.issueMu.Lock()
 	defer s.issueMu.Unlock()
@@ -471,6 +511,39 @@ func (s *Service) runUploadCAS(taskID int64, d model.ACMEDomain, cert model.ACME
 		upd["log_text"] = logBuf.String()
 	} else {
 		logf(logw, "上传 CAS 完成")
+		upd["status"] = "success"
+		upd["log_text"] = logBuf.String()
+	}
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(upd).Error
+	s.hub.Close(taskID)
+}
+
+func (s *Service) runDeploySSH(taskID int64, d model.ACMEDomain, cert model.ACMECert, target model.ACMESSHTarget, opts SSHDeployOptions) {
+	s.issueMu.Lock()
+	defer s.issueMu.Unlock()
+
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).
+		Updates(map[string]any{"status": "running"}).Error
+
+	logBuf := &bytes.Buffer{}
+	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
+
+	logf(logw, "开始部署证书到 SSH：%s -> %s", d.MainDomain, target.Name)
+
+	err := deployCertViaSSH(logw, target, cert, opts)
+
+	finish := time.Now()
+	upd := map[string]any{
+		"finished_at": &finish,
+		"log_text":    logBuf.String(),
+	}
+	if err != nil {
+		logf(logw, "SSH 部署失败：%v", err)
+		upd["status"] = "failed"
+		upd["error_msg"] = truncate(err.Error(), 1000)
+		upd["log_text"] = logBuf.String()
+	} else {
+		logf(logw, "SSH 部署完成")
 		upd["status"] = "success"
 		upd["log_text"] = logBuf.String()
 	}

@@ -11,6 +11,8 @@ import {
   ShieldCheck,
   Ban,
   UploadCloud,
+  Server,
+  Send,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -18,6 +20,7 @@ import { avatarColor, getColorSet } from '../colors'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import { Textarea } from './ui/textarea'
 import { Label } from './ui/label'
 import { Switch } from './ui/switch'
 import {
@@ -81,6 +84,21 @@ interface Credential {
   id: number
   provider: string
   envs_json: string
+  created_at: string
+  updated_at: string
+}
+
+interface SSHTarget {
+  id: number
+  name: string
+  host: string
+  port: number
+  username: string
+  auth_type: 'password' | 'key' | string
+  password: string
+  private_key: string
+  passphrase: string
+  enabled: boolean
   created_at: string
   updated_at: string
 }
@@ -156,11 +174,13 @@ const KIND_LABEL: Record<string, string> = {
   renew: '续期',
   revoke: '吊销',
   upload_cas: '上传 CAS',
+  deploy_ssh: '部署 SSH',
 }
 
 export default function AcmePage() {
   const [domains, setDomains] = useState<Domain[]>([])
   const [accounts, setAccounts] = useState<AcmeAccount[]>([])
+  const [sshTargets, setSSHTargets] = useState<SSHTarget[]>([])
   const [providers, setProviders] = useState<string[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
@@ -171,6 +191,13 @@ export default function AcmePage() {
   const [editTarget, setEditTarget] = useState<Domain | null>(null)
   const [deletePending, setDeletePending] = useState<Domain | null>(null)
   const [revokePending, setRevokePending] = useState<Domain | null>(null)
+  const [deployPending, setDeployPending] = useState<Domain | null>(null)
+  const [deployTargetID, setDeployTargetID] = useState<number>(0)
+  const [deployFullchainPath, setDeployFullchainPath] = useState('')
+  const [deployKeyPath, setDeployKeyPath] = useState('')
+  const [deployCertPath, setDeployCertPath] = useState('')
+  const [deployChainPath, setDeployChainPath] = useState('')
+  const [deployCommand, setDeployCommand] = useState('')
   const [logTaskID, setLogTaskID] = useState<number | null>(null)
 
   const [credDrawerOpen, setCredDrawerOpen] = useState(false)
@@ -181,6 +208,10 @@ export default function AcmePage() {
   const [accountEditOpen, setAccountEditOpen] = useState(false)
   const [accountEditTarget, setAccountEditTarget] = useState<AcmeAccount | null>(null)
   const [accountDeletePending, setAccountDeletePending] = useState<AcmeAccount | null>(null)
+  const [sshDrawerOpen, setSSHDrawerOpen] = useState(false)
+  const [sshEditOpen, setSSHEditOpen] = useState(false)
+  const [sshEditTarget, setSSHEditTarget] = useState<SSHTarget | null>(null)
+  const [sshDeletePending, setSSHDeletePending] = useState<SSHTarget | null>(null)
 
   const cs = getColorSet('emerald')
   const accountSummary = useMemo(() => {
@@ -197,18 +228,20 @@ export default function AcmePage() {
   const reloadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [d, p, t, c, a] = await Promise.all([
+      const [d, p, t, c, a, s] = await Promise.all([
         api.get('/acme/domains'),
         api.get('/acme/providers'),
         api.get('/acme/tasks?limit=30'),
         api.get('/acme/credentials'),
         api.get('/acme/accounts'),
+        api.get('/acme/ssh-targets'),
       ])
       setDomains(d.data?.data ?? [])
       setProviders(p.data?.data ?? [])
       setTasks(t.data?.data ?? [])
       setCredentials(c.data?.data ?? [])
       setAccounts(a.data?.data ?? [])
+      setSSHTargets(s.data?.data ?? [])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载失败')
     } finally {
@@ -238,6 +271,15 @@ export default function AcmePage() {
     }
   }, [])
 
+  const reloadSSHTargets = useCallback(async () => {
+    try {
+      const { data } = await api.get('/acme/ssh-targets')
+      setSSHTargets(data?.data ?? [])
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '加载 SSH 机器失败')
+    }
+  }, [])
+
   const onDeleteCredential = async () => {
     const c = credDeletePending
     if (!c) return
@@ -259,6 +301,19 @@ export default function AcmePage() {
       await api.delete(`/acme/accounts/${a.id}`)
       toast.success('已删除')
       await reloadAll()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+
+  const onDeleteSSHTarget = async () => {
+    const t = sshDeletePending
+    if (!t) return
+    setSSHDeletePending(null)
+    try {
+      await api.delete(`/acme/ssh-targets/${t.id}`)
+      toast.success('已删除')
+      await reloadSSHTargets()
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '删除失败')
     }
@@ -323,6 +378,54 @@ export default function AcmePage() {
     }
   }
 
+  const openDeploySSH = (d: Domain) => {
+    const first = sshTargets.find((t) => t.enabled)
+    setDeployPending(d)
+    setDeployTargetID(first?.id ?? 0)
+    setDeployFullchainPath(`/etc/nginx/ssl/{domain}/fullchain.pem`)
+    setDeployKeyPath(`/etc/nginx/ssl/{domain}/key.pem`)
+    setDeployCertPath('')
+    setDeployChainPath('')
+    setDeployCommand('nginx -t && systemctl reload nginx')
+  }
+
+  const startDeploySSH = async () => {
+    const d = deployPending
+    if (!d) return
+    if (!deployTargetID) {
+      toast.error('请选择 SSH 机器')
+      return
+    }
+    if (!deployKeyPath.trim()) {
+      toast.error('远端 key.pem 路径必填')
+      return
+    }
+    if (!deployFullchainPath.trim() && !deployCertPath.trim()) {
+      toast.error('fullchain.pem 路径和 cert.pem 路径至少填写一个')
+      return
+    }
+    setDeployPending(null)
+    setBusy(`deploy-ssh-${d.id}`)
+    try {
+      const { data } = await api.post(`/acme/domains/${d.id}/deploy-ssh`, {
+        target_id: deployTargetID,
+        fullchain_path: deployFullchainPath.trim(),
+        key_path: deployKeyPath.trim(),
+        cert_path: deployCertPath.trim(),
+        chain_path: deployChainPath.trim(),
+        deploy_command: deployCommand.trim(),
+      })
+      const taskID = data?.data?.task_id as number
+      toast.success(`已提交 SSH 部署，任务 #${taskID}`)
+      await reloadTasks()
+      setLogTaskID(taskID)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '提交 SSH 部署失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const onDelete = async () => {
     const d = deletePending
     if (!d) return
@@ -379,6 +482,14 @@ export default function AcmePage() {
             CA 账号
           </Button>
           <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSSHDrawerOpen(true)}
+          >
+            <Server className="mr-1.5 h-3.5 w-3.5" />
+            SSH 机器
+          </Button>
+          <Button
             size="sm"
             onClick={() => {
               setEditTarget(null)
@@ -414,6 +525,7 @@ export default function AcmePage() {
                 : { cls: 'bg-muted text-muted-foreground', text: '未签发' }
           const issuing = busy === `issue-${d.id}`
           const uploadingCAS = busy === `upload-cas-${d.id}`
+          const deployingSSH = busy === `deploy-ssh-${d.id}`
           return (
             <Card
               key={d.id}
@@ -476,7 +588,7 @@ export default function AcmePage() {
                   签发
                 </Button>
                 <Button
-                  size="sm"
+                  size="icon"
                   variant="outline"
                   onClick={() => startUploadCAS(d)}
                   disabled={busy !== null || !d.not_after || revoked}
@@ -489,7 +601,20 @@ export default function AcmePage() {
                   )}
                 </Button>
                 <Button
-                  size="sm"
+                  size="icon"
+                  variant="outline"
+                  onClick={() => openDeploySSH(d)}
+                  disabled={busy !== null || !d.not_after || revoked}
+                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '部署当前证书到 SSH 机器'}
+                >
+                  {deployingSSH ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+                <Button
+                  size="icon"
                   variant="outline"
                   className="hover:text-destructive"
                   onClick={() => setRevokePending(d)}
@@ -499,7 +624,7 @@ export default function AcmePage() {
                   <Ban className="h-3.5 w-3.5" />
                 </Button>
                 <Button
-                  size="sm"
+                  size="icon"
                   variant="outline"
                   onClick={() => {
                     setEditTarget(d)
@@ -510,7 +635,7 @@ export default function AcmePage() {
                   <Edit3 className="h-3.5 w-3.5" />
                 </Button>
                 <Button
-                  size="sm"
+                  size="icon"
                   variant="outline"
                   className="hover:text-destructive"
                   onClick={() => setDeletePending(d)}
@@ -630,6 +755,107 @@ export default function AcmePage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog
+        open={!!deployPending}
+        onOpenChange={(o) => {
+          if (!o) setDeployPending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>部署到 SSH 机器</AlertDialogTitle>
+            <AlertDialogDescription>
+              选择目标机器后，会通过 SSH 写入当前证书文件并执行部署命令。路径和命令支持 {'{domain}'} 占位符。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid max-h-[62vh] gap-3 overflow-auto py-1 pr-1">
+            <div className="grid gap-1.5">
+              <Label htmlFor="deploy-ssh-target">目标机器</Label>
+              <select
+                id="deploy-ssh-target"
+                className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
+                value={deployTargetID ? String(deployTargetID) : ''}
+                onChange={(e) => setDeployTargetID(Number(e.target.value))}
+              >
+                {sshTargets.filter((t) => t.enabled).length === 0 && (
+                  <option value="">（暂无启用的 SSH 机器）</option>
+                )}
+                {sshTargets
+                  .filter((t) => t.enabled)
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.username}@{t.host}:{t.port || 22})
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label>远端路径</Label>
+              <Input
+                value={deployFullchainPath}
+                onChange={(e) => setDeployFullchainPath(e.target.value)}
+                placeholder="/etc/nginx/ssl/{domain}/fullchain.pem"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+              <Input
+                value={deployKeyPath}
+                onChange={(e) => setDeployKeyPath(e.target.value)}
+                placeholder="/etc/nginx/ssl/{domain}/key.pem（必填）"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+              <Input
+                value={deployCertPath}
+                onChange={(e) => setDeployCertPath(e.target.value)}
+                placeholder="/etc/nginx/ssl/{domain}/cert.pem（可选）"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+              <Input
+                value={deployChainPath}
+                onChange={(e) => setDeployChainPath(e.target.value)}
+                placeholder="/etc/nginx/ssl/{domain}/chain.pem（可选）"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="deploy-ssh-command">部署命令（可选）</Label>
+              <Textarea
+                id="deploy-ssh-command"
+                value={deployCommand}
+                onChange={(e) => setDeployCommand(e.target.value)}
+                placeholder="nginx -t && systemctl reload nginx"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                void startDeploySSH()
+              }}
+            >
+              部署
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <LogDrawer
         taskID={logTaskID}
         onClose={() => {
@@ -683,6 +909,52 @@ export default function AcmePage() {
         target={accountEditTarget}
         onSaved={reloadAccounts}
       />
+
+      <SSHTargetsDrawer
+        open={sshDrawerOpen}
+        onOpenChange={setSSHDrawerOpen}
+        targets={sshTargets}
+        onAdd={() => {
+          setSSHEditTarget(null)
+          setSSHEditOpen(true)
+        }}
+        onEdit={(t) => {
+          setSSHEditTarget(t)
+          setSSHEditOpen(true)
+        }}
+        onDelete={(t) => setSSHDeletePending(t)}
+      />
+
+      <SSHTargetEditDialog
+        open={sshEditOpen}
+        onOpenChange={setSSHEditOpen}
+        target={sshEditTarget}
+        onSaved={reloadSSHTargets}
+      />
+
+      <AlertDialog
+        open={!!sshDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setSSHDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除 SSH 机器</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除{' '}
+              <span className="font-mono font-medium text-foreground">
+                {sshDeletePending?.name}
+              </span>{' '}
+              的部署配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteSSHTarget}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={!!accountDeletePending}
@@ -1218,6 +1490,311 @@ function AccountsDrawer({
         </div>
       </DrawerContent>
     </Drawer>
+  )
+}
+
+interface SSHTargetsDrawerProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  targets: SSHTarget[]
+  onAdd: () => void
+  onEdit: (t: SSHTarget) => void
+  onDelete: (t: SSHTarget) => void
+}
+
+function authLabel(authType: string) {
+  return authType === 'key' ? '证书' : '密码'
+}
+
+function SSHTargetsDrawer({
+  open,
+  onOpenChange,
+  targets,
+  onAdd,
+  onEdit,
+  onDelete,
+}: SSHTargetsDrawerProps) {
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>SSH 机器</DrawerTitle>
+          <DrawerDescription>
+            配置远程证书部署目标；支持密码认证和私钥证书认证
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="flex-1 space-y-2 overflow-auto px-4 pb-4">
+          <div className="flex justify-end">
+            <Button size="sm" onClick={onAdd}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加机器
+            </Button>
+          </div>
+          {targets.length === 0 ? (
+            <p className="py-8 text-center text-[12.5px] text-muted-foreground">
+              还没有 SSH 机器，点击「添加机器」开始
+            </p>
+          ) : (
+            targets.map((t) => (
+              <Card key={t.id} className="px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-mono text-[13px] font-medium">
+                        {t.name}
+                      </span>
+                      <span
+                        className={cn(
+                          'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                          t.enabled
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {t.enabled ? '启用' : '停用'}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                      {t.username}@{t.host}:{t.port || 22} · {authLabel(t.auth_type)}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => onEdit(t)}>
+                    <Edit3 className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="hover:text-destructive"
+                    onClick={() => onDelete(t)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </Card>
+            ))
+          )}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
+interface SSHTargetEditProps {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  target: SSHTarget | null
+  onSaved: () => void
+}
+
+function SSHTargetEditDialog({ open, onOpenChange, target, onSaved }: SSHTargetEditProps) {
+  const [name, setName] = useState('')
+  const [host, setHost] = useState('')
+  const [port, setPort] = useState('22')
+  const [username, setUsername] = useState('')
+  const [authType, setAuthType] = useState<'password' | 'key'>('password')
+  const [password, setPassword] = useState('')
+  const [privateKey, setPrivateKey] = useState('')
+  const [passphrase, setPassphrase] = useState('')
+  const [enabled, setEnabled] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setName(target?.name ?? '')
+    setHost(target?.host ?? '')
+    setPort(String(target?.port || 22))
+    setUsername(target?.username ?? '')
+    setAuthType(target?.auth_type === 'key' ? 'key' : 'password')
+    setPassword(target?.password ?? '')
+    setPrivateKey(target?.private_key ?? '')
+    setPassphrase(target?.passphrase ?? '')
+    setEnabled(target?.enabled ?? true)
+  }, [open, target])
+
+  const save = async () => {
+    const portNum = Number(port)
+    const payload = {
+      name: name.trim(),
+      host: host.trim(),
+      port: portNum,
+      username: username.trim(),
+      auth_type: authType,
+      password: password.trim(),
+      private_key: privateKey.trim(),
+      passphrase: passphrase.trim(),
+      enabled,
+    }
+    if (!payload.name) {
+      toast.error('目标名称必填')
+      return
+    }
+    if (!payload.host) {
+      toast.error('SSH 主机必填')
+      return
+    }
+    if (!payload.username) {
+      toast.error('SSH 用户名必填')
+      return
+    }
+    if (!Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) {
+      toast.error('SSH 端口无效')
+      return
+    }
+    if (authType === 'password' && !payload.password) {
+      toast.error('密码认证需要填写密码')
+      return
+    }
+    if (authType === 'key' && !payload.private_key) {
+      toast.error('证书模式需要填写私钥')
+      return
+    }
+    setSaving(true)
+    try {
+      if (target?.id) {
+        await api.put(`/acme/ssh-targets/${target.id}`, payload)
+      } else {
+        await api.post('/acme/ssh-targets', payload)
+      }
+      toast.success('已保存')
+      onOpenChange(false)
+      onSaved()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{target ? '编辑 SSH 机器' : '新增 SSH 机器'}</DialogTitle>
+          <DialogDescription>
+            只保存机器连接和认证信息；证书路径和部署命令在每次部署时填写
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid max-h-[70vh] gap-3.5 overflow-auto pr-1">
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-name">目标名称</Label>
+            <Input
+              id="ssh-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-2 grid gap-1.5">
+              <Label htmlFor="ssh-host">主机</Label>
+              <Input
+                id="ssh-host"
+                value={host}
+                onChange={(e) => setHost(e.target.value)}
+                placeholder="example.com / 10.0.0.1"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="ssh-port">端口</Label>
+              <Input
+                id="ssh-port"
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-user">用户名</Label>
+            <Input
+              id="ssh-user"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="font-mono text-[12px]"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-auth">认证方式</Label>
+            <select
+              id="ssh-auth"
+              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
+              value={authType}
+              onChange={(e) => setAuthType(e.target.value === 'key' ? 'key' : 'password')}
+            >
+              <option value="password">密码模式</option>
+              <option value="key">证书模式（私钥）</option>
+            </select>
+          </div>
+          {authType === 'password' ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="ssh-password">密码</Label>
+              <Input
+                id="ssh-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                data-lpignore="true"
+                data-1p-ignore="true"
+              />
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ssh-private-key">私钥</Label>
+                <Textarea
+                  id="ssh-private-key"
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  className="min-h-[140px] font-mono text-[11.5px]"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ssh-passphrase">私钥口令（可选）</Label>
+                <Input
+                  id="ssh-passphrase"
+                  type="password"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                />
+              </div>
+            </>
+          )}
+          <div className="flex items-center justify-between">
+            <Label htmlFor="ssh-enabled">启用</Label>
+            <Switch id="ssh-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            取消
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

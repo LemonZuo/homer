@@ -30,6 +30,10 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.POST("/accounts", h.upsertAccount)
 	g.PUT("/accounts/:id", h.updateAccount)
 	g.DELETE("/accounts/:id", h.deleteAccount)
+	g.GET("/ssh-targets", h.listSSHTargets)
+	g.POST("/ssh-targets", h.upsertSSHTarget)
+	g.PUT("/ssh-targets/:id", h.updateSSHTarget)
+	g.DELETE("/ssh-targets/:id", h.deleteSSHTarget)
 	g.GET("/credentials", h.listCredentials)
 	g.POST("/credentials", h.upsertCredential)
 	g.DELETE("/credentials/:id", h.deleteCredential)
@@ -41,6 +45,7 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.POST("/domains/:id/issue", h.issue)
 	g.POST("/domains/:id/revoke", h.revoke)
 	g.POST("/domains/:id/upload-cas", h.uploadCAS)
+	g.POST("/domains/:id/deploy-ssh", h.deploySSH)
 	g.GET("/tasks", h.listTasks)
 	g.GET("/tasks/:id", h.getTask)
 	g.GET("/tasks/:id/stream", h.streamTask)
@@ -102,6 +107,63 @@ func (h *ACMEHandler) deleteAccount(c *gin.Context) {
 	}
 	if err := h.svc.Accounts().Delete(id); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) listSSHTargets(c *gin.Context) {
+	items, err := h.svc.SSHTargets().List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertSSHTarget(c *gin.Context) {
+	var t model.ACMESSHTarget
+	if err := c.ShouldBindJSON(&t); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	t.ID = 0
+	row, err := h.svc.SSHTargets().Upsert(&t)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateSSHTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var t model.ACMESSHTarget
+	if err := c.ShouldBindJSON(&t); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	t.ID = id
+	row, err := h.svc.SSHTargets().Upsert(&t)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteSSHTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.SSHTargets().Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
@@ -274,6 +336,38 @@ func (h *ACMEHandler) uploadCAS(c *gin.Context) {
 		return
 	}
 	taskID, err := h.svc.UploadCASTaskAsync(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
+}
+
+func (h *ACMEHandler) deploySSH(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var body struct {
+		TargetID      int64  `json:"target_id"`
+		CertPath      string `json:"cert_path"`
+		KeyPath       string `json:"key_path"`
+		ChainPath     string `json:"chain_path"`
+		FullchainPath string `json:"fullchain_path"`
+		DeployCommand string `json:"deploy_command"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	taskID, err := h.svc.DeploySSHTaskAsync(id, body.TargetID, acme.SSHDeployOptions{
+		CertPath:      body.CertPath,
+		KeyPath:       body.KeyPath,
+		ChainPath:     body.ChainPath,
+		FullchainPath: body.FullchainPath,
+		DeployCommand: body.DeployCommand,
+	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

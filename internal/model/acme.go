@@ -32,6 +32,24 @@ type ACMEAccount struct {
 
 func (ACMEAccount) TableName() string { return "acme_account" }
 
+// ACMESSHTarget 证书远程部署目标。auth_type 支持 password / key。
+type ACMESSHTarget struct {
+	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name       string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
+	Host       string    `gorm:"column:host;size:255" json:"host"`
+	Port       int       `gorm:"column:port;default:22" json:"port"`
+	Username   string    `gorm:"column:username;size:128" json:"username"`
+	AuthType   string    `gorm:"column:auth_type;size:16" json:"auth_type"` // password | key
+	Password   string    `gorm:"column:password;type:text" json:"password"`
+	PrivateKey string    `gorm:"column:private_key;type:text" json:"private_key"`
+	Passphrase string    `gorm:"column:passphrase;type:text" json:"passphrase"`
+	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (ACMESSHTarget) TableName() string { return "acme_ssh_target" }
+
 // ACMEDomain 自动签发的域名配置。
 // account_id 引用 ACMEAccount.ID；provider 引用 ACMECredential.Provider。
 type ACMEDomain struct {
@@ -72,7 +90,7 @@ type ACMEIssueTask struct {
 	ID         int64      `gorm:"primaryKey;column:id" json:"id"`
 	DomainID   int64      `gorm:"column:domain_id;index" json:"domain_id"`
 	MainDomain string     `gorm:"column:main_domain;size:255" json:"main_domain"`
-	Kind       string     `gorm:"column:kind;size:16" json:"kind"`           // issue | renew | revoke | upload_cas
+	Kind       string     `gorm:"column:kind;size:16" json:"kind"`           // issue | renew | revoke | upload_cas | deploy_ssh
 	Status     string     `gorm:"column:status;size:16;index" json:"status"` // pending | running | success | failed
 	StartedAt  time.Time  `gorm:"column:started_at;autoCreateTime" json:"started_at"`
 	FinishedAt *time.Time `gorm:"column:finished_at" json:"finished_at"`
