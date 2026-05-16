@@ -42,27 +42,29 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) 
 func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service) *scheduler.Scheduler {
 	sched := scheduler.New()
 
-	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() {
+	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() error {
 		birthday.RunOnce(gormDB, notifier)
+		return nil
 	}); err != nil {
 		log.Fatalf("register birthday task: %v", err)
 	}
 
-	if err := sched.Register("event", cfg.EventRemindCron, func() {
+	if err := sched.Register("event", cfg.EventRemindCron, func() error {
 		event.RunOnce(gormDB, eventNotifier)
+		return nil
 	}); err != nil {
 		log.Fatalf("register event task: %v", err)
 	}
 
-	if err := sched.Register("acme-renew", cfg.ACMERenewCron, func() {
+	if err := sched.Register("acme-renew", cfg.ACMERenewCron, func() error {
 		ids, err := acmeSvc.RenewExpiring()
 		if err != nil {
-			log.Printf("acme renew scan: %v", err)
-			return
+			return err
 		}
 		if len(ids) > 0 {
 			log.Printf("acme renew 触发：%v", ids)
 		}
+		return nil
 	}); err != nil {
 		log.Fatalf("register acme-renew task: %v", err)
 	}

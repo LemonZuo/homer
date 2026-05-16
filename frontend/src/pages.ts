@@ -13,6 +13,7 @@ export const pages: PageDef[] = [
   { key: 'cas', label: '证书管理', color: 'violet' },
   { key: 'acme', label: 'ACME 签发', color: 'emerald' },
   { key: 'sms', label: '短信转发器', color: 'teal' },
+  { key: 'scheduler', label: '任务调度', color: 'blue' },
 ]
 
 export function getPage(key: string | undefined): PageDef | undefined {

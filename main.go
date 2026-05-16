@@ -58,13 +58,14 @@ func main() {
 
 	sched := startScheduler(gormDB, cfg, notifier, eventNotifier, acmeSvc)
 	defer sched.Stop()
+	schedulerHandler := handler.NewSchedulerHandler(sched)
 
 	dist, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
 		log.Fatalf("sub frontend/dist: %v", err)
 	}
 
-	r := router.Setup(gormDB, notifier, eventNotifier, cdnHandler, casHandler, acmeHandler, bypassHandler, smsHandler, dist)
+	r := router.Setup(gormDB, notifier, eventNotifier, cdnHandler, casHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, dist)
 	log.Printf("server listening on %s", cfg.ListenURL())
 	if err := r.Run(cfg.ListenAddr()); err != nil {
 		log.Fatalf("run server: %v", err)

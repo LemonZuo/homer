@@ -27,7 +27,7 @@ var Tables = []TableMeta{
 	{Key: "event", Label: "事项提醒", Path: "event"},
 }
 
-func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, acmeHandler *handler.ACMEHandler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, frontend fs.FS) *gin.Engine {
+func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, acmeHandler *handler.ACMEHandler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, frontend fs.FS) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
@@ -59,6 +59,7 @@ func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier,
 	acmeHandler.Register(api)
 	bypassHandler.Register(api)
 	smsHandler.Register(api)
+	schedulerHandler.Register(api)
 
 	// 前端单页：未命中 /api/* 的请求都交给 embed 出来的 dist
 	spa := web.SPAHandler(frontend)
