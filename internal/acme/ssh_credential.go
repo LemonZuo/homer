@@ -1,6 +1,7 @@
 package acme
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -79,7 +80,36 @@ func (s *SSHCredentialStore) Delete(id int64) error {
 	if id <= 0 {
 		return errors.New("id 无效")
 	}
+	used, err := s.referencingTargets(id)
+	if err != nil {
+		return err
+	}
+	if len(used) > 0 {
+		return errors.New("该凭证仍被机器使用，无法删除")
+	}
 	return s.db.Delete(&model.SSHCredential{}, id).Error
+}
+
+// referencingTargets 返回所有「凭证模式」且引用了该 credential id 的 SSH 机器名称。
+func (s *SSHCredentialStore) referencingTargets(id int64) ([]string, error) {
+	var rows []model.ACMEDeployTarget
+	if err := s.db.Where("kind = ?", DeployKindSSH).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, row := range rows {
+		var auth struct {
+			AuthSource   string `json:"auth_source"`
+			CredentialID int64  `json:"credential_id"`
+		}
+		if json.Unmarshal([]byte(row.AuthJSON), &auth) != nil {
+			continue
+		}
+		if auth.AuthSource == "credential" && auth.CredentialID == id {
+			names = append(names, row.Name)
+		}
+	}
+	return names, nil
 }
 
 func normalizeCredential(c *model.SSHCredential) {

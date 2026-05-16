@@ -937,6 +937,12 @@ export default function AcmePage() {
         open={sshCredDrawerOpen}
         onOpenChange={setSSHCredDrawerOpen}
         credentials={sshCredentials}
+        usage={sshTargets.reduce<Record<number, number>>((acc, t) => {
+          if (t.auth_source === 'credential' && t.credential_id) {
+            acc[t.credential_id] = (acc[t.credential_id] ?? 0) + 1
+          }
+          return acc
+        }, {})}
         onAdd={() => {
           setSSHCredEditTarget(null)
           setSSHCredEditOpen(true)
