@@ -24,9 +24,10 @@ type TableMeta struct {
 
 var Tables = []TableMeta{
 	{Key: "birthday", Label: "生日提醒", Path: "birthday"},
+	{Key: "event", Label: "事项提醒", Path: "event"},
 }
 
-func Setup(db *gorm.DB, notifier *wework.Client, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, acmeHandler *handler.ACMEHandler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, frontend fs.FS) *gin.Engine {
+func Setup(db *gorm.DB, notifier *wework.Client, eventNotifier *wework.Client, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, acmeHandler *handler.ACMEHandler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, frontend fs.FS) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
@@ -49,6 +50,9 @@ func Setup(db *gorm.DB, notifier *wework.Client, cdnHandler *handler.CDNHandler,
 
 	handler.NewCRUD[model.BirthdayRemind](db).Register(api, "/birthday")
 	api.POST("/birthday/:id/notify", handler.BirthdayNotify(db, notifier))
+
+	handler.NewCRUD[model.EventReminder](db).Register(api, "/event")
+	api.POST("/event/:id/notify", handler.EventNotify(db, eventNotifier))
 
 	cdnHandler.Register(api)
 	casHandler.Register(api)

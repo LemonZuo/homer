@@ -39,6 +39,13 @@ type Config struct {
 	// 调度
 	BirthdayRemindCron string
 
+	// 企业微信通知（事项提醒）
+	WeWorkEventCorpID  string
+	WeWorkEventAgentID string
+	WeWorkEventSecret  string
+	WeWorkEventTagID   string
+	EventRemindCron    string
+
 	// 12306Bypass 分流抢票助手 webhook 转发：独立企业微信应用 + Resend 邮件
 	WeWorkBypassCorpID  string
 	WeWorkBypassAgentID string
@@ -78,6 +85,12 @@ func Load() *Config {
 		ACMERenewCron:       env("ACME_RENEW_CRON", "0 0 3 * * *"),
 
 		BirthdayRemindCron: env("BIRTHDAY_REMIND_CRON", "0 0 9 * * *"),
+
+		WeWorkEventCorpID:  env("WEWORK_EVENT_CORP_ID", ""),
+		WeWorkEventAgentID: env("WEWORK_EVENT_AGENT_ID", ""),
+		WeWorkEventSecret:  env("WEWORK_EVENT_SECRET", ""),
+		WeWorkEventTagID:   env("WEWORK_EVENT_TAG_ID", ""),
+		EventRemindCron:    env("EVENT_REMIND_CRON", "0 0 9 * * *"),
 
 		WeWorkBypassCorpID:  env("WEWORK_BYPASS_CORP_ID", ""),
 		WeWorkBypassAgentID: env("WEWORK_BYPASS_AGENT_ID", ""),

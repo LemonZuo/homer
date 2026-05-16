@@ -69,10 +69,36 @@ export default function RecordForm({ fields, initial, onSubmit, onCancel }: Prop
             ) : (
               <Input
                 id={fid}
-                type={f.type === 'date' ? 'date' : f.type === 'password' ? 'password' : 'text'}
+                type={
+                  f.type === 'date'
+                    ? 'date'
+                    : f.type === 'password'
+                      ? 'password'
+                      : f.type === 'number'
+                        ? 'number'
+                        : 'text'
+                }
                 value={data[f.key] ?? ''}
                 placeholder={f.placeholder}
-                onChange={(e) => set(f.key, e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  if (f.type === 'number') {
+                    set(f.key, v === '' ? null : Number(v))
+                  } else {
+                    set(f.key, v)
+                  }
+                }}
+                onClick={
+                  f.type === 'date' && !f.readonly
+                    ? (e) => {
+                        try {
+                          ;(e.currentTarget as HTMLInputElement).showPicker?.()
+                        } catch {
+                          /* 老浏览器不支持时回退到默认行为 */
+                        }
+                      }
+                    : undefined
+                }
                 disabled={f.readonly}
               />
             )}

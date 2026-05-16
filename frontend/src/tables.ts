@@ -1,4 +1,4 @@
-export type FieldType = 'text' | 'password' | 'textarea' | 'date' | 'switch'
+export type FieldType = 'text' | 'password' | 'textarea' | 'date' | 'switch' | 'number'
 
 export interface Field {
   key: string
@@ -68,6 +68,32 @@ export const tables: TableDef[] = [
       { key: 'chinese_birthday', label: '农历生日', readonly: true, placeholder: '保存后自动计算' },
       { key: 'zodiac', label: '生肖', readonly: true, placeholder: '保存后自动计算' },
       { key: 'is_remind', label: '启用提醒', type: 'switch' },
+    ],
+  },
+  {
+    key: 'event',
+    label: '事项提醒',
+    path: 'event',
+    icon: '',
+    color: 'blue',
+    titleKeys: ['title'],
+    subtitleKeys: ['event_date', 'remark'],
+    noCopy: true,
+    recordActions: [
+      {
+        key: 'notify',
+        label: '立即推送',
+        icon: 'bell',
+        path: 'notify',
+        successToast: '已推送企业微信',
+      },
+    ],
+    fields: [
+      { key: 'title', label: '标题', placeholder: '会议 / 体检 / 截止...' },
+      { key: 'event_date', label: '事项日期', type: 'date' },
+      { key: 'lead_days', label: '提前天数', type: 'number', placeholder: '5' },
+      { key: 'remark', label: '备注', type: 'textarea' },
+      { key: 'enabled', label: '启用提醒', type: 'switch' },
     ],
   },
 ]

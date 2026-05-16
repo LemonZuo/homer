@@ -150,3 +150,23 @@ CREATE TABLE `sms_forwarder` (
   UNIQUE KEY `uk_name` (`name`),
   KEY `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短信转发器服务端配置';
+
+-- 事项提醒：一次性日期提醒（会议/体检/办事截止等），与生日提醒隔离。
+-- 触发规则：事项当天前 lead_days 天起，每天 cron 推送一次。
+-- 去重：last_notified_at 记录最近一次发送时间，同一天命中则不重复推。
+-- 过期：event_date < today 直接跳过；如需归档由人工删除。
+
+DROP TABLE IF EXISTS `event_reminder`;
+CREATE TABLE `event_reminder` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT,
+  `title`             VARCHAR(128) NOT NULL                COMMENT '事项标题，推送时作为正文主体',
+  `event_date`        VARCHAR(10)  NOT NULL                COMMENT '事项日期 YYYY-MM-DD',
+  `lead_days`         INT          NOT NULL DEFAULT 5      COMMENT '提前多少天起开始每天提醒',
+  `remark`            VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '备注，附加在推送末尾',
+  `enabled`           VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `last_notified_at`  DATETIME     NULL                    COMMENT '最近一次推送时间，用于同一天去重',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_enabled_event_date` (`enabled`, `event_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事项提醒（一次性日期）';

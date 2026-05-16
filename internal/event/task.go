@@ -1,0 +1,64 @@
+package event
+
+import (
+	"log"
+	"time"
+
+	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/notify/wework"
+
+	"gorm.io/gorm"
+)
+
+// RunOnce 扫描启用中的事项，命中提醒窗口的逐条推送。
+// 窗口：[event_date - lead_days, event_date]；过期事项跳过。
+// 去重：last_notified_at 与今天同日则不再推送。
+func RunOnce(db *gorm.DB, notifier *wework.Client) {
+	if notifier == nil || !notifier.Enabled() {
+		log.Print("event: wework not configured, skip")
+		return
+	}
+	now := time.Now()
+	loc := now.Location()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+
+	var items []model.EventReminder
+	if err := db.Where("enabled = ?", "1").Find(&items).Error; err != nil {
+		log.Printf("event query: %v", err)
+		return
+	}
+
+	for _, it := range items {
+		target, err := time.ParseInLocation("2006-01-02", it.EventDate, loc)
+		if err != nil {
+			log.Printf("event parse %q date=%q: %v", it.Title, it.EventDate, err)
+			continue
+		}
+		if target.Before(today) {
+			continue
+		}
+		lead := it.LeadDays
+		if lead < 0 {
+			lead = 0
+		}
+		start := target.AddDate(0, 0, -lead)
+		if today.Before(start) {
+			continue
+		}
+		if it.LastNotifiedAt != nil {
+			last := it.LastNotifiedAt.In(loc)
+			lastDay := time.Date(last.Year(), last.Month(), last.Day(), 0, 0, 0, 0, loc)
+			if !lastDay.Before(today) {
+				continue
+			}
+		}
+		msg := BuildMessage(&it, target, now)
+		if err := notifier.SendText(msg); err != nil {
+			log.Printf("event send %q: %v", it.Title, err)
+			continue
+		}
+		if err := db.Model(&model.EventReminder{}).Where("id = ?", it.ID).Update("last_notified_at", now).Error; err != nil {
+			log.Printf("event mark %q: %v", it.Title, err)
+		}
+	}
+}
