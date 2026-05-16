@@ -39,11 +39,24 @@ import { cn } from '../lib/utils'
 type QueryType = 1 | 2
 type SimSlot = 1 | 2
 
+// auth_mode 与 SmsForwarder Android「客户端安全措施」一致
+type AuthMode = 0 | 1 | 2 | 3
+
+const AUTH_MODES: { value: AuthMode; label: string }[] = [
+  { value: 0, label: '无（明文）' },
+  { value: 1, label: '签名（HmacSHA256）' },
+  { value: 2, label: 'RSA' },
+  { value: 3, label: 'SM4' },
+]
+
 interface Forwarder {
   id: number
   name: string
   server_url: string
-  secret: string
+  auth_mode: AuthMode
+  sign_key: string
+  rsa_public_key: string
+  sm4_key: string
   timeout_seconds: number
   enabled: boolean
 }
@@ -232,7 +245,10 @@ function ForwarderEditDialog({
 }) {
   const [name, setName] = useState('')
   const [serverURL, setServerURL] = useState('')
-  const [secret, setSecret] = useState('')
+  const [authMode, setAuthMode] = useState<AuthMode>(1)
+  const [signKey, setSignKey] = useState('')
+  const [rsaPublicKey, setRSAPublicKey] = useState('')
+  const [sm4Key, setSM4Key] = useState('')
   const [timeoutSeconds, setTimeoutSeconds] = useState<number | ''>(30)
   const [enabled, setEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -241,7 +257,10 @@ function ForwarderEditDialog({
     if (!open) return
     setName(target?.name ?? '')
     setServerURL(target?.server_url ?? '')
-    setSecret(target?.secret ?? '')
+    setAuthMode(target?.auth_mode ?? 1)
+    setSignKey(target?.sign_key ?? '')
+    setRSAPublicKey(target?.rsa_public_key ?? '')
+    setSM4Key(target?.sm4_key ?? '')
     setTimeoutSeconds(target?.timeout_seconds ?? 30)
     setEnabled(target?.enabled ?? true)
   }, [open, target])
@@ -251,13 +270,23 @@ function ForwarderEditDialog({
     const payload = {
       name: name.trim(),
       server_url: serverURL.trim().replace(/\/+$/, ''),
-      secret: secret.trim(),
+      auth_mode: authMode,
+      sign_key: signKey.trim(),
+      rsa_public_key: rsaPublicKey.trim(),
+      sm4_key: sm4Key.trim(),
       timeout_seconds: timeout > 0 ? timeout : 30,
       enabled,
     }
     if (!payload.name) return toast.error('名称必填')
     if (!payload.server_url) return toast.error('服务端地址必填')
-    if (!payload.secret) return toast.error('签名密钥必填')
+    if (authMode === 1 && !payload.sign_key) return toast.error('签名模式需填签名密钥')
+    if (authMode === 2 && !payload.rsa_public_key) return toast.error('RSA 模式需填服务端公钥')
+    if (authMode === 3) {
+      if (!payload.sm4_key) return toast.error('SM4 模式需填密钥')
+      if (!/^[0-9a-fA-F]{32}$/.test(payload.sm4_key)) {
+        return toast.error('SM4 密钥需为 32 位 hex（16 字节）')
+      }
+    }
     if (payload.timeout_seconds < 1 || payload.timeout_seconds > 300) {
       return toast.error('超时秒数需在 1 ~ 300 之间')
     }
@@ -309,14 +338,59 @@ function ForwarderEditDialog({
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="fw-secret">签名密钥</Label>
-            <Input
-              id="fw-secret"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              className="font-mono text-[12px]"
-            />
+            <Label htmlFor="fw-auth">客户端安全措施</Label>
+            <select
+              id="fw-auth"
+              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
+              value={authMode}
+              onChange={(e) => setAuthMode(Number(e.target.value) as AuthMode)}
+            >
+              {AUTH_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground">
+              需与服务端「设置 - 客户端安全措施」一致
+            </p>
           </div>
+          {authMode === 1 && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="fw-sign">签名密钥</Label>
+              <Input
+                id="fw-sign"
+                value={signKey}
+                onChange={(e) => setSignKey(e.target.value)}
+                className="font-mono text-[12px]"
+              />
+            </div>
+          )}
+          {authMode === 2 && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="fw-rsa">RSA 公钥</Label>
+              <Textarea
+                id="fw-rsa"
+                rows={4}
+                value={rsaPublicKey}
+                onChange={(e) => setRSAPublicKey(e.target.value)}
+                placeholder="服务端 RSA 公钥，X.509/SPKI DER 的 Base64（不含 PEM 头尾）"
+                className="font-mono text-[12px]"
+              />
+            </div>
+          )}
+          {authMode === 3 && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="fw-sm4">SM4 密钥</Label>
+              <Input
+                id="fw-sm4"
+                value={sm4Key}
+                onChange={(e) => setSM4Key(e.target.value)}
+                placeholder="32 位 hex（16 字节）"
+                className="font-mono text-[12px]"
+              />
+            </div>
+          )}
           <div className="grid gap-1.5">
             <Label htmlFor="fw-timeout">请求超时（秒）</Label>
             <Input

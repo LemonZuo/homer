@@ -46,9 +46,13 @@ func (h *SMSHandler) resolve(c *gin.Context, targetID int64) (*sms.Client, bool)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "该转发器已停用"})
 		return nil, false
 	}
-	cli := sms.New(row.ServerURL, row.Secret, row.TimeoutSeconds)
+	cli, err := sms.New(row.ServerURL, row.AuthMode, row.SignKey, row.RSAPublicKey, row.SM4Key, row.TimeoutSeconds)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return nil, false
+	}
 	if !cli.Enabled() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "转发器地址或密钥为空"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "转发器地址或对应模式密钥为空"})
 		return nil, false
 	}
 	return cli, true

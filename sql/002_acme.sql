@@ -128,16 +128,20 @@ CREATE TABLE `acme_issue_task` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发/续期任务流水';
 
 -- 短信转发器（SmsForwarder Android）服务端配置。
--- 老 Java 项目里用 application.yml 单实例配置；本仓库改为多实例存库 + 前端切换，
--- 服务端「客户端安全措施」需选「签名校验」，密钥与本表 secret 保持一致。
--- 仅支持签名鉴权模式：RSA 在老项目里就是错的（用公钥"解密"），SM4 从未实现，均不迁移。
+-- 老 Java 项目里用 application.yml 单实例配置；本仓库改为多实例存库 + 前端切换。
+-- 对接服务端「客户端安全措施」全部 4 种模式（auth_mode）：
+--   0 无、1 签名(sign_key)、2 RSA(rsa_public_key)、3 SM4(sm4_key)。
+-- 老 Java 的 RSA/SM4 实现有误，这里按 SmsForwarder Android 源码重新对齐。
 
 DROP TABLE IF EXISTS `sms_forwarder`;
 CREATE TABLE `sms_forwarder` (
   `id`         BIGINT       NOT NULL AUTO_INCREMENT,
   `name`       VARCHAR(64)  NOT NULL                COMMENT '转发器名称，前端下拉显示',
   `server_url` VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '服务端地址，如 http://192.168.1.100:5000',
-  `secret`     VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '签名校验密钥，与服务端一致',
+  `auth_mode`  INT          NOT NULL DEFAULT 1      COMMENT '客户端安全措施：0无 1签名 2RSA 3SM4',
+  `sign_key`   VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '签名模式 HmacSHA256 密钥',
+  `rsa_public_key` TEXT     NULL                    COMMENT 'RSA 模式服务端公钥（X.509/SPKI DER 的 Base64）',
+  `sm4_key`    VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT 'SM4 模式密钥（16 字节，32 位 hex）',
   `timeout_seconds` INT     NOT NULL DEFAULT 30     COMMENT '请求超时秒数，旧机器可适当调大',
   `enabled`    VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
