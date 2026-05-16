@@ -33,7 +33,7 @@ func main() {
 		log.Fatalf("migrate sms_forwarder: %v", err)
 	}
 
-	notifier := wework.New(cfg.WeWorkCorpID, cfg.WeWorkAgentID, cfg.WeWorkSecret, cfg.WeWorkTagID)
+	notifier := wework.New(cfg.WeWorkBirthdayCorpID, cfg.WeWorkBirthdayAgentID, cfg.WeWorkBirthdaySecret, cfg.WeWorkBirthdayTagID)
 
 	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
 	casSvc := cas.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
@@ -43,7 +43,7 @@ func main() {
 	acmeSvc := buildACMEService(gormDB, cfg, casSvc)
 	acmeHandler := handler.NewACMEHandler(acmeSvc)
 
-	bypassWeWork := wework.New(cfg.BypassWeWorkCorpID, cfg.BypassWeWorkAgentID, cfg.BypassWeWorkSecret, cfg.BypassWeWorkTagID)
+	bypassWeWork := wework.New(cfg.WeWorkBypassCorpID, cfg.WeWorkBypassAgentID, cfg.WeWorkBypassSecret, cfg.WeWorkBypassTagID)
 	bypassEmail := email.NewResend(cfg.ResendAPIKey, cfg.BypassEmailFrom)
 	bypassHandler := handler.NewBypassHandler(bypassWeWork, bypassEmail, cfg.BypassEmailTo, cfg.BypassSubject)
 

@@ -17,11 +17,11 @@ type Config struct {
 	DBCharset  string
 	ServerPort string
 
-	// 企业微信通知（生日提醒等使用）
-	WeWorkCorpID  string
-	WeWorkAgentID string
-	WeWorkSecret  string
-	WeWorkTagID   string
+	// 企业微信通知（生日提醒）
+	WeWorkBirthdayCorpID  string
+	WeWorkBirthdayAgentID string
+	WeWorkBirthdaySecret  string
+	WeWorkBirthdayTagID   string
 
 	// 阿里云 CDN（加速域名管理，与 CAS 用独立 AK/SK）
 	AliyunCDNAccessKeyID     string
@@ -40,10 +40,10 @@ type Config struct {
 	BirthdayRemindCron string
 
 	// 12306Bypass 分流抢票助手 webhook 转发：独立企业微信应用 + Resend 邮件
-	BypassWeWorkCorpID  string
-	BypassWeWorkAgentID string
-	BypassWeWorkSecret  string
-	BypassWeWorkTagID   string
+	WeWorkBypassCorpID  string
+	WeWorkBypassAgentID string
+	WeWorkBypassSecret  string
+	WeWorkBypassTagID   string
 
 	ResendAPIKey    string
 	BypassEmailFrom string
@@ -62,10 +62,10 @@ func Load() *Config {
 		DBCharset:  env("DB_CHARSET", "utf8mb4"),
 		ServerPort: normalizePort(env("SERVER_PORT", "8081")),
 
-		WeWorkCorpID:  env("WEWORK_CORP_ID", ""),
-		WeWorkAgentID: env("WEWORK_AGENT_ID", ""),
-		WeWorkSecret:  env("WEWORK_SECRET", ""),
-		WeWorkTagID:   env("WEWORK_TAG_ID", ""),
+		WeWorkBirthdayCorpID:  env("WEWORK_BIRTHDAY_CORP_ID", ""),
+		WeWorkBirthdayAgentID: env("WEWORK_BIRTHDAY_AGENT_ID", ""),
+		WeWorkBirthdaySecret:  env("WEWORK_BIRTHDAY_SECRET", ""),
+		WeWorkBirthdayTagID:   env("WEWORK_BIRTHDAY_TAG_ID", ""),
 
 		AliyunCDNAccessKeyID:     env("ALIYUN_CDN_ACCESS_KEY_ID", ""),
 		AliyunCDNAccessKeySecret: env("ALIYUN_CDN_ACCESS_KEY_SECRET", ""),
@@ -79,10 +79,10 @@ func Load() *Config {
 
 		BirthdayRemindCron: env("BIRTHDAY_REMIND_CRON", "0 0 9 * * *"),
 
-		BypassWeWorkCorpID:  env("BYPASS_WEWORK_CORP_ID", ""),
-		BypassWeWorkAgentID: env("BYPASS_WEWORK_AGENT_ID", ""),
-		BypassWeWorkSecret:  env("BYPASS_WEWORK_SECRET", ""),
-		BypassWeWorkTagID:   env("BYPASS_WEWORK_TAG_ID", ""),
+		WeWorkBypassCorpID:  env("WEWORK_BYPASS_CORP_ID", ""),
+		WeWorkBypassAgentID: env("WEWORK_BYPASS_AGENT_ID", ""),
+		WeWorkBypassSecret:  env("WEWORK_BYPASS_SECRET", ""),
+		WeWorkBypassTagID:   env("WEWORK_BYPASS_TAG_ID", ""),
 
 		ResendAPIKey:    env("RESEND_API_KEY", ""),
 		BypassEmailFrom: env("BYPASS_EMAIL_FROM", ""),
