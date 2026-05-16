@@ -7,14 +7,14 @@ import (
 
 	"github.com/LemonZuo/homer/internal/event"
 	"github.com/LemonZuo/homer/internal/model"
-	"github.com/LemonZuo/homer/internal/notify/wework"
+	"github.com/LemonZuo/homer/internal/notify"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
 // EventNotify 手动触发：对指定 ID 的事项立刻推送一次，并刷新 last_notified_at。
-func EventNotify(db *gorm.DB, notifier *wework.Client) gin.HandlerFunc {
+func EventNotify(db *gorm.DB, notifier notify.Notifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
@@ -37,7 +37,7 @@ func EventNotify(db *gorm.DB, notifier *wework.Client) gin.HandlerFunc {
 			return
 		}
 		msg := event.BuildMessage(&item, target, now)
-		if err := notifier.SendText(msg); err != nil {
+		if err := notifier.Send(c.Request.Context(), notify.Message{Text: msg}); err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}

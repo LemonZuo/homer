@@ -1,11 +1,12 @@
 package event
 
 import (
+	"context"
 	"log"
 	"time"
 
 	"github.com/LemonZuo/homer/internal/model"
-	"github.com/LemonZuo/homer/internal/notify/wework"
+	"github.com/LemonZuo/homer/internal/notify"
 
 	"gorm.io/gorm"
 )
@@ -13,9 +14,9 @@ import (
 // RunOnce 扫描启用中的事项，命中提醒窗口的逐条推送。
 // 窗口：[event_date - lead_days, event_date]；过期事项跳过。
 // 去重：last_notified_at 与今天同日则不再推送。
-func RunOnce(db *gorm.DB, notifier *wework.Client) {
+func RunOnce(db *gorm.DB, notifier notify.Notifier) {
 	if notifier == nil || !notifier.Enabled() {
-		log.Print("event: wework not configured, skip")
+		log.Print("event: notifier not configured, skip")
 		return
 	}
 	now := time.Now()
@@ -53,7 +54,7 @@ func RunOnce(db *gorm.DB, notifier *wework.Client) {
 			}
 		}
 		msg := BuildMessage(&it, target, now)
-		if err := notifier.SendText(msg); err != nil {
+		if err := notifier.Send(context.Background(), notify.Message{Text: msg}); err != nil {
 			log.Printf("event send %q: %v", it.Title, err)
 			continue
 		}

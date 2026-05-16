@@ -7,7 +7,7 @@ import (
 	"github.com/LemonZuo/homer/internal/buildinfo"
 	"github.com/LemonZuo/homer/internal/handler"
 	"github.com/LemonZuo/homer/internal/model"
-	"github.com/LemonZuo/homer/internal/notify/wework"
+	"github.com/LemonZuo/homer/internal/notify"
 	"github.com/LemonZuo/homer/internal/web"
 
 	"github.com/gin-contrib/cors"
@@ -27,7 +27,7 @@ var Tables = []TableMeta{
 	{Key: "event", Label: "事项提醒", Path: "event"},
 }
 
-func Setup(db *gorm.DB, notifier *wework.Client, eventNotifier *wework.Client, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, acmeHandler *handler.ACMEHandler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, frontend fs.FS) *gin.Engine {
+func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, acmeHandler *handler.ACMEHandler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, frontend fs.FS) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,

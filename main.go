@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"log"
+	"time"
 
 	"github.com/LemonZuo/homer/internal/buildinfo"
 	"github.com/LemonZuo/homer/internal/cas"
@@ -12,6 +13,7 @@ import (
 	"github.com/LemonZuo/homer/internal/db"
 	"github.com/LemonZuo/homer/internal/handler"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/notify"
 	"github.com/LemonZuo/homer/internal/notify/email"
 	"github.com/LemonZuo/homer/internal/notify/wework"
 	"github.com/LemonZuo/homer/internal/router"
@@ -33,8 +35,10 @@ func main() {
 		log.Fatalf("migrate sms_forwarder: %v", err)
 	}
 
-	notifier := wework.New(cfg.WeWorkBirthdayCorpID, cfg.WeWorkBirthdayAgentID, cfg.WeWorkBirthdaySecret, cfg.WeWorkBirthdayTagID)
-	eventNotifier := wework.New(cfg.WeWorkEventCorpID, cfg.WeWorkEventAgentID, cfg.WeWorkEventSecret, cfg.WeWorkEventTagID)
+	notifier := notify.Retry(3, 2*time.Second, notify.WeWork(
+		wework.New(cfg.WeWorkBirthdayCorpID, cfg.WeWorkBirthdayAgentID, cfg.WeWorkBirthdaySecret, cfg.WeWorkBirthdayTagID)))
+	eventNotifier := notify.Retry(3, 2*time.Second, notify.WeWork(
+		wework.New(cfg.WeWorkEventCorpID, cfg.WeWorkEventAgentID, cfg.WeWorkEventSecret, cfg.WeWorkEventTagID)))
 
 	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
 	casSvc := cas.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
@@ -44,9 +48,11 @@ func main() {
 	acmeSvc := buildACMEService(gormDB, cfg, casSvc)
 	acmeHandler := handler.NewACMEHandler(acmeSvc)
 
-	bypassWeWork := wework.New(cfg.WeWorkBypassCorpID, cfg.WeWorkBypassAgentID, cfg.WeWorkBypassSecret, cfg.WeWorkBypassTagID)
-	bypassEmail := email.NewResend(cfg.ResendAPIKey, cfg.BypassEmailFrom)
-	bypassHandler := handler.NewBypassHandler(bypassWeWork, bypassEmail, cfg.BypassEmailTo, cfg.BypassSubject)
+	bypassWeWork := notify.Retry(3, 2*time.Second, notify.WeWork(
+		wework.New(cfg.WeWorkBypassCorpID, cfg.WeWorkBypassAgentID, cfg.WeWorkBypassSecret, cfg.WeWorkBypassTagID)))
+	bypassEmail := notify.Retry(3, 2*time.Second, notify.Email(
+		email.NewResend(cfg.ResendAPIKey, cfg.BypassEmailFrom), cfg.BypassEmailTo))
+	bypassHandler := handler.NewBypassHandler(bypassWeWork, bypassEmail, cfg.BypassSubject)
 
 	smsHandler := handler.NewSMSHandler(gormDB)
 

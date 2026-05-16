@@ -12,7 +12,7 @@ import (
 	"github.com/LemonZuo/homer/internal/cas"
 	"github.com/LemonZuo/homer/internal/config"
 	"github.com/LemonZuo/homer/internal/event"
-	"github.com/LemonZuo/homer/internal/notify/wework"
+	"github.com/LemonZuo/homer/internal/notify"
 	"github.com/LemonZuo/homer/internal/scheduler"
 )
 
@@ -39,7 +39,7 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) 
 }
 
 // startScheduler 注册并启动后台任务，返回 Scheduler 供调用方 defer Stop。
-func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier *wework.Client, eventNotifier *wework.Client, acmeSvc *acme.Service) *scheduler.Scheduler {
+func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service) *scheduler.Scheduler {
 	sched := scheduler.New()
 
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() {

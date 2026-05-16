@@ -6,8 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/LemonZuo/homer/internal/notify/email"
-	"github.com/LemonZuo/homer/internal/notify/wework"
+	"github.com/LemonZuo/homer/internal/notify"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,14 +14,13 @@ import (
 // BypassHandler 接收 12306Bypass 分流抢票助手推过来的 webhook 通知，
 // 转发到企业微信 + Resend 邮件。任意一路失败不影响另一路。
 type BypassHandler struct {
-	WeWork    *wework.Client
-	Email     *email.ResendClient
-	EmailTo   string
-	Subject   string
+	WeWork  notify.Notifier
+	Email   notify.Notifier
+	Subject string
 }
 
-func NewBypassHandler(w *wework.Client, e *email.ResendClient, emailTo, subject string) *BypassHandler {
-	return &BypassHandler{WeWork: w, Email: e, EmailTo: emailTo, Subject: subject}
+func NewBypassHandler(w, e notify.Notifier, subject string) *BypassHandler {
+	return &BypassHandler{WeWork: w, Email: e, Subject: subject}
 }
 
 func (h *BypassHandler) Register(api *gin.RouterGroup) {
@@ -50,13 +48,14 @@ func (h *BypassHandler) receive(c *gin.Context) {
 		subject = "分流通知"
 	}
 
+	ctx := c.Request.Context()
 	if h.WeWork != nil && h.WeWork.Enabled() {
-		if err := h.WeWork.SendText(content); err != nil {
+		if err := h.WeWork.Send(ctx, notify.Message{Text: content}); err != nil {
 			log.Printf("bypass wework send: %v", err)
 		}
 	}
-	if h.Email != nil && h.Email.Enabled() && h.EmailTo != "" {
-		if err := h.Email.SendText(h.EmailTo, subject, content); err != nil {
+	if h.Email != nil && h.Email.Enabled() {
+		if err := h.Email.Send(ctx, notify.Message{Title: subject, Text: content}); err != nil {
 			log.Printf("bypass email send: %v", err)
 		}
 	}

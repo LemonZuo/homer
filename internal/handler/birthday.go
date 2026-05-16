@@ -6,7 +6,7 @@ import (
 
 	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/model"
-	"github.com/LemonZuo/homer/internal/notify/wework"
+	"github.com/LemonZuo/homer/internal/notify"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -14,7 +14,7 @@ import (
 
 // BirthdayNotify 手动触发：对指定 ID 的记录立刻推送一次企业微信通知。
 // 与定时任务共用消息构造逻辑，措辞按距下次农历生日的天数自适应。
-func BirthdayNotify(db *gorm.DB, notifier *wework.Client) gin.HandlerFunc {
+func BirthdayNotify(db *gorm.DB, notifier notify.Notifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
@@ -31,7 +31,7 @@ func BirthdayNotify(db *gorm.DB, notifier *wework.Client) gin.HandlerFunc {
 			return
 		}
 		msg := birthday.BuildMessage(&item)
-		if err := notifier.SendText(msg); err != nil {
+		if err := notifier.Send(c.Request.Context(), notify.Message{Text: msg}); err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}
