@@ -12,6 +12,7 @@ export const pages: PageDef[] = [
   { key: 'cdn', label: '加速域名', color: 'sky' },
   { key: 'cas', label: '证书管理', color: 'violet' },
   { key: 'acme', label: 'ACME 签发', color: 'emerald' },
+  { key: 'sms', label: '短信转发器', color: 'teal' },
 ]
 
 export function getPage(key: string | undefined): PageDef | undefined {

@@ -126,3 +126,23 @@ CREATE TABLE `acme_issue_task` (
   KEY `idx_domain_started` (`domain_id`, `started_at`),
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发/续期任务流水';
+
+-- 短信转发器（SmsForwarder Android）服务端配置。
+-- 老 Java 项目里用 application.yml 单实例配置；本仓库改为多实例存库 + 前端切换，
+-- 服务端「客户端安全措施」需选「签名校验」，密钥与本表 secret 保持一致。
+-- 仅支持签名鉴权模式：RSA 在老项目里就是错的（用公钥"解密"），SM4 从未实现，均不迁移。
+
+DROP TABLE IF EXISTS `sms_forwarder`;
+CREATE TABLE `sms_forwarder` (
+  `id`         BIGINT       NOT NULL AUTO_INCREMENT,
+  `name`       VARCHAR(64)  NOT NULL                COMMENT '转发器名称，前端下拉显示',
+  `server_url` VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '服务端地址，如 http://192.168.1.100:5000',
+  `secret`     VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '签名校验密钥，与服务端一致',
+  `timeout_seconds` INT     NOT NULL DEFAULT 30     COMMENT '请求超时秒数，旧机器可适当调大',
+  `enabled`    VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_name` (`name`),
+  KEY `idx_enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短信转发器服务端配置';

@@ -11,6 +11,7 @@ import (
 	"github.com/LemonZuo/homer/internal/config"
 	"github.com/LemonZuo/homer/internal/db"
 	"github.com/LemonZuo/homer/internal/handler"
+	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify/email"
 	"github.com/LemonZuo/homer/internal/notify/wework"
 	"github.com/LemonZuo/homer/internal/router"
@@ -28,6 +29,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("connect db: %v", err)
 	}
+	if err := gormDB.AutoMigrate(&model.SmsForwarder{}); err != nil {
+		log.Fatalf("migrate sms_forwarder: %v", err)
+	}
 
 	notifier := wework.New(cfg.WeWorkCorpID, cfg.WeWorkAgentID, cfg.WeWorkSecret, cfg.WeWorkTagID)
 
@@ -43,6 +47,8 @@ func main() {
 	bypassEmail := email.NewResend(cfg.ResendAPIKey, cfg.BypassEmailFrom)
 	bypassHandler := handler.NewBypassHandler(bypassWeWork, bypassEmail, cfg.BypassEmailTo, cfg.BypassSubject)
 
+	smsHandler := handler.NewSMSHandler(gormDB)
+
 	sched := startScheduler(gormDB, cfg, notifier, acmeSvc)
 	defer sched.Stop()
 
@@ -51,7 +57,7 @@ func main() {
 		log.Fatalf("sub frontend/dist: %v", err)
 	}
 
-	r := router.Setup(gormDB, notifier, cdnHandler, casHandler, acmeHandler, bypassHandler, dist)
+	r := router.Setup(gormDB, notifier, cdnHandler, casHandler, acmeHandler, bypassHandler, smsHandler, dist)
 	log.Printf("server listening on %s", cfg.ListenURL())
 	if err := r.Run(cfg.ListenAddr()); err != nil {
 		log.Fatalf("run server: %v", err)
