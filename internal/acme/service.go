@@ -23,6 +23,7 @@ type Service struct {
 	db             *gorm.DB
 	manager        *Manager
 	credstore      *CredentialStore
+	sshCredstore   *SSHCredentialStore
 	accountStore   *AccountStore
 	deployTargets  *DeployTargetStore
 	deployConfigs  *DeployConfigStore
@@ -35,15 +36,16 @@ type Service struct {
 	issueMu sync.Mutex // 串行化签发（lego logger / env 是全局状态）
 }
 
-func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, accounts *AccountStore, deployTargets *DeployTargetStore, deployConfigs *DeployConfigStore, deployRegistry *DeployRegistry, casSvc *cas.Service, hub *SSEHub, dataDir string, renewDays int) *Service {
-	return &Service{db: db, manager: mgr, credstore: store, accountStore: accounts, deployTargets: deployTargets, deployConfigs: deployConfigs, deployRegistry: deployRegistry, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays}
+func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, sshCreds *SSHCredentialStore, accounts *AccountStore, deployTargets *DeployTargetStore, deployConfigs *DeployConfigStore, deployRegistry *DeployRegistry, casSvc *cas.Service, hub *SSEHub, dataDir string, renewDays int) *Service {
+	return &Service{db: db, manager: mgr, credstore: store, sshCredstore: sshCreds, accountStore: accounts, deployTargets: deployTargets, deployConfigs: deployConfigs, deployRegistry: deployRegistry, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays}
 }
 
-func (s *Service) Hub() *SSEHub                      { return s.hub }
-func (s *Service) Credentials() *CredentialStore     { return s.credstore }
-func (s *Service) Accounts() *AccountStore           { return s.accountStore }
-func (s *Service) DeployTargets() *DeployTargetStore { return s.deployTargets }
-func (s *Service) DeployConfigs() *DeployConfigStore { return s.deployConfigs }
+func (s *Service) Hub() *SSEHub                         { return s.hub }
+func (s *Service) Credentials() *CredentialStore        { return s.credstore }
+func (s *Service) SSHCredentials() *SSHCredentialStore  { return s.sshCredstore }
+func (s *Service) Accounts() *AccountStore              { return s.accountStore }
+func (s *Service) DeployTargets() *DeployTargetStore    { return s.deployTargets }
+func (s *Service) DeployConfigs() *DeployConfigStore    { return s.deployConfigs }
 
 // DomainView 联查域名 + 最近一次证书（NotAfter 用于前端显示剩余天数）。
 type DomainView struct {

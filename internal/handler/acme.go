@@ -116,6 +116,10 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.GET("/credentials", h.listCredentials)
 	g.POST("/credentials", h.upsertCredential)
 	g.DELETE("/credentials/:id", h.deleteCredential)
+	g.GET("/ssh-credentials", h.listSSHCredentials)
+	g.POST("/ssh-credentials", h.upsertSSHCredential)
+	g.PUT("/ssh-credentials/:id", h.updateSSHCredential)
+	g.DELETE("/ssh-credentials/:id", h.deleteSSHCredential)
 	g.GET("/domains", h.listDomains)
 	g.POST("/domains", h.createDomain)
 	g.PUT("/domains/:id", h.updateDomain)
@@ -704,6 +708,63 @@ func (h *ACMEHandler) deleteCredential(c *gin.Context) {
 		return
 	}
 	if err := h.svc.Credentials().Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) listSSHCredentials(c *gin.Context) {
+	items, err := h.svc.SSHCredentials().List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertSSHCredential(c *gin.Context) {
+	var cred model.SSHCredential
+	if err := c.ShouldBindJSON(&cred); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	cred.ID = 0
+	row, err := h.svc.SSHCredentials().Upsert(&cred)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateSSHCredential(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var cred model.SSHCredential
+	if err := c.ShouldBindJSON(&cred); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	cred.ID = id
+	row, err := h.svc.SSHCredentials().Upsert(&cred)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteSSHCredential(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.SSHCredentials().Delete(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

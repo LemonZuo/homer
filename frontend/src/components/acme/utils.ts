@@ -62,6 +62,8 @@ export function deployTargetToSSH(t: DeployTarget): SSHTarget {
     name: t.name,
     host: endpoint.host,
     port: endpoint.port,
+    auth_source: String(auth.auth_source ?? 'inline') === 'credential' ? 'credential' : 'inline',
+    credential_id: Number(auth.credential_id ?? 0) || 0,
     username: String(auth.username ?? ''),
     auth_type: String(auth.auth_type ?? 'password'),
     password: String(auth.password ?? ''),
@@ -96,18 +98,23 @@ export function splitDeployTargets(rows: DeployTarget[]) {
 }
 
 export function sshTargetToDeployTarget(t: SSHTarget): DeployTarget {
+  const credential = t.auth_source === 'credential'
+  const auth = credential
+    ? { auth_source: 'credential', credential_id: t.credential_id }
+    : {
+        auth_source: 'inline',
+        username: t.username,
+        auth_type: t.auth_type,
+        password: t.password,
+        private_key: t.private_key,
+        passphrase: t.passphrase,
+      }
   return {
     id: t.id,
     name: t.name,
     kind: 'ssh',
     endpoint: `${t.host}:${t.port || 22}`,
-    auth_json: JSON.stringify({
-      username: t.username,
-      auth_type: t.auth_type,
-      password: t.password,
-      private_key: t.private_key,
-      passphrase: t.passphrase,
-    }),
+    auth_json: JSON.stringify(auth),
     config_json: '{}',
     enabled: t.enabled,
   }
@@ -266,7 +273,8 @@ export function targetByID(targets: SSHTarget[], id: number) {
 
 export function targetSummary(t?: SSHTarget) {
   if (!t) return 'SSH 机器不存在'
-  return `${t.name} · ${t.username}@${t.host}:${t.port || 22}`
+  const who = t.auth_source === 'credential' ? '凭证' : t.username || '未配置用户'
+  return `${t.name} · ${who}@${t.host}:${t.port || 22}`
 }
 
 export function configTitle(cfg: SSHDeployConfig) {

@@ -48,11 +48,25 @@ export interface DeployTarget {
   updated_at?: string
 }
 
+export interface SSHCredential {
+  id: number
+  name: string
+  username: string
+  auth_type: 'password' | 'key' | string
+  password: string
+  private_key: string
+  passphrase: string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface SSHTarget {
   id: number
   name: string
   host: string
   port: number
+  auth_source: 'inline' | 'credential' | string
+  credential_id: number
   username: string
   auth_type: 'password' | 'key' | string
   password: string

@@ -34,6 +34,7 @@ import type {
   AcmeAccount,
   Credential,
   Domain,
+  SSHCredential,
   SSHDeployConfig,
   SSHTarget,
   SafelineDeployConfig,
@@ -59,6 +60,7 @@ import { TaskPager } from './acme/TaskPager'
 import { LogDrawer } from './acme/LogDrawer'
 import { DomainEditDialog } from './acme/dialogs/DomainEditDialog'
 import { SSHTargetEditDialog } from './acme/dialogs/SSHTargetEditDialog'
+import { SSHCredentialEditDialog } from './acme/dialogs/SSHCredentialEditDialog'
 import { SafelineTargetEditDialog } from './acme/dialogs/SafelineTargetEditDialog'
 import { AccountEditDialog } from './acme/dialogs/AccountEditDialog'
 import { CredentialEditDialog } from './acme/dialogs/CredentialEditDialog'
@@ -67,6 +69,7 @@ import { SafelineDeployConfigEditDialog } from './acme/dialogs/SafelineDeployCon
 import { CredentialsDrawer } from './acme/drawers/CredentialsDrawer'
 import { AccountsDrawer } from './acme/drawers/AccountsDrawer'
 import { DeployTargetsEntryDrawer } from './acme/drawers/DeployTargetsEntryDrawer'
+import { SSHCredentialsDrawer } from './acme/drawers/SSHCredentialsDrawer'
 import { DeployConfigsDrawer } from './acme/drawers/DeployConfigsDrawer'
 
 export default function AcmePage() {
@@ -74,6 +77,7 @@ export default function AcmePage() {
   const [accounts, setAccounts] = useState<AcmeAccount[]>([])
   const [sshTargets, setSSHTargets] = useState<SSHTarget[]>([])
   const [safelineTargets, setSafelineTargets] = useState<SafelineTarget[]>([])
+  const [sshCredentials, setSSHCredentials] = useState<SSHCredential[]>([])
   const [providers, setProviders] = useState<string[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
@@ -119,6 +123,10 @@ export default function AcmePage() {
   const [safeEditOpen, setSafeEditOpen] = useState(false)
   const [safeEditTarget, setSafeEditTarget] = useState<SafelineTarget | null>(null)
   const [safeDeletePending, setSafeDeletePending] = useState<SafelineTarget | null>(null)
+  const [sshCredDrawerOpen, setSSHCredDrawerOpen] = useState(false)
+  const [sshCredEditOpen, setSSHCredEditOpen] = useState(false)
+  const [sshCredEditTarget, setSSHCredEditTarget] = useState<SSHCredential | null>(null)
+  const [sshCredDeletePending, setSSHCredDeletePending] = useState<SSHCredential | null>(null)
 
   const cs = getColorSet('emerald')
   const accountSummary = useMemo(() => {
@@ -135,13 +143,14 @@ export default function AcmePage() {
   const reloadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [d, p, t, c, a, targets] = await Promise.all([
+      const [d, p, t, c, a, targets, sc] = await Promise.all([
         api.get('/acme/domains'),
         api.get('/acme/providers'),
         api.get(`/acme/tasks?page=${taskPageRef.current}&page_size=${taskPageSizeRef.current}`),
         api.get('/acme/credentials'),
         api.get('/acme/accounts'),
         api.get('/acme/deploy/targets'),
+        api.get('/acme/ssh-credentials'),
       ])
       const groupedTargets = splitDeployTargets(targets.data?.data ?? [])
       setDomains(d.data?.data ?? [])
@@ -153,6 +162,7 @@ export default function AcmePage() {
       setAccounts(a.data?.data ?? [])
       setSSHTargets(groupedTargets.ssh)
       setSafelineTargets(groupedTargets.safeline)
+      setSSHCredentials(sc.data?.data ?? [])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载失败')
     } finally {
@@ -192,6 +202,28 @@ export default function AcmePage() {
       toast.error(e?.response?.data?.error || e?.message || '加载部署目标失败')
     }
   }, [])
+
+  const reloadSSHCredentials = useCallback(async () => {
+    try {
+      const { data } = await api.get('/acme/ssh-credentials')
+      setSSHCredentials(data?.data ?? [])
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '加载登录凭证失败')
+    }
+  }, [])
+
+  const onDeleteSSHCredential = async () => {
+    const c = sshCredDeletePending
+    if (!c) return
+    setSSHCredDeletePending(null)
+    try {
+      await api.delete(`/acme/ssh-credentials/${c.id}`)
+      toast.success('已删除')
+      await reloadSSHCredentials()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
 
   const reloadDeployConfigs = useCallback(async (domainID: number) => {
     setDeployConfigLoading(true)
@@ -864,6 +896,7 @@ export default function AcmePage() {
           setSSHEditOpen(true)
         }}
         onDeleteSSH={(t) => setSSHDeletePending(t)}
+        onManageCredentials={() => setSSHCredDrawerOpen(true)}
         onTestSSH={async (t) => {
           try {
             await api.post(`/acme/ssh-targets/${t.id}/test`)
@@ -895,7 +928,31 @@ export default function AcmePage() {
         open={sshEditOpen}
         onOpenChange={setSSHEditOpen}
         target={sshEditTarget}
+        credentials={sshCredentials}
+        onManageCredentials={() => setSSHCredDrawerOpen(true)}
         onSaved={reloadDeployTargets}
+      />
+
+      <SSHCredentialsDrawer
+        open={sshCredDrawerOpen}
+        onOpenChange={setSSHCredDrawerOpen}
+        credentials={sshCredentials}
+        onAdd={() => {
+          setSSHCredEditTarget(null)
+          setSSHCredEditOpen(true)
+        }}
+        onEdit={(c) => {
+          setSSHCredEditTarget(c)
+          setSSHCredEditOpen(true)
+        }}
+        onDelete={(c) => setSSHCredDeletePending(c)}
+      />
+
+      <SSHCredentialEditDialog
+        open={sshCredEditOpen}
+        onOpenChange={setSSHCredEditOpen}
+        target={sshCredEditTarget}
+        onSaved={reloadSSHCredentials}
       />
 
       <SafelineTargetEditDialog
@@ -1058,6 +1115,30 @@ export default function AcmePage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={onDeleteSafelineTarget}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!sshCredDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setSSHCredDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除登录凭证</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除登录凭证{' '}
+              <span className="font-mono font-medium text-foreground">
+                {sshCredDeletePending?.name}
+              </span>
+              ；引用了该凭证的机器将无法连接，请确认。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteSSHCredential}>删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -1,4 +1,4 @@
-import { Edit3, Plus, RefreshCw, Server, ShieldCheck, Trash2 } from 'lucide-react'
+import { Edit3, KeyRound, Plus, RefreshCw, Server, ShieldCheck, Trash2 } from 'lucide-react'
 import { Card } from '../../ui/card'
 import { Button } from '../../ui/button'
 import {
@@ -21,6 +21,7 @@ export function DeployTargetsEntryDrawer({
   onEditSSH,
   onDeleteSSH,
   onTestSSH,
+  onManageCredentials,
   onAddSafeline,
   onEditSafeline,
   onDeleteSafeline,
@@ -34,6 +35,7 @@ export function DeployTargetsEntryDrawer({
   onEditSSH: (t: SSHTarget) => void
   onDeleteSSH: (t: SSHTarget) => void
   onTestSSH: (t: SSHTarget) => void
+  onManageCredentials: () => void
   onAddSafeline: () => void
   onEditSafeline: (t: SafelineTarget) => void
   onDeleteSafeline: (t: SafelineTarget) => void
@@ -54,10 +56,16 @@ export function DeployTargetsEntryDrawer({
               <div className="text-[13px] font-medium">SSH 机器</div>
               <div className="text-[11.5px] text-muted-foreground">{sshTargets.length} 台机器</div>
             </div>
-            <Button size="sm" onClick={onAddSSH}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              添加机器
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={onManageCredentials}>
+                <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                登录凭证
+              </Button>
+              <Button size="sm" onClick={onAddSSH}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                添加机器
+              </Button>
+            </div>
           </div>
           {sshTargets.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
@@ -84,7 +92,9 @@ export function DeployTargetsEntryDrawer({
                         </span>
                       </div>
                       <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
-                        {t.username}@{t.host}:{t.port || 22} · {authLabel(t.auth_type)}
+                        {t.auth_source === 'credential'
+                          ? `凭证@${t.host}:${t.port || 22} · 登录凭证`
+                          : `${t.username}@${t.host}:${t.port || 22} · ${authLabel(t.auth_type)}`}
                       </div>
                     </div>
                     <div className="flex gap-2 sm:contents">

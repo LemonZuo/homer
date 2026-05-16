@@ -20,18 +20,30 @@ import (
 )
 
 // Driver 实现 acme.DeployDriver，把证书写到远端 SSH 机器并执行部署命令。
-type Driver struct{}
-
-// TargetAuth 是 acme_deploy_target.auth_json 在 SSH 场景下的结构。
-type TargetAuth struct {
-	Username   string `json:"username"`
-	AuthType   string `json:"auth_type"`
-	Password   string `json:"password"`
-	PrivateKey string `json:"private_key"`
-	Passphrase string `json:"passphrase"`
+type Driver struct {
+	credentials *acme.SSHCredentialStore
 }
 
-func NewDriver() *Driver { return &Driver{} }
+// TargetAuth 是 acme_deploy_target.auth_json 在 SSH 场景下的结构。
+// AuthSource:
+//   - ""/"inline"：使用本结构里的 Username + 密码/私钥
+//   - "credential"：忽略 inline 字段，运行时按 CredentialID 加载 ssh_credential
+type TargetAuth struct {
+	AuthSource   string `json:"auth_source,omitempty"`
+	CredentialID int64  `json:"credential_id,omitempty"`
+	Username     string `json:"username,omitempty"`
+	AuthType     string `json:"auth_type,omitempty"`
+	Password     string `json:"password,omitempty"`
+	PrivateKey   string `json:"private_key,omitempty"`
+	Passphrase   string `json:"passphrase,omitempty"`
+}
+
+// AuthSourceCredential 表示按凭证 id 解析认证信息。
+const AuthSourceCredential = "credential"
+
+func NewDriver(credentials *acme.SSHCredentialStore) *Driver {
+	return &Driver{credentials: credentials}
+}
 
 func (d *Driver) Kind() string  { return acme.DeployKindSSH }
 func (d *Driver) Label() string { return "SSH 机器" }
@@ -57,6 +69,9 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	if err != nil {
 		return err
 	}
+	if err := d.resolveCredential(t); err != nil {
+		return err
+	}
 	auth, err := sshAuth(*t)
 	if err != nil {
 		return err
@@ -78,6 +93,9 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
 	target, err := targetFromDeployTarget(req.Target)
 	if err != nil {
+		return nil, err
+	}
+	if err := d.resolveCredential(target); err != nil {
 		return nil, err
 	}
 	opts, err := optionsFromGenericConfig(req.Config, req.Domain.MainDomain)
@@ -122,6 +140,9 @@ func (o DeployOptions) validate() error {
 	return nil
 }
 
+// targetFromDeployTarget 仅做 auth_json 解析，不解析凭证：
+// UI 列表/详情走这里，凭证模式下保留 AuthSource/CredentialID，inline 字段为空。
+// 真正建连前（Deploy/TestTarget）再调 resolveCredential 把凭证字段填进去。
 func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget, error) {
 	auth := TargetAuth{}
 	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.AuthJSON)), &auth); err != nil {
@@ -132,37 +153,78 @@ func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget
 		return nil, err
 	}
 	out := &model.ACMESSHTarget{
-		ID:         target.ID,
-		Name:       target.Name,
-		Host:       host,
-		Port:       port,
-		Username:   auth.Username,
-		AuthType:   auth.AuthType,
-		Password:   auth.Password,
-		PrivateKey: auth.PrivateKey,
-		Passphrase: auth.Passphrase,
-		Enabled:    target.Enabled,
-		CreatedAt:  target.CreatedAt,
-		UpdatedAt:  target.UpdatedAt,
+		ID:           target.ID,
+		Name:         target.Name,
+		Host:         host,
+		Port:         port,
+		AuthSource:   auth.AuthSource,
+		CredentialID: auth.CredentialID,
+		Username:     auth.Username,
+		AuthType:     auth.AuthType,
+		Password:     auth.Password,
+		PrivateKey:   auth.PrivateKey,
+		Passphrase:   auth.Passphrase,
+		Enabled:      target.Enabled,
+		CreatedAt:    target.CreatedAt,
+		UpdatedAt:    target.UpdatedAt,
 	}
 	normalizeTarget(out)
 	return out, nil
 }
 
+// resolveCredential 在凭证模式下把 ssh_credential 的认证信息覆盖到 target 上。
+// inline 模式直接返回。
+func (d *Driver) resolveCredential(t *model.ACMESSHTarget) error {
+	if t.AuthSource != AuthSourceCredential {
+		return nil
+	}
+	if d.credentials == nil {
+		return errors.New("凭证模式未注入 SSHCredentialStore")
+	}
+	if t.CredentialID <= 0 {
+		return errors.New("凭证模式需要选择登录凭证")
+	}
+	cred, err := d.credentials.Get(t.CredentialID)
+	if err != nil {
+		return fmt.Errorf("加载 SSH 登录凭证失败：%w", err)
+	}
+	t.Username = strings.TrimSpace(cred.Username)
+	t.AuthType = strings.ToLower(strings.TrimSpace(cred.AuthType))
+	t.Password = strings.TrimSpace(cred.Password)
+	t.PrivateKey = strings.TrimSpace(cred.PrivateKey)
+	t.Passphrase = strings.TrimSpace(cred.Passphrase)
+	if t.AuthType == "" {
+		t.AuthType = "password"
+	}
+	return nil
+}
+
 func deployTargetFromTarget(t model.ACMESSHTarget) model.ACMEDeployTarget {
 	normalizeTarget(&t)
+	auth := TargetAuth{
+		AuthSource:   t.AuthSource,
+		CredentialID: t.CredentialID,
+	}
+	if t.AuthSource == AuthSourceCredential {
+		// 凭证模式不持久化 inline 字段，避免脱节的脏数据
+		auth.Username = ""
+		auth.AuthType = ""
+		auth.Password = ""
+		auth.PrivateKey = ""
+		auth.Passphrase = ""
+	} else {
+		auth.Username = t.Username
+		auth.AuthType = t.AuthType
+		auth.Password = t.Password
+		auth.PrivateKey = t.PrivateKey
+		auth.Passphrase = t.Passphrase
+	}
 	return model.ACMEDeployTarget{
-		ID:       t.ID,
-		Name:     t.Name,
-		Kind:     acme.DeployKindSSH,
-		Endpoint: net.JoinHostPort(t.Host, strconv.Itoa(t.Port)),
-		AuthJSON: acme.MustJSON(TargetAuth{
-			Username:   t.Username,
-			AuthType:   t.AuthType,
-			Password:   t.Password,
-			PrivateKey: t.PrivateKey,
-			Passphrase: t.Passphrase,
-		}),
+		ID:         t.ID,
+		Name:       t.Name,
+		Kind:       acme.DeployKindSSH,
+		Endpoint:   net.JoinHostPort(t.Host, strconv.Itoa(t.Port)),
+		AuthJSON:   acme.MustJSON(auth),
 		ConfigJSON: "{}",
 		Enabled:    t.Enabled,
 		CreatedAt:  t.CreatedAt,
@@ -377,6 +439,7 @@ func shellQuote(s string) string {
 func normalizeTarget(t *model.ACMESSHTarget) {
 	t.Name = strings.TrimSpace(t.Name)
 	t.Host = strings.TrimSpace(t.Host)
+	t.AuthSource = strings.ToLower(strings.TrimSpace(t.AuthSource))
 	t.Username = strings.TrimSpace(t.Username)
 	t.AuthType = strings.ToLower(strings.TrimSpace(t.AuthType))
 	t.Password = strings.TrimSpace(t.Password)
@@ -385,7 +448,10 @@ func normalizeTarget(t *model.ACMESSHTarget) {
 	if t.Port <= 0 {
 		t.Port = 22
 	}
-	if t.AuthType == "" {
+	if t.AuthSource == "" {
+		t.AuthSource = "inline"
+	}
+	if t.AuthSource != AuthSourceCredential && t.AuthType == "" {
 		t.AuthType = "password"
 	}
 }
@@ -397,11 +463,19 @@ func validateTarget(t model.ACMESSHTarget) error {
 	if t.Host == "" {
 		return errors.New("SSH 主机不能为空")
 	}
-	if t.Username == "" {
-		return errors.New("SSH 用户名不能为空")
-	}
 	if t.Port <= 0 || t.Port > 65535 {
 		return errors.New("SSH 端口无效")
+	}
+	// 凭证模式：用户名/密码/私钥都在 ssh_credential 上（且建凭证时已校验），
+	// 这里只需确认引用了一个有效凭证 id。
+	if t.AuthSource == AuthSourceCredential {
+		if t.CredentialID <= 0 {
+			return errors.New("凭证模式需要选择登录凭证")
+		}
+		return nil
+	}
+	if t.Username == "" {
+		return errors.New("SSH 用户名不能为空")
 	}
 	switch t.AuthType {
 	case "password":

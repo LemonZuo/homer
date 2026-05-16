@@ -66,20 +66,45 @@ type ACMEDeployConfig struct {
 
 func (ACMEDeployConfig) TableName() string { return "acme_deploy_config" }
 
-// ACMESSHTarget 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployTarget。
-type ACMESSHTarget struct {
+// SSHCredential 可被多台机器复用的 SSH 登录身份（用户名 + 密码 / 私钥）。
+// 引用关系不落 acme_deploy_target 列，而是写在 auth_json 里：
+//
+//	{"auth_source":"credential","credential_id":42}
+//
+// 这样 safeline 等其他 driver 无需感知此表。
+type SSHCredential struct {
 	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
 	Name       string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
-	Host       string    `gorm:"column:host;size:255" json:"host"`
-	Port       int       `gorm:"column:port;default:22" json:"port"`
 	Username   string    `gorm:"column:username;size:128" json:"username"`
 	AuthType   string    `gorm:"column:auth_type;size:16" json:"auth_type"` // password | key
 	Password   string    `gorm:"column:password;type:text" json:"password"`
 	PrivateKey string    `gorm:"column:private_key;type:text" json:"private_key"`
 	Passphrase string    `gorm:"column:passphrase;type:text" json:"passphrase"`
-	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (SSHCredential) TableName() string { return "ssh_credential" }
+
+// ACMESSHTarget 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployTarget。
+// AuthSource:
+//   - "inline"（默认）：使用 Username + AuthType + Password|PrivateKey|Passphrase
+//   - "credential"：忽略 inline 字段，运行时从 ssh_credential 加载（按 CredentialID）
+type ACMESSHTarget struct {
+	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name         string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
+	Host         string    `gorm:"column:host;size:255" json:"host"`
+	Port         int       `gorm:"column:port;default:22" json:"port"`
+	AuthSource   string    `gorm:"-" json:"auth_source"`   // inline | credential
+	CredentialID int64     `gorm:"-" json:"credential_id"` // auth_source=credential 时使用
+	Username     string    `gorm:"column:username;size:128" json:"username"`
+	AuthType     string    `gorm:"column:auth_type;size:16" json:"auth_type"` // password | key
+	Password     string    `gorm:"column:password;type:text" json:"password"`
+	PrivateKey   string    `gorm:"column:private_key;type:text" json:"private_key"`
+	Passphrase   string    `gorm:"column:passphrase;type:text" json:"passphrase"`
+	Enabled      BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 // ACMESSHDeployConfig 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployConfig。

@@ -151,6 +151,25 @@ CREATE TABLE `sms_forwarder` (
   KEY `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短信转发器服务端配置';
 
+-- SSH 登录凭证：可复用的认证身份（密码 / 私钥）。
+-- 多台 acme_deploy_target 可引用同一条凭证，避免重复输入。
+-- 引用关系存在 acme_deploy_target.auth_json 里：{"auth_source":"credential","credential_id":42}。
+-- 不在 acme_deploy_target 加 FK 列，保持 driver 多态：safeline 等其他 kind 不感知此表。
+DROP TABLE IF EXISTS `ssh_credential`;
+CREATE TABLE `ssh_credential` (
+  `id`           BIGINT       NOT NULL AUTO_INCREMENT,
+  `name`         VARCHAR(64)  NOT NULL                COMMENT '凭证名称，前端下拉显示',
+  `username`     VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '登录用户名（与密钥/密码绑定）',
+  `auth_type`    VARCHAR(16)  NOT NULL DEFAULT 'password' COMMENT 'password | key',
+  `password`     TEXT         NULL                    COMMENT 'password 模式登录密码',
+  `private_key`  TEXT         NULL                    COMMENT 'key 模式 OpenSSH 私钥',
+  `passphrase`   TEXT         NULL                    COMMENT 'key 模式私钥口令（可选）',
+  `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SSH 登录凭证（可被多台机器复用）';
+
 -- 事项提醒：一次性日期提醒（会议/体检/办事截止等），与生日提醒隔离。
 -- 触发规则：事项当天前 lead_days 天起，每天 cron 推送一次。
 -- 去重：last_notified_at 记录最近一次发送时间，同一天命中则不重复推。

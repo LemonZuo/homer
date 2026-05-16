@@ -7,6 +7,8 @@ import { Input } from '../../ui/input'
 import { Textarea } from '../../ui/textarea'
 import { Label } from '../../ui/label'
 import { Switch } from '../../ui/switch'
+import { Segmented } from '../../ui/segmented'
+import { Select } from '../../ui/select'
 import {
   Dialog,
   DialogContent,
@@ -15,25 +17,32 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../ui/dialog'
-import type { SSHTarget } from '../types'
+import type { SSHCredential, SSHTarget } from '../types'
 import { sshTargetToDeployTarget } from '../utils'
+
+type AuthMode = 'password' | 'key' | 'credential'
 
 export function SSHTargetEditDialog({
   open,
   onOpenChange,
   target,
+  credentials,
+  onManageCredentials,
   onSaved,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   target: SSHTarget | null
+  credentials: SSHCredential[]
+  onManageCredentials: () => void
   onSaved: () => void
 }) {
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
   const [port, setPort] = useState('22')
+  const [authMode, setAuthMode] = useState<AuthMode>('password')
+  const [credentialID, setCredentialID] = useState(0)
   const [username, setUsername] = useState('')
-  const [authType, setAuthType] = useState<'password' | 'key'>('password')
   const [password, setPassword] = useState('')
   const [privateKey, setPrivateKey] = useState('')
   const [passphrase, setPassphrase] = useState('')
@@ -45,8 +54,13 @@ export function SSHTargetEditDialog({
     setName(target?.name ?? '')
     setHost(target?.host ?? '')
     setPort(String(target?.port || 22))
+    if (target?.auth_source === 'credential') {
+      setAuthMode('credential')
+    } else {
+      setAuthMode(target?.auth_type === 'key' ? 'key' : 'password')
+    }
+    setCredentialID(target?.credential_id ?? 0)
     setUsername(target?.username ?? '')
-    setAuthType(target?.auth_type === 'key' ? 'key' : 'password')
     setPassword(target?.password ?? '')
     setPrivateKey(target?.private_key ?? '')
     setPassphrase(target?.passphrase ?? '')
@@ -55,16 +69,19 @@ export function SSHTargetEditDialog({
 
   const save = async () => {
     const portNum = Number(port)
+    const credential = authMode === 'credential'
     const form = {
       id: target?.id ?? 0,
       name: name.trim(),
       host: host.trim(),
       port: portNum,
-      username: username.trim(),
-      auth_type: authType,
-      password: password.trim(),
-      private_key: privateKey.trim(),
-      passphrase: passphrase.trim(),
+      auth_source: credential ? 'credential' : 'inline',
+      credential_id: credential ? credentialID : 0,
+      username: credential ? '' : username.trim(),
+      auth_type: credential ? 'password' : authMode,
+      password: credential ? '' : password.trim(),
+      private_key: credential ? '' : privateKey.trim(),
+      passphrase: credential ? '' : passphrase.trim(),
       enabled,
       created_at: target?.created_at ?? '',
       updated_at: target?.updated_at ?? '',
@@ -77,21 +94,28 @@ export function SSHTargetEditDialog({
       toast.error('SSH 主机必填')
       return
     }
-    if (!form.username) {
-      toast.error('SSH 用户名必填')
-      return
-    }
     if (!Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) {
       toast.error('SSH 端口无效')
       return
     }
-    if (authType === 'password' && !form.password) {
-      toast.error('密码认证需要填写密码')
-      return
-    }
-    if (authType === 'key' && !form.private_key) {
-      toast.error('证书模式需要填写私钥')
-      return
+    if (credential) {
+      if (!form.credential_id) {
+        toast.error('请选择登录凭证')
+        return
+      }
+    } else {
+      if (!form.username) {
+        toast.error('SSH 用户名必填')
+        return
+      }
+      if (authMode === 'password' && !form.password) {
+        toast.error('密码认证需要填写密码')
+        return
+      }
+      if (authMode === 'key' && !form.private_key) {
+        toast.error('证书模式需要填写私钥')
+        return
+      }
     }
     const payload = sshTargetToDeployTarget(form)
     setSaving(true)
@@ -160,30 +184,60 @@ export function SSHTargetEditDialog({
             </div>
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="ssh-user">用户名</Label>
-            <Input
-              id="ssh-user"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="off"
-              data-lpignore="true"
-              data-1p-ignore="true"
-              className="font-mono text-[12px]"
+            <Label>认证方式</Label>
+            <Segmented<AuthMode>
+              value={authMode}
+              onChange={setAuthMode}
+              options={[
+                { value: 'password', label: '密码模式' },
+                { value: 'key', label: '证书模式（私钥）' },
+                { value: 'credential', label: '登录凭证' },
+              ]}
             />
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ssh-auth">认证方式</Label>
-            <select
-              id="ssh-auth"
-              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
-              value={authType}
-              onChange={(e) => setAuthType(e.target.value === 'key' ? 'key' : 'password')}
-            >
-              <option value="password">密码模式</option>
-              <option value="key">证书模式（私钥）</option>
-            </select>
-          </div>
-          {authType === 'password' ? (
+          {authMode === 'credential' ? (
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="ssh-credential">登录凭证</Label>
+                <button
+                  type="button"
+                  className="text-[11.5px] text-primary hover:underline"
+                  onClick={onManageCredentials}
+                >
+                  管理登录凭证
+                </button>
+              </div>
+              <Select
+                id="ssh-credential"
+                value={credentialID}
+                onChange={setCredentialID}
+                placeholder="请选择登录凭证"
+                options={credentials.map((c) => ({
+                  value: c.id,
+                  label: `${c.name}（${c.username} · ${c.auth_type === 'key' ? '证书' : '密码'}）`,
+                }))}
+              />
+              {credentials.length === 0 && (
+                <p className="text-[11.5px] text-muted-foreground">
+                  还没有登录凭证，点「管理登录凭证」创建
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="grid gap-1.5">
+              <Label htmlFor="ssh-user">用户名</Label>
+              <Input
+                id="ssh-user"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                className="font-mono text-[12px]"
+              />
+            </div>
+          )}
+          {authMode === 'password' && (
             <div className="grid gap-1.5">
               <Label htmlFor="ssh-password">密码</Label>
               <Input
@@ -196,7 +250,8 @@ export function SSHTargetEditDialog({
                 data-1p-ignore="true"
               />
             </div>
-          ) : (
+          )}
+          {authMode === 'key' && (
             <>
               <div className="grid gap-1.5">
                 <Label htmlFor="ssh-private-key">私钥</Label>
