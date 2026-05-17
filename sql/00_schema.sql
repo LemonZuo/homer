@@ -69,6 +69,7 @@ CREATE TABLE `acme_domain` (
   `san_domains`  VARCHAR(1024) NOT NULL DEFAULT ''    COMMENT 'SAN，逗号分隔；可空',
   `account_id`   BIGINT       NOT NULL DEFAULT 0      COMMENT 'ACME CA 账号 ID',
   `provider`     VARCHAR(64)  NOT NULL                COMMENT 'lego DNS provider key（alidns/cloudflare/dnspod...）',
+  `san_providers` VARCHAR(1024) NOT NULL DEFAULT ''   COMMENT '按域名指定 provider 的覆盖表 JSON {"b.com":"alidns"}；空=全用 provider',
   `enabled`      VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用自动续期：1/0',
   `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

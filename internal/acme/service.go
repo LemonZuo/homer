@@ -40,12 +40,12 @@ func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, sshCreds *SSH
 	return &Service{db: db, manager: mgr, credstore: store, sshCredstore: sshCreds, accountStore: accounts, deployTargets: deployTargets, deployConfigs: deployConfigs, deployRegistry: deployRegistry, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays}
 }
 
-func (s *Service) Hub() *SSEHub                         { return s.hub }
-func (s *Service) Credentials() *CredentialStore        { return s.credstore }
-func (s *Service) SSHCredentials() *SSHCredentialStore  { return s.sshCredstore }
-func (s *Service) Accounts() *AccountStore              { return s.accountStore }
-func (s *Service) DeployTargets() *DeployTargetStore    { return s.deployTargets }
-func (s *Service) DeployConfigs() *DeployConfigStore    { return s.deployConfigs }
+func (s *Service) Hub() *SSEHub                        { return s.hub }
+func (s *Service) Credentials() *CredentialStore       { return s.credstore }
+func (s *Service) SSHCredentials() *SSHCredentialStore { return s.sshCredstore }
+func (s *Service) Accounts() *AccountStore             { return s.accountStore }
+func (s *Service) DeployTargets() *DeployTargetStore   { return s.deployTargets }
+func (s *Service) DeployConfigs() *DeployConfigStore   { return s.deployConfigs }
 
 // DomainView 联查域名 + 最近一次证书（NotAfter 用于前端显示剩余天数）。
 type DomainView struct {
@@ -84,6 +84,33 @@ func (s *Service) ListDomains() ([]DomainView, error) {
 	return out, nil
 }
 
+// normalizeSanProviders 校验并归一化 san_providers JSON；空串保持空串。
+func normalizeSanProviders(s string) (string, error) {
+	if strings.TrimSpace(s) == "" {
+		return "", nil
+	}
+	m := map[string]string{}
+	if err := JSONUnmarshal([]byte(s), &m); err != nil {
+		return "", errors.New("san_providers 不是合法的 JSON 对象")
+	}
+	out := map[string]string{}
+	for k, v := range m {
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if k != "" && v != "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return "", nil
+	}
+	b, err := JSONMarshalIndent(out)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 // CreateDomain 新增域名。
 func (s *Service) CreateDomain(d *model.ACMEDomain) error {
 	d.MainDomain = strings.TrimSpace(d.MainDomain)
@@ -91,6 +118,11 @@ func (s *Service) CreateDomain(d *model.ACMEDomain) error {
 	if d.MainDomain == "" || d.Provider == "" {
 		return errors.New("main_domain 与 provider 必填")
 	}
+	sp, err := normalizeSanProviders(d.SanProviders)
+	if err != nil {
+		return err
+	}
+	d.SanProviders = sp
 	if _, err := s.accountStore.Get(d.AccountID); err != nil {
 		return err
 	}
@@ -107,6 +139,11 @@ func (s *Service) UpdateDomain(d *model.ACMEDomain) error {
 	if d.MainDomain == "" || d.Provider == "" {
 		return errors.New("main_domain 与 provider 必填")
 	}
+	sp, err := normalizeSanProviders(d.SanProviders)
+	if err != nil {
+		return err
+	}
+	d.SanProviders = sp
 	if _, err := s.accountStore.Get(d.AccountID); err != nil {
 		return err
 	}
@@ -246,6 +283,14 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 	logf(logw, "开始签发：%s（provider=%s）", d.MainDomain, d.Provider)
 	domains := BuildDomains(d)
 	logf(logw, "目标域名：%s", strings.Join(domains, ", "))
+	sanProviders := ParseSanProviders(d)
+	if len(sanProviders) > 0 {
+		parts := make([]string, 0, len(sanProviders))
+		for dom, pv := range sanProviders {
+			parts = append(parts, fmt.Sprintf("%s→%s", dom, pv))
+		}
+		logf(logw, "按域名指定 provider：%s", strings.Join(parts, ", "))
+	}
 
 	err := func() error {
 		account, err := s.accountStore.Get(d.AccountID)
@@ -257,7 +302,7 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 		if err != nil {
 			return fmt.Errorf("初始化 lego 失败：%w", err)
 		}
-		res, err := client.Obtain(domains, d.Provider, s.credstore)
+		res, err := client.Obtain(domains, d.Provider, sanProviders, s.credstore)
 		if err != nil {
 			return err
 		}
@@ -797,6 +842,22 @@ func (s *Service) RenewExpiring() ([]int64, error) {
 }
 
 // ----- helpers -----
+
+// ParseSanProviders 解析 ACMEDomain.SanProviders（按域名覆盖 DNS provider）。
+// 空键/空值、与默认 provider 相同的项直接丢弃，返回有效覆盖映射。
+func ParseSanProviders(d model.ACMEDomain) map[string]string {
+	raw := map[string]string{}
+	_ = JSONUnmarshal([]byte(EmptyJSON(d.SanProviders)), &raw)
+	out := map[string]string{}
+	for k, v := range raw {
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if k != "" && v != "" && v != d.Provider {
+			out[k] = v
+		}
+	}
+	return out
+}
 
 // BuildDomains 主域名 + SAN 拆成 lego.Obtain / 雷池匹配等所需的字符串切片。
 func BuildDomains(d model.ACMEDomain) []string {

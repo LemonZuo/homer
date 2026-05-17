@@ -15,11 +15,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge"
+	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/lego"
 	legolog "github.com/go-acme/lego/v4/log"
 	"github.com/go-acme/lego/v4/providers/dns/alidns"
@@ -210,8 +212,9 @@ func optionsFromAccount(a model.ACMEAccount) CAOptions {
 }
 
 // Obtain 用指定 provider 跑 DNS-01 签发主域名 + SAN。
-func (c *Client) Obtain(domains []string, provider string, store *CredentialStore) (*certificate.Resource, error) {
-	prov, err := makeProvider(provider, store)
+// sanProviders 可选，按域名覆盖 provider（域名跨多个 DNS 服务商时用），空则全用 provider。
+func (c *Client) Obtain(domains []string, provider string, sanProviders map[string]string, store *CredentialStore) (*certificate.Resource, error) {
+	prov, err := makeProviderForDomains(provider, sanProviders, store)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +267,96 @@ func makeProvider(name string, store *CredentialStore) (challenge.Provider, erro
 		return nil, fmt.Errorf("初始化 DNS provider %s 失败：%w", name, err)
 	}
 	return prov, nil
+}
+
+// makeProviderForDomains 按需构造「分发型」provider：无覆盖时退化为单 provider；
+// 有覆盖时为每个用到的 provider 各建一个实例（同名复用），按域名路由。
+// 底层 lego provider 在构造时即读 env 存入自身 config，逐个串行构造互不干扰。
+func makeProviderForDomains(defaultName string, perDomain map[string]string, store *CredentialStore) (challenge.Provider, error) {
+	def, err := makeProvider(defaultName, store)
+	if err != nil {
+		return nil, err
+	}
+	disp := &dnsDispatcher{def: def, byBase: map[string]challenge.Provider{}}
+	built := map[string]challenge.Provider{defaultName: def}
+	for dom, pname := range perDomain {
+		pname = strings.TrimSpace(pname)
+		base := stripWildcard(dom)
+		if base == "" || pname == "" || pname == defaultName {
+			continue
+		}
+		prov, ok := built[pname]
+		if !ok {
+			if prov, err = makeProvider(pname, store); err != nil {
+				return nil, err
+			}
+			built[pname] = prov
+		}
+		disp.byBase[base] = prov
+	}
+	if len(disp.byBase) == 0 {
+		return def, nil
+	}
+	return disp, nil
+}
+
+func stripWildcard(d string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(d)), "*.")
+}
+
+// dnsDispatcher 把每个 DNS-01 挑战按域名路由到对应底层 provider，
+// 实现「一张证书的 SAN 跨多个 DNS 服务商」。lego 会以 cert identifier
+// （通配符已折叠为基础域名）调用 Present/CleanUp，按最长后缀匹配选 provider。
+type dnsDispatcher struct {
+	def    challenge.Provider
+	byBase map[string]challenge.Provider
+}
+
+func (p *dnsDispatcher) pick(domain string) challenge.Provider {
+	cd := stripWildcard(domain)
+	var bestBase string
+	var best challenge.Provider
+	for base, prov := range p.byBase {
+		if (cd == base || strings.HasSuffix(cd, "."+base)) && len(base) > len(bestBase) {
+			bestBase, best = base, prov
+		}
+	}
+	if best != nil {
+		return best
+	}
+	return p.def
+}
+
+func (p *dnsDispatcher) Present(domain, token, keyAuth string) error {
+	return p.pick(domain).Present(domain, token, keyAuth)
+}
+
+func (p *dnsDispatcher) CleanUp(domain, token, keyAuth string) error {
+	return p.pick(domain).CleanUp(domain, token, keyAuth)
+}
+
+// Timeout 取所有底层 provider 中最大的传播超时/轮询间隔，
+// 保证最慢的 DNS 也能等到生效（lego 对整批挑战用同一组超时）。
+func (p *dnsDispatcher) Timeout() (timeout, interval time.Duration) {
+	timeout, interval = dns01.DefaultPropagationTimeout, dns01.DefaultPollingInterval
+	consider := func(prov challenge.Provider) {
+		t, ok := prov.(challenge.ProviderTimeout)
+		if !ok {
+			return
+		}
+		pt, pi := t.Timeout()
+		if pt > timeout {
+			timeout = pt
+		}
+		if pi > interval {
+			interval = pi
+		}
+	}
+	consider(p.def)
+	for _, prov := range p.byBase {
+		consider(prov)
+	}
+	return
 }
 
 // ----- 账号实现 -----

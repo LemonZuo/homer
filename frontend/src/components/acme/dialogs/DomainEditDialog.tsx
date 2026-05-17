@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from '../../ui/dialog'
 import { cn } from '../../../lib/utils'
+import { Select } from '../../ui/select'
 import type { AcmeAccount, Domain } from '../types'
 import { caLabel, isValidDomain } from '../utils'
 
@@ -36,6 +37,7 @@ export function DomainEditDialog({
   const [draft, setDraft] = useState('')
   const [accountID, setAccountID] = useState<number>(0)
   const [provider, setProvider] = useState('')
+  const [overrides, setOverrides] = useState<Record<string, string>>({})
   const [enabled, setEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
@@ -52,11 +54,19 @@ export function DomainEditDialog({
       setDomains([...main, ...sans])
       setAccountID(target.account_id || accounts[0]?.id || 0)
       setProvider(target.provider || providers[0] || '')
+      let ov: Record<string, string> = {}
+      try {
+        if (target.san_providers) ov = JSON.parse(target.san_providers)
+      } catch {
+        ov = {}
+      }
+      setOverrides(ov)
       setEnabled(target.enabled)
     } else {
       setDomains([])
       setAccountID(accounts[0]?.id || 0)
       setProvider(providers[0] || '')
+      setOverrides({})
       setEnabled(true)
     }
     setDraft('')
@@ -129,11 +139,17 @@ export function DomainEditDialog({
       toast.error('CA 账号必填')
       return
     }
+    const allSet = new Set(all)
+    const sp: Record<string, string> = {}
+    for (const [d, p] of Object.entries(overrides)) {
+      if (allSet.has(d) && p && p !== provider) sp[d] = p
+    }
     const payload = {
       main_domain: all[0],
       san_domains: all.slice(1).join(','),
       account_id: accountID,
       provider,
+      san_providers: Object.keys(sp).length ? JSON.stringify(sp) : '',
       enabled,
     }
     setSaving(true)
@@ -213,36 +229,78 @@ export function DomainEditDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="account">CA 账号</Label>
-            <select
+            <Select<number>
               id="account"
-              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
-              value={accountID ? String(accountID) : ''}
-              onChange={(e) => setAccountID(Number(e.target.value))}
-            >
-              {accounts.length === 0 && <option value="">（暂无账号，请先添加）</option>}
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({caLabel(a.ca)})
-                </option>
-              ))}
-            </select>
+              value={accountID}
+              onChange={setAccountID}
+              placeholder="（暂无账号，请先添加）"
+              options={accounts.map((a) => ({
+                value: a.id,
+                label: `${a.name} (${caLabel(a.ca)})`,
+              }))}
+            />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="provider">DNS Provider</Label>
-            <select
+            <Select<string>
               id="provider"
-              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
               value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-            >
-              {providers.length === 0 && <option value="">（暂无凭证，请先添加）</option>}
-              {providers.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
+              onChange={setProvider}
+              placeholder="（暂无凭证，请先添加）"
+              options={providers.map((p) => ({ value: p, label: p }))}
+            />
           </div>
+          {domains.length > 0 && providers.length > 1 && (
+            <div className="grid gap-1.5">
+              <Label>按域名指定 DNS Provider（可选）</Label>
+              <p className="text-[11.5px] text-muted-foreground">
+                域名跨多个 DNS 服务商时，可单独指定；选「默认」即用上方 DNS Provider。
+              </p>
+              <div className="divide-y divide-border overflow-hidden rounded-md border border-input">
+                {domains.map((d, i) => {
+                  const ov = overrides[d] && overrides[d] !== provider ? overrides[d] : ''
+                  return (
+                    <div
+                      key={`${d}-${i}`}
+                      className="flex items-center gap-2.5 px-2.5 py-2 hover:bg-muted/40"
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                        {i === 0 && (
+                          <span className="shrink-0 rounded bg-emerald-500/10 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                            主
+                          </span>
+                        )}
+                        <span className="truncate font-mono text-[12px]" title={d}>
+                          {d}
+                        </span>
+                      </div>
+                      <Select<string>
+                        className={cn(
+                          'h-8 w-32 shrink-0 text-[12px] sm:w-44',
+                          ov
+                            ? 'border-emerald-500/50 text-emerald-700 dark:text-emerald-300'
+                            : 'text-muted-foreground',
+                        )}
+                        value={ov}
+                        onChange={(v) =>
+                          setOverrides((prev) => {
+                            const next = { ...prev }
+                            if (v) next[d] = v
+                            else delete next[d]
+                            return next
+                          })
+                        }
+                        options={[
+                          { value: '', label: `默认（${provider || '—'}）` },
+                          ...providers.map((p) => ({ value: p, label: p })),
+                        ]}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <Label htmlFor="enabled">启用自动续期</Label>
             <Switch

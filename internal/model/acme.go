@@ -155,15 +155,18 @@ type ACMESafelineDeployConfig struct {
 
 // ACMEDomain 自动签发的域名配置。
 // account_id 引用 ACMEAccount.ID；provider 引用 ACMECredential.Provider。
+// san_providers 是可选的「按域名指定 DNS provider」覆盖表，JSON：{"b.com":"alidns"}；
+// 未列出的域名走 provider（默认）。用于一张证书的域名跨多个 DNS 服务商的场景。
 type ACMEDomain struct {
-	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
-	MainDomain string    `gorm:"column:main_domain;size:255;uniqueIndex" json:"main_domain"`
-	SanDomains string    `gorm:"column:san_domains;size:1024" json:"san_domains"`
-	AccountID  int64     `gorm:"column:account_id;index" json:"account_id"`
-	Provider   string    `gorm:"column:provider;size:64" json:"provider"`
-	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
-	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
+	MainDomain   string    `gorm:"column:main_domain;size:255;uniqueIndex" json:"main_domain"`
+	SanDomains   string    `gorm:"column:san_domains;size:1024" json:"san_domains"`
+	AccountID    int64     `gorm:"column:account_id;index" json:"account_id"`
+	Provider     string    `gorm:"column:provider;size:64" json:"provider"`
+	SanProviders string    `gorm:"column:san_providers;size:1024" json:"san_providers"`
+	Enabled      BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (ACMEDomain) TableName() string { return "acme_domain" }
