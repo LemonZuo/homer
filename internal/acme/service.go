@@ -901,6 +901,44 @@ func (s *Service) RenewExpiring() ([]int64, error) {
 	return taskIDs, nil
 }
 
+// RetryDeployTaskNow 手动立即重试一条失败/待重试的部署任务（单次）。
+// 仅持久化配置触发的任务可重试；耗尽次数的 failed 任务抬高一次上限，
+// 失败后回到 failed，不会无限重试。立即异步执行，不等 cron。
+func (s *Service) RetryDeployTaskNow(taskID int64) error {
+	var t model.ACMEIssueTask
+	if err := s.db.First(&t, taskID).Error; err != nil {
+		return err
+	}
+	if t.ConfigID <= 0 {
+		return errors.New("该任务无持久化部署配置，无法重试")
+	}
+	if t.Status != "failed" && t.Status != "retrying" {
+		return errors.New("仅失败或待重试的任务可手动重试")
+	}
+	cfg, err := s.deployConfigs.Get(t.ConfigID)
+	if err != nil {
+		return fmt.Errorf("部署配置不可用：%w", err)
+	}
+	d, cert, target, err := s.prepareDeploy(*cfg)
+	if err != nil {
+		return err
+	}
+	maxAttempt := t.MaxAttempt
+	if t.Attempt >= maxAttempt {
+		maxAttempt = t.Attempt + 1
+	}
+	if err := s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
+		"status":        "retrying",
+		"max_attempt":   maxAttempt,
+		"next_retry_at": nil,
+		"finished_at":   nil,
+	}).Error; err != nil {
+		return err
+	}
+	go s.runDeploy(taskID, d, *cert, *target, *cfg)
+	return nil
+}
+
 // RetryDeployTasks 由 cron 调用：拉起到期的待重试部署任务。
 // 只扫 status='retrying' 且 next_retry_at<=now 的行（历史数据无此状态，零影响），
 // 双保险再校验 attempt<max_attempt 且 config_id>0。返回本轮拉起的任务数。

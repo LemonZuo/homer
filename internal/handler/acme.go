@@ -140,6 +140,7 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.POST("/domains/:id/safeline-deploy-configs/deploy", h.deploySafelineConfigsByDomain)
 	g.GET("/tasks", h.listTasks)
 	g.GET("/tasks/:id", h.getTask)
+	g.POST("/tasks/:id/retry", h.retryTask)
 	g.GET("/tasks/:id/stream", h.streamTask)
 }
 
@@ -1008,6 +1009,19 @@ func (h *ACMEHandler) getTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": t})
+}
+
+func (h *ACMEHandler) retryTask(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.svc.RetryDeployTaskNow(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": id}})
 }
 
 // streamTask SSE 推送任务日志。若任务已结束（FinishedAt 非空），

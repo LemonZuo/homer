@@ -149,6 +149,7 @@ export interface Task {
   error_msg: string
   attempt?: number
   max_attempt?: number
+  config_id?: number
   next_retry_at?: string | null
 }
 

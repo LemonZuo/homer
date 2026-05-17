@@ -454,6 +454,20 @@ export default function AcmePage() {
     }
   }
 
+  const retryTask = async (taskID: number) => {
+    setBusy(`retry-${taskID}`)
+    try {
+      await api.post(`/acme/tasks/${taskID}/retry`)
+      toast.success(`已重试任务 #${taskID}`)
+      await reloadTasks()
+      setLogTaskID(taskID)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '重试失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const onDelete = async () => {
     const d = deletePending
     if (!d) return
@@ -757,6 +771,23 @@ export default function AcmePage() {
               <ScrollText className="mr-1.5 h-3.5 w-3.5" />
               日志
             </Button>
+            {(t.config_id ?? 0) > 0 &&
+              (t.status === 'failed' || t.status === 'retrying') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-9 w-full sm:h-8 sm:w-auto"
+                  disabled={busy === `retry-${t.id}`}
+                  onClick={() => void retryTask(t.id)}
+                >
+                  {busy === `retry-${t.id}` ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  重试
+                </Button>
+              )}
           </Card>
         ))}
         {!loading && tasks.length === 0 && (
