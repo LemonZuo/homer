@@ -1,29 +1,27 @@
 -- Homer 数据库 schema（首次建表）。
 -- 全新部署直接执行本文件即可。
--- 注意：acme / sms / ssh / notify / scheduler 等表使用 DROP TABLE IF EXISTS，
--- 已有数据的环境不要直接重跑，请按需整理增量迁移。
--- sys_birthday_remind 沿用老 ruoyi 表结构，仅 CREATE IF NOT EXISTS，可与老库共存。
+-- 注意：所有表均使用 DROP TABLE IF EXISTS，已有数据的环境不要直接重跑，
+-- 请按需整理增量迁移（老库迁移见 sql/migrate_birthday_rename.sql）。
 
 
 -- ============================================================
 -- 生日提醒
 -- ============================================================
--- 复用老 ruoyi 项目的表 `sys_birthday_remind`，结构保持原样。
 -- 字段语义：
---   remind_birthday          : 公历生日字符串 yyyy-MM-dd（用户输入）
---   remind_chinese_birthday  : 农历生日中文字符串，由后端 BeforeSave 自动算
---   remind_zodiac            : 生肖，由后端 BeforeSave 自动算
---   is_remind                : varchar('0'/'1'); Go 侧用 BoolFlag 自动转 bool
--- 全新部署时使用以下 DDL；老库已有数据时直接复用，无需建表。
-CREATE TABLE IF NOT EXISTS `sys_birthday_remind` (
-  `remind_id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '唯一标识',
-  `remind_name`             VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '姓名',
-  `remind_birthday`         VARCHAR(10)  NOT NULL DEFAULT ''     COMMENT '公历生日 yyyy-MM-dd',
-  `remind_chinese_birthday` VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '农历生日（后端自动）',
-  `remind_zodiac`           VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '生肖（后端自动）',
-  `is_remind`               VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否提醒：1=是 0=否',
-  PRIMARY KEY (`remind_id`),
-  KEY `idx_chinese_birthday` (`remind_chinese_birthday`, `is_remind`)
+--   birthday          : 公历生日字符串 yyyy-MM-dd（用户输入）
+--   chinese_birthday  : 农历生日中文字符串，由后端 BeforeSave 自动算
+--   zodiac            : 生肖，由后端 BeforeSave 自动算
+--   enabled           : varchar('0'/'1'); Go 侧用 BoolFlag 自动转 bool
+DROP TABLE IF EXISTS `birthday_reminder`;
+CREATE TABLE `birthday_reminder` (
+  `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '唯一标识',
+  `name`             VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '姓名',
+  `birthday`         VARCHAR(10)  NOT NULL DEFAULT ''     COMMENT '公历生日 yyyy-MM-dd',
+  `chinese_birthday` VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '农历生日（后端自动）',
+  `zodiac`           VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '生肖（后端自动）',
+  `enabled`          VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  PRIMARY KEY (`id`),
+  KEY `idx_chinese_birthday` (`chinese_birthday`, `enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='生日提醒';
 
 

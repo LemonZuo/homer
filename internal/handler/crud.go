@@ -11,7 +11,7 @@ import (
 )
 
 // CRUD 为带自增主键的表生成通用 handler。主键列名通过 GORM schema 自动识别，
-// 兼容 `id` 之外的列名（如老 ruoyi 表的 `remind_id`）。
+// 主键列名通过 GORM schema 自动识别，兼容 `id` 之外的列名。
 type CRUD[T any] struct {
 	DB *gorm.DB
 	pk string

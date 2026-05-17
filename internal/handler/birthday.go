@@ -22,7 +22,7 @@ func BirthdayNotify(db *gorm.DB, notifier notify.Notifier) gin.HandlerFunc {
 			return
 		}
 		var item model.BirthdayRemind
-		if err := db.Where("remind_id = ?", id).First(&item).Error; err != nil {
+		if err := db.Where("id = ?", id).First(&item).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "record not found"})
 			return
 		}

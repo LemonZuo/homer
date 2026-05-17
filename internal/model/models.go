@@ -60,18 +60,18 @@ func (b *BoolFlag) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// BirthdayRemind 复用老 ruoyi 表 sys_birthday_remind 的字段结构。
+// BirthdayRemind 生日提醒记录。
 // 公历日期由用户输入，chinese_birthday / zodiac 在 BeforeSave 钩子自动计算。
 type BirthdayRemind struct {
-	ID              int      `gorm:"primaryKey;column:remind_id" json:"id"`
-	Name            string   `gorm:"column:remind_name;size:30" json:"name"`
-	Birthday        string   `gorm:"column:remind_birthday;size:10" json:"birthday"`
-	ChineseBirthday string   `gorm:"column:remind_chinese_birthday;size:30" json:"chinese_birthday"`
-	Zodiac          string   `gorm:"column:remind_zodiac;size:30" json:"zodiac"`
-	IsRemind        BoolFlag `gorm:"column:is_remind;type:varchar(1);default:'1'" json:"is_remind"`
+	ID              int      `gorm:"primaryKey;column:id" json:"id"`
+	Name            string   `gorm:"column:name;size:30" json:"name"`
+	Birthday        string   `gorm:"column:birthday;size:10" json:"birthday"`
+	ChineseBirthday string   `gorm:"column:chinese_birthday;size:30" json:"chinese_birthday"`
+	Zodiac          string   `gorm:"column:zodiac;size:30" json:"zodiac"`
+	IsRemind        BoolFlag `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
 }
 
-func (BirthdayRemind) TableName() string { return "sys_birthday_remind" }
+func (BirthdayRemind) TableName() string { return "birthday_reminder" }
 
 // BeforeSave 在 Create / Update 时自动根据公历生日回填 chinese_birthday 与 zodiac。
 func (b *BirthdayRemind) BeforeSave(_ *gorm.DB) error {

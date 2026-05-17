@@ -67,7 +67,7 @@ export const tables: TableDef[] = [
       { key: 'birthday', label: '公历生日', type: 'date' },
       { key: 'chinese_birthday', label: '农历生日', readonly: true, placeholder: '保存后自动计算' },
       { key: 'zodiac', label: '生肖', readonly: true, placeholder: '保存后自动计算' },
-      { key: 'is_remind', label: '启用提醒', type: 'switch' },
+      { key: 'enabled', label: '启用提醒', type: 'switch' },
     ],
   },
   {
