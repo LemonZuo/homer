@@ -5,9 +5,9 @@ package jobmonitor
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
 	"github.com/LemonZuo/homer/internal/scheduler"
@@ -37,14 +37,14 @@ func (m *Monitor) Record(name string, r scheduler.Run, consecFails int) {
 		ConsecFails: consecFails,
 	}
 	if err := m.db.Save(&st).Error; err != nil {
-		log.Printf("jobmonitor: persist %s: %v", name, err)
+		logx.Error("jobmonitor persist failed", "job", name, "err", err)
 	}
 }
 
 // Alert 连续失败达阈值时推送告警；无可用通道则只落日志（Record 已落库）。
 func (m *Monitor) Alert(name string, r scheduler.Run, consecFails int) {
 	if m.alert == nil || !m.alert.Enabled() {
-		log.Printf("jobmonitor: %s 连续失败 %d 次（无告警通道）：%s", name, consecFails, r.Err)
+		logx.Warn("jobmonitor alert: no channel", "job", name, "consec_fails", consecFails, "err", r.Err)
 		return
 	}
 	text := fmt.Sprintf("任务：%s\n连续失败：%d 次\n时间：%s\n错误：%s",
@@ -52,7 +52,9 @@ func (m *Monitor) Alert(name string, r scheduler.Run, consecFails int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := m.alert.Send(ctx, notify.Message{Title: "homer 任务失败告警", Text: text}); err != nil {
-		log.Printf("jobmonitor: 告警发送失败 %s: %v", name, err)
+		logx.Error("jobmonitor alert send failed", "job", name, "err", err)
+	} else {
+		logx.Warn("jobmonitor alert sent", "job", name, "consec_fails", consecFails)
 	}
 }
 
@@ -60,7 +62,7 @@ func (m *Monitor) Alert(name string, r scheduler.Run, consecFails int) {
 func (m *Monitor) Hydrate(s *scheduler.Scheduler) {
 	var rows []model.SchedulerJobState
 	if err := m.db.Find(&rows).Error; err != nil {
-		log.Printf("jobmonitor: hydrate: %v", err)
+		logx.Error("jobmonitor hydrate failed", "err", err)
 		return
 	}
 	for _, st := range rows {

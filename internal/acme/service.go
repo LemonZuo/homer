@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/LemonZuo/homer/internal/cas"
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"gorm.io/gorm"
 )
@@ -185,19 +186,24 @@ func (s *Service) GetCertByDomain(domainID int64) (*model.ACMECert, error) {
 }
 
 // ListTasks 任务流水分页（按 id 倒序），返回当前页数据与总条数。
-func (s *Service) ListTasks(page, pageSize int) ([]model.ACMEIssueTask, int64, error) {
+// status 非空时按状态过滤（pending|running|success|failed|retrying）。
+func (s *Service) ListTasks(page, pageSize int, status string) ([]model.ACMEIssueTask, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
 	if pageSize <= 0 {
 		pageSize = 10
 	}
+	q := s.db.Model(&model.ACMEIssueTask{})
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
 	var total int64
-	if err := s.db.Model(&model.ACMEIssueTask{}).Count(&total).Error; err != nil {
+	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var items []model.ACMEIssueTask
-	if err := s.db.Order("id DESC").
+	if err := q.Order("id DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&items).Error; err != nil {
@@ -286,6 +292,7 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 	logBuf := &bytes.Buffer{}
 	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
 
+	logx.Info("acme issue start", "task", taskID, "domain", d.MainDomain, "provider", d.Provider)
 	logf(logw, "开始签发：%s（provider=%s）", d.MainDomain, d.Provider)
 	domains := BuildDomains(d)
 	logf(logw, "目标域名：%s", strings.Join(domains, ", "))
@@ -327,12 +334,14 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 	}
 	if err != nil {
 		logf(logw, "签发失败：%v", err)
+		logx.Error("acme issue failed", "task", taskID, "domain", d.MainDomain, "err", err)
 		upd["status"] = "failed"
 		upd["error_msg"] = truncate(err.Error(), 1000)
 		// 重新写一次 log_text 以包含错误
 		upd["log_text"] = logBuf.String()
 	} else {
 		logf(logw, "签发完成")
+		logx.Info("acme issue done", "task", taskID, "domain", d.MainDomain)
 		upd["status"] = "success"
 		upd["log_text"] = logBuf.String()
 	}
@@ -351,6 +360,7 @@ func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECer
 	logBuf := &bytes.Buffer{}
 	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
 
+	logx.Info("acme revoke start", "task", taskID, "domain", d.MainDomain, "serial", cert.Serial)
 	logf(logw, "开始吊销证书：%s", d.MainDomain)
 	if cert.Serial != "" {
 		logf(logw, "证书序列号：%s", cert.Serial)
@@ -390,11 +400,13 @@ func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECer
 	}
 	if err != nil {
 		logf(logw, "吊销失败：%v", err)
+		logx.Error("acme revoke failed", "task", taskID, "domain", d.MainDomain, "err", err)
 		upd["status"] = "failed"
 		upd["error_msg"] = truncate(err.Error(), 1000)
 		upd["log_text"] = logBuf.String()
 	} else {
 		logf(logw, "吊销完成")
+		logx.Info("acme revoke done", "task", taskID, "domain", d.MainDomain)
 		upd["status"] = "success"
 		upd["log_text"] = logBuf.String()
 	}
@@ -742,6 +754,7 @@ func (s *Service) runUploadCAS(taskID int64, d model.ACMEDomain, cert model.ACME
 	logBuf := &bytes.Buffer{}
 	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
 
+	logx.Info("acme upload-cas start", "task", taskID, "domain", d.MainDomain)
 	logf(logw, "开始上传 CAS：%s", d.MainDomain)
 
 	err := func() error {
@@ -768,11 +781,13 @@ func (s *Service) runUploadCAS(taskID int64, d model.ACMEDomain, cert model.ACME
 	}
 	if err != nil {
 		logf(logw, "上传 CAS 失败：%v", err)
+		logx.Error("acme upload-cas failed", "task", taskID, "domain", d.MainDomain, "err", err)
 		upd["status"] = "failed"
 		upd["error_msg"] = truncate(err.Error(), 1000)
 		upd["log_text"] = logBuf.String()
 	} else {
 		logf(logw, "上传 CAS 完成")
+		logx.Info("acme upload-cas done", "task", taskID, "domain", d.MainDomain)
 		upd["status"] = "success"
 		upd["log_text"] = logBuf.String()
 	}
@@ -807,6 +822,9 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 		logf(logw, "—— 第 %d/%d 次尝试 ——", attempt, maxAttempt)
 	}
 
+	logx.Info("acme deploy start", "task", taskID, "domain", d.MainDomain,
+		"kind", cfg.Kind, "target", target.Name, "attempt", attempt, "max_attempt", maxAttempt)
+
 	driver, err := s.deployRegistry.Get(cfg.Kind)
 	if err == nil {
 		logf(logw, "开始部署证书到%s：%s -> %s / %s", driver.Label(), d.MainDomain, target.Name, deployConfigName(cfg))
@@ -831,6 +849,7 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 
 	if err == nil {
 		logf(logw, "部署完成")
+		logx.Info("acme deploy done", "task", taskID, "domain", d.MainDomain, "target", target.Name, "attempt", attempt)
 		finish := time.Now()
 		_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
 			"status":        "success",
@@ -848,6 +867,8 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 		next := time.Now().Add(s.deployRetryBackoff * time.Duration(attempt))
 		logf(logw, "部署失败：%v", err)
 		logf(logw, "已安排第 %d/%d 次重试，约 %s 后", attempt+1, maxAttempt, next.Format("15:04:05"))
+		logx.Warn("acme deploy failed, retry scheduled", "task", taskID, "domain", d.MainDomain,
+			"target", target.Name, "attempt", attempt, "max_attempt", maxAttempt, "next_retry", next.Format("15:04:05"), "err", err)
 		_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
 			"status":        "retrying",
 			"error_msg":     truncate(err.Error(), 1000),
@@ -859,6 +880,8 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 	}
 
 	logf(logw, "部署失败：%v", err)
+	logx.Error("acme deploy failed", "task", taskID, "domain", d.MainDomain,
+		"target", target.Name, "attempt", attempt, "max_attempt", maxAttempt, "err", err)
 	finish := time.Now()
 	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
 		"status":        "failed",
@@ -935,6 +958,7 @@ func (s *Service) RetryDeployTaskNow(taskID int64) error {
 	}).Error; err != nil {
 		return err
 	}
+	logx.Info("acme deploy manual retry", "task", taskID, "config_id", t.ConfigID, "domain", d.MainDomain)
 	go s.runDeploy(taskID, d, *cert, *target, *cfg)
 	return nil
 }

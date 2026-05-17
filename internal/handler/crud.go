@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -42,6 +43,7 @@ func (c *CRUD[T]) List(ctx *gin.Context) {
 		_ = kw
 	}
 	if err := q.Find(&items).Error; err != nil {
+		logx.Error("crud list failed", "path", ctx.FullPath(), "err", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -55,6 +57,7 @@ func (c *CRUD[T]) Create(ctx *gin.Context) {
 		return
 	}
 	if err := c.DB.Create(&item).Error; err != nil {
+		logx.Error("crud create failed", "path", ctx.FullPath(), "err", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -74,6 +77,7 @@ func (c *CRUD[T]) Update(ctx *gin.Context) {
 	}
 	// 用 map 更新会丢字段；用结构体 + Select("*") 全字段覆盖，跳过主键以免破坏
 	if err := c.DB.Model(&item).Where(c.pk+" = ?", id).Select("*").Omit(c.pk).Updates(item).Error; err != nil {
+		logx.Error("crud update failed", "path", ctx.FullPath(), "id", id, "err", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -88,6 +92,7 @@ func (c *CRUD[T]) Delete(ctx *gin.Context) {
 	}
 	var item T
 	if err := c.DB.Where(c.pk+" = ?", id).Delete(&item).Error; err != nil {
+		logx.Error("crud delete failed", "path", ctx.FullPath(), "id", id, "err", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

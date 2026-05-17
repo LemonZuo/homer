@@ -17,6 +17,9 @@ type Config struct {
 	DBCharset  string
 	ServerPort string
 
+	// 日志级别：debug | info | warn | error（默认 info）。仅控制台输出，不落文件。
+	LogLevel string
+
 	// 阿里云 CDN（加速域名管理，与 CAS 用独立 AK/SK）
 	AliyunCDNAccessKeyID     string
 	AliyunCDNAccessKeySecret string
@@ -54,6 +57,8 @@ func Load() *Config {
 		DBName:     env("DB_NAME", ""),
 		DBCharset:  env("DB_CHARSET", "utf8mb4"),
 		ServerPort: normalizePort(env("SERVER_PORT", "8081")),
+
+		LogLevel: env("LOG_LEVEL", "info"),
 
 		AliyunCDNAccessKeyID:     env("ALIYUN_CDN_ACCESS_KEY_ID", ""),
 		AliyunCDNAccessKeySecret: env("ALIYUN_CDN_ACCESS_KEY_SECRET", ""),

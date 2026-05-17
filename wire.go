@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io/fs"
-	"log"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +19,7 @@ import (
 	"github.com/LemonZuo/homer/internal/event"
 	"github.com/LemonZuo/homer/internal/handler"
 	"github.com/LemonZuo/homer/internal/jobmonitor"
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
 	"github.com/LemonZuo/homer/internal/router"
@@ -51,6 +51,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	); err != nil {
 		return nil, nil, fmt.Errorf("migrate: %w", err)
 	}
+	logx.Info("db automigrate done")
 
 	hub := notify.NewHub(gormDB)
 	notifyStore := notify.NewStore(gormDB)
@@ -112,14 +113,14 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 		birthday.RunOnce(gormDB, notifier)
 		return nil
 	}); err != nil {
-		log.Fatalf("register birthday task: %v", err)
+		logx.Fatal("register birthday task", "err", err)
 	}
 
 	if err := sched.Register("event", cfg.EventRemindCron, func() error {
 		event.RunOnce(gormDB, eventNotifier)
 		return nil
 	}); err != nil {
-		log.Fatalf("register event task: %v", err)
+		logx.Fatal("register event task", "err", err)
 	}
 
 	if err := sched.Register("acme-renew", cfg.ACMERenewCron, func() error {
@@ -128,11 +129,11 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 			return err
 		}
 		if len(ids) > 0 {
-			log.Printf("acme renew 触发：%v", ids)
+			logx.Info("acme renew triggered", "task_ids", ids)
 		}
 		return nil
 	}); err != nil {
-		log.Fatalf("register acme-renew task: %v", err)
+		logx.Fatal("register acme-renew task", "err", err)
 	}
 
 	if err := sched.Register("acme-deploy-retry", cfg.ACMEDeployRetryCron, func() error {
@@ -141,11 +142,11 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 			return err
 		}
 		if n > 0 {
-			log.Printf("acme deploy 重试拉起：%d 个任务", n)
+			logx.Info("acme deploy retry pulled", "count", n)
 		}
 		return nil
 	}); err != nil {
-		log.Fatalf("register acme-deploy-retry task: %v", err)
+		logx.Fatal("register acme-deploy-retry task", "err", err)
 	}
 
 	// 观察者：落库 + 连续失败达阈值经 Hub 告警。须在 Start 前注入并预热。

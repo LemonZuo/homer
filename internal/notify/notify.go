@@ -4,8 +4,9 @@ package notify
 
 import (
 	"context"
-	"log"
 	"time"
+
+	"github.com/LemonZuo/homer/internal/logx"
 )
 
 // Message 通道无关的消息载体。Title 作邮件主题/webhook 标题；
@@ -53,9 +54,13 @@ func (r *retry) Send(ctx context.Context, m Message) error {
 			}
 		}
 		if err = r.inner.Send(ctx, m); err == nil {
+			if i > 0 {
+				logx.Info("notify sent after retry", "channel", r.inner.Name(), "attempts", i+1)
+			}
 			return nil
 		}
+		logx.Warn("notify send attempt failed", "channel", r.inner.Name(), "attempt", i+1, "err", err)
 	}
-	log.Printf("notify[%s] send failed after %d attempts: %v", r.inner.Name(), r.n, err)
+	logx.Error("notify send failed", "channel", r.inner.Name(), "attempts", r.n, "err", err)
 	return err
 }

@@ -2,10 +2,10 @@ package birthday
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/LemonZuo/homer/internal/chinesedate"
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
 
@@ -20,7 +20,7 @@ var offsets = []int{15, 10, 5, 3, 2, 1, 0}
 // 推送文案统一通过 BuildMessage 生成，与手动触发一致。
 func RunOnce(db *gorm.DB, notifier notify.Notifier) {
 	if notifier == nil || !notifier.Enabled() {
-		log.Print("birthday: notifier not configured, skip")
+		logx.Warn("birthday skip: notifier not configured")
 		return
 	}
 	today := time.Now()
@@ -29,13 +29,15 @@ func RunOnce(db *gorm.DB, notifier notify.Notifier) {
 		lunar := chinesedate.LunarString(target)
 		var items []model.BirthdayRemind
 		if err := db.Where("enabled = ? AND chinese_birthday = ?", "1", lunar).Find(&items).Error; err != nil {
-			log.Printf("birthday query offset=%d: %v", d, err)
+			logx.Error("birthday query failed", "offset", d, "err", err)
 			continue
 		}
 		for _, it := range items {
 			msg := BuildMessage(&it)
 			if err := notifier.Send(context.Background(), notify.Message{Text: msg}); err != nil {
-				log.Printf("birthday send %q: %v", it.Name, err)
+				logx.Error("birthday send failed", "name", it.Name, "err", err)
+			} else {
+				logx.Info("birthday reminder sent", "name", it.Name, "offset", d)
 			}
 		}
 	}

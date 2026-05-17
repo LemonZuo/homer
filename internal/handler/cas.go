@@ -2,12 +2,12 @@ package handler
 
 import (
 	"errors"
-	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/LemonZuo/homer/internal/cas"
 	"github.com/LemonZuo/homer/internal/cdn"
+	"github.com/LemonZuo/homer/internal/logx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -70,12 +70,13 @@ func (h *CASHandler) deploy(c *gin.Context) {
 	}
 	certName := body.CertName
 	go func() {
+		logx.Info("cas deploy to cdn start", "cert_name", certName)
 		msg, err := h.cdn.DeployCertificate(certName)
 		if err != nil {
-			log.Printf("CAS 证书部署到 CDN 失败 certName=%s: %v", certName, err)
+			logx.Error("cas deploy to cdn failed", "cert_name", certName, "err", err)
 			return
 		}
-		log.Printf("CAS 证书部署到 CDN 结果 certName=%s: %s", certName, msg)
+		logx.Info("cas deploy to cdn done", "cert_name", certName, "result", msg)
 	}()
 	c.JSON(http.StatusOK, gin.H{"message": "证书部署任务已提交，结果见服务端日志"})
 }

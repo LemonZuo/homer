@@ -979,7 +979,13 @@ func (h *ACMEHandler) deploySafelineConfigsByDomain(c *gin.Context) {
 func (h *ACMEHandler) listTasks(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-	items, total, err := h.svc.ListTasks(page, pageSize)
+	status := c.Query("status")
+	switch status {
+	case "", "pending", "running", "success", "failed", "retrying":
+	default:
+		status = ""
+	}
+	items, total, err := h.svc.ListTasks(page, pageSize, status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

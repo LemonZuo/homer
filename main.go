@@ -3,33 +3,39 @@ package main
 import (
 	"embed"
 	"io/fs"
-	"log"
 
 	"github.com/LemonZuo/homer/internal/buildinfo"
 	"github.com/LemonZuo/homer/internal/config"
+	"github.com/LemonZuo/homer/internal/logx"
 )
 
 //go:embed all:frontend/dist
 var frontendFS embed.FS
 
 func main() {
-	log.Printf("homer %s (commit %s, build %s) starting", buildinfo.Version, buildinfo.Commit, buildinfo.BuildID)
-
 	cfg := config.Load()
+	logx.Init(cfg.LogLevel)
+
+	logx.Info("homer starting",
+		"version", buildinfo.Version,
+		"commit", buildinfo.Commit,
+		"build", buildinfo.BuildID,
+		"log_level", cfg.LogLevel,
+	)
 
 	dist, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
-		log.Fatalf("sub frontend/dist: %v", err)
+		logx.Fatal("sub frontend/dist", "err", err)
 	}
 
 	srv, cleanup, err := buildServer(cfg, dist)
 	if err != nil {
-		log.Fatalf("build server: %v", err)
+		logx.Fatal("build server", "err", err)
 	}
 	defer cleanup()
 
-	log.Printf("server listening on %s", cfg.ListenURL())
+	logx.Info("server listening", "url", cfg.ListenURL())
 	if err := srv.Run(cfg.ListenAddr()); err != nil {
-		log.Fatalf("run server: %v", err)
+		logx.Fatal("run server", "err", err)
 	}
 }

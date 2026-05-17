@@ -2,9 +2,9 @@ package event
 
 import (
 	"context"
-	"log"
 	"time"
 
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
 
@@ -16,7 +16,7 @@ import (
 // 去重：last_notified_at 与今天同日则不再推送。
 func RunOnce(db *gorm.DB, notifier notify.Notifier) {
 	if notifier == nil || !notifier.Enabled() {
-		log.Print("event: notifier not configured, skip")
+		logx.Warn("event skip: notifier not configured")
 		return
 	}
 	now := time.Now()
@@ -25,14 +25,14 @@ func RunOnce(db *gorm.DB, notifier notify.Notifier) {
 
 	var items []model.EventReminder
 	if err := db.Where("enabled = ?", "1").Find(&items).Error; err != nil {
-		log.Printf("event query: %v", err)
+		logx.Error("event query failed", "err", err)
 		return
 	}
 
 	for _, it := range items {
 		target, err := time.ParseInLocation("2006-01-02", it.EventDate, loc)
 		if err != nil {
-			log.Printf("event parse %q date=%q: %v", it.Title, it.EventDate, err)
+			logx.Error("event date parse failed", "title", it.Title, "date", it.EventDate, "err", err)
 			continue
 		}
 		if target.Before(today) {
@@ -55,11 +55,12 @@ func RunOnce(db *gorm.DB, notifier notify.Notifier) {
 		}
 		msg := BuildMessage(&it, target, now)
 		if err := notifier.Send(context.Background(), notify.Message{Text: msg}); err != nil {
-			log.Printf("event send %q: %v", it.Title, err)
+			logx.Error("event send failed", "title", it.Title, "err", err)
 			continue
 		}
+		logx.Info("event reminder sent", "title", it.Title)
 		if err := db.Model(&model.EventReminder{}).Where("id = ?", it.ID).Update("last_notified_at", now).Error; err != nil {
-			log.Printf("event mark %q: %v", it.Title, err)
+			logx.Error("event mark notified failed", "title", it.Title, "err", err)
 		}
 	}
 }

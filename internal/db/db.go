@@ -1,15 +1,24 @@
 package db
 
 import (
+	"strings"
+
 	"github.com/LemonZuo/homer/internal/config"
+	"github.com/LemonZuo/homer/internal/logx"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func New(cfg *config.Config) (*gorm.DB, error) {
-	return gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+	debug := strings.EqualFold(strings.TrimSpace(cfg.LogLevel), "debug")
+	gdb, err := gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{
+		Logger: logx.NewGormLogger(debug),
 	})
+	if err != nil {
+		logx.Error("db connect failed", "host", cfg.DBHost, "port", cfg.DBPort, "db", cfg.DBName, "err", err)
+		return nil, err
+	}
+	logx.Info("db connected", "host", cfg.DBHost, "port", cfg.DBPort, "db", cfg.DBName)
+	return gdb, nil
 }

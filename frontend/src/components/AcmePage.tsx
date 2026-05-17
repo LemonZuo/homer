@@ -19,6 +19,7 @@ import { api } from '../api'
 import { avatarColor, getColorSet } from '../colors'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
+import { Select } from './ui/select'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -84,8 +85,10 @@ export default function AcmePage() {
   const [taskPage, setTaskPage] = useState(1)
   const [taskTotal, setTaskTotal] = useState(0)
   const [taskPageSize, setTaskPageSize] = useState(readTaskPageSize)
+  const [taskStatus, setTaskStatus] = useState('')
   const taskPageRef = useRef(1)
   const taskPageSizeRef = useRef(readTaskPageSize())
+  const taskStatusRef = useRef('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -146,7 +149,7 @@ export default function AcmePage() {
       const [d, p, t, c, a, targets, sc] = await Promise.all([
         api.get('/acme/domains'),
         api.get('/acme/providers'),
-        api.get(`/acme/tasks?page=${taskPageRef.current}&page_size=${taskPageSizeRef.current}`),
+        api.get(`/acme/tasks?page=${taskPageRef.current}&page_size=${taskPageSizeRef.current}${taskStatusRef.current ? `&status=${taskStatusRef.current}` : ''}`),
         api.get('/acme/credentials'),
         api.get('/acme/accounts'),
         api.get('/acme/deploy/targets'),
@@ -326,7 +329,7 @@ export default function AcmePage() {
   const loadTasks = useCallback(async (page: number) => {
     try {
       const { data } = await api.get(
-        `/acme/tasks?page=${page}&page_size=${taskPageSizeRef.current}`,
+        `/acme/tasks?page=${page}&page_size=${taskPageSizeRef.current}${taskStatusRef.current ? `&status=${taskStatusRef.current}` : ''}`,
       )
       setTasks(data?.data ?? [])
       setTaskTotal(data?.total ?? 0)
@@ -346,6 +349,15 @@ export default function AcmePage() {
       setTaskPageSize(size)
       taskPageSizeRef.current = size
       localStorage.setItem(TASK_PAGE_SIZE_KEY, String(size))
+      void loadTasks(1)
+    },
+    [loadTasks],
+  )
+
+  const changeTaskStatus = useCallback(
+    (status: string) => {
+      setTaskStatus(status)
+      taskStatusRef.current = status
       void loadTasks(1)
     },
     [loadTasks],
@@ -726,7 +738,20 @@ export default function AcmePage() {
       </div>
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-[14px] font-semibold tracking-tight">任务历史</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-[14px] font-semibold tracking-tight">任务历史</h2>
+          <Select<string>
+            className="h-8 w-28 text-[12px]"
+            value={taskStatus}
+            onChange={changeTaskStatus}
+            options={[
+              { value: '', label: '全部状态' },
+              ...(['pending', 'running', 'success', 'failed', 'retrying'] as const).map(
+                (s) => ({ value: s, label: STATUS_LABEL[s] || s }),
+              ),
+            ]}
+          />
+        </div>
         <div className="w-full sm:w-auto">
           <TaskPager
             page={taskPage}

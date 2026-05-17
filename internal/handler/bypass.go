@@ -2,10 +2,10 @@ package handler
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/notify"
 
 	"github.com/gin-gonic/gin"
@@ -39,12 +39,12 @@ func (h *BypassHandler) receive(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true, "skipped": true})
 		return
 	}
-	log.Printf("bypass receive: %s", content)
+	logx.Info("bypass receive", "content", content)
 
 	ctx := c.Request.Context()
 	if h.Notifier != nil && h.Notifier.Enabled() {
 		if err := h.Notifier.Send(ctx, notify.Message{Title: "分流通知", Text: content}); err != nil {
-			log.Printf("bypass send: %v", err)
+			logx.Error("bypass forward failed", "err", err)
 		}
 	}
 

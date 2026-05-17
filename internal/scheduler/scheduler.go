@@ -6,10 +6,10 @@ package scheduler
 import (
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/robfig/cron/v3"
 )
 
@@ -107,9 +107,9 @@ func (s *Scheduler) Register(name, spec string, fn func() error) error {
 			return err
 		}
 		j.entryID = id
-		log.Printf("scheduler[%s] registered with spec %q", name, spec)
+		logx.Info("scheduler job registered", "job", name, "spec", spec)
 	} else {
-		log.Printf("scheduler[%s] manual-only (empty cron spec)", name)
+		logx.Info("scheduler job manual-only", "job", name)
 	}
 	s.jobs[name] = j
 	s.order = append(s.order, name)
@@ -120,7 +120,7 @@ func (s *Scheduler) run(j *job, trigger string) {
 	j.mu.Lock()
 	if j.running {
 		j.mu.Unlock()
-		log.Printf("scheduler[%s] skip %s: already running", j.name, trigger)
+		logx.Warn("scheduler job skipped: already running", "job", j.name, "trigger", trigger)
 		return
 	}
 	j.running = true
@@ -132,16 +132,21 @@ func (s *Scheduler) run(j *job, trigger string) {
 		defer func() {
 			if r := recover(); r != nil {
 				runErr = fmt.Errorf("panic: %v", r)
-				log.Printf("scheduler[%s] panic: %v", j.name, r)
+				logx.Error("scheduler job panic", "job", j.name, "panic", r)
 			}
 		}()
-		log.Printf("scheduler[%s] tick (%s)", j.name, trigger)
+		logx.Info("scheduler job tick", "job", j.name, "trigger", trigger)
 		runErr = j.fn()
 	}()
 
 	rec := Run{Start: start, End: time.Now(), OK: runErr == nil, Trigger: trigger}
 	if runErr != nil {
 		rec.Err = runErr.Error()
+		logx.Error("scheduler job failed", "job", j.name, "trigger", trigger,
+			"elapsed", time.Since(start).Round(time.Millisecond).String(), "err", runErr)
+	} else {
+		logx.Info("scheduler job done", "job", j.name, "trigger", trigger,
+			"elapsed", time.Since(start).Round(time.Millisecond).String())
 	}
 	j.mu.Lock()
 	j.running = false
