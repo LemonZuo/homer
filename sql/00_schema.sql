@@ -1,7 +1,7 @@
 -- Homer 数据库 schema（首次建表）。
 -- 全新部署直接执行本文件即可。
 -- 注意：所有表均使用 DROP TABLE IF EXISTS，已有数据的环境不要直接重跑，
--- 请按需整理增量迁移（老库迁移见 sql/migrate_birthday_rename.sql）。
+-- 请按需整理增量迁移（老库迁移见 sql/01_migrate_birthday_rename.sql）。
 
 
 -- ============================================================
