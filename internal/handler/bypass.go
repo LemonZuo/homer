@@ -12,15 +12,13 @@ import (
 )
 
 // BypassHandler 接收 12306Bypass 分流抢票助手推过来的 webhook 通知，
-// 转发到企业微信 + Resend 邮件。任意一路失败不影响另一路。
+// 经扇出 Notifier 转发到配置的各通道；任意一路失败不影响另一路。
 type BypassHandler struct {
-	WeWork  notify.Notifier
-	Email   notify.Notifier
-	Subject string
+	Notifier notify.Notifier
 }
 
-func NewBypassHandler(w, e notify.Notifier, subject string) *BypassHandler {
-	return &BypassHandler{WeWork: w, Email: e, Subject: subject}
+func NewBypassHandler(n notify.Notifier) *BypassHandler {
+	return &BypassHandler{Notifier: n}
 }
 
 func (h *BypassHandler) Register(api *gin.RouterGroup) {
@@ -43,20 +41,10 @@ func (h *BypassHandler) receive(c *gin.Context) {
 	}
 	log.Printf("bypass receive: %s", content)
 
-	subject := h.Subject
-	if subject == "" {
-		subject = "分流通知"
-	}
-
 	ctx := c.Request.Context()
-	if h.WeWork != nil && h.WeWork.Enabled() {
-		if err := h.WeWork.Send(ctx, notify.Message{Text: content}); err != nil {
-			log.Printf("bypass wework send: %v", err)
-		}
-	}
-	if h.Email != nil && h.Email.Enabled() {
-		if err := h.Email.Send(ctx, notify.Message{Title: subject, Text: content}); err != nil {
-			log.Printf("bypass email send: %v", err)
+	if h.Notifier != nil && h.Notifier.Enabled() {
+		if err := h.Notifier.Send(ctx, notify.Message{Title: "分流通知", Text: content}); err != nil {
+			log.Printf("bypass send: %v", err)
 		}
 	}
 

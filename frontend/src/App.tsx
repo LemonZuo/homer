@@ -7,6 +7,7 @@ import CasPage from './components/CasPage'
 import AcmePage from './components/AcmePage'
 import SmsPage from './components/SmsPage'
 import SchedulerPage from './components/SchedulerPage'
+import NotifyPage from './components/NotifyPage'
 import { tables } from './tables'
 import { getPage } from './pages'
 
@@ -25,6 +26,7 @@ const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
   acme: () => <AcmePage />,
   sms: () => <SmsPage />,
   scheduler: () => <SchedulerPage />,
+  notify: () => <NotifyPage />,
 }
 
 function CustomPage() {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -19,55 +18,51 @@ import (
 	"github.com/LemonZuo/homer/internal/db"
 	"github.com/LemonZuo/homer/internal/event"
 	"github.com/LemonZuo/homer/internal/handler"
+	"github.com/LemonZuo/homer/internal/jobmonitor"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
-	"github.com/LemonZuo/homer/internal/notify/email"
-	"github.com/LemonZuo/homer/internal/notify/wework"
 	"github.com/LemonZuo/homer/internal/router"
 	"github.com/LemonZuo/homer/internal/scheduler"
 )
 
-// retryWeWork 构造带统一重试（3 次 / 2s 指数退避）的企业微信 Notifier。
-func retryWeWork(corpID, agentID, secret, tagID string) notify.Notifier {
-	return notify.Retry(3, 2*time.Second, notify.WeWork(wework.New(corpID, agentID, secret, tagID)))
-}
-
-// retryEmail 构造带统一重试（3 次 / 2s 指数退避）的 Resend 邮件 Notifier。
-func retryEmail(apiKey, from, to string) notify.Notifier {
-	return notify.Retry(3, 2*time.Second, notify.Email(email.NewResend(apiKey, from), to))
-}
-
-// buildServer 组装全部依赖（DB / notifier / service / handler / scheduler / router），
+// buildServer 组装全部依赖（DB / notify Hub / service / handler / scheduler / router），
 // 返回可运行的 gin.Engine 与清理函数（停止调度器）。
 func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error) {
 	gormDB, err := db.New(cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect db: %w", err)
 	}
-	if err := gormDB.AutoMigrate(&model.SmsForwarder{}); err != nil {
-		return nil, nil, fmt.Errorf("migrate sms_forwarder: %w", err)
+	if err := gormDB.AutoMigrate(
+		&model.SmsForwarder{},
+		&model.NotifyChannel{},
+		&model.NotifyBinding{},
+		&model.SchedulerJobState{},
+	); err != nil {
+		return nil, nil, fmt.Errorf("migrate: %w", err)
 	}
 
-	notifier := retryWeWork(cfg.WeWorkBirthdayCorpID, cfg.WeWorkBirthdayAgentID, cfg.WeWorkBirthdaySecret, cfg.WeWorkBirthdayTagID)
-	eventNotifier := retryWeWork(cfg.WeWorkEventCorpID, cfg.WeWorkEventAgentID, cfg.WeWorkEventSecret, cfg.WeWorkEventTagID)
+	hub := notify.NewHub(gormDB)
+	notifyStore := notify.NewStore(gormDB)
+
+	birthdayNotifier := hub.For(notify.ModuleBirthday)
+	eventNotifier := hub.For(notify.ModuleEvent)
+	bypassNotifier := hub.For(notify.ModuleBypass)
 
 	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
 	casSvc := cas.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
 	acmeSvc := buildACMEService(gormDB, cfg, casSvc)
 
-	bypassWeWork := retryWeWork(cfg.WeWorkBypassCorpID, cfg.WeWorkBypassAgentID, cfg.WeWorkBypassSecret, cfg.WeWorkBypassTagID)
-	bypassEmail := retryEmail(cfg.ResendAPIKey, cfg.BypassEmailFrom, cfg.BypassEmailTo)
-
-	sched := startScheduler(gormDB, cfg, notifier, eventNotifier, acmeSvc)
+	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, hub)
 
 	cdnHandler := handler.NewCDNHandler(cdnSvc)
 	casHandler := handler.NewCASHandler(casSvc, cdnSvc)
 	acmeHandler := handler.NewACMEHandler(acmeSvc)
-	bypassHandler := handler.NewBypassHandler(bypassWeWork, bypassEmail, cfg.BypassSubject)
+	bypassHandler := handler.NewBypassHandler(bypassNotifier)
 	smsHandler := handler.NewSMSHandler(gormDB)
 	schedulerHandler := handler.NewSchedulerHandler(sched)
+	notifyHandler := handler.NewNotifyHandler(notifyStore)
 
-	r := router.Setup(gormDB, notifier, eventNotifier, cdnHandler, casHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, frontend)
+	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnHandler, casHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, frontend)
 	r.GET("/healthz", handler.Health(gormDB, sched))
 
 	return r, sched.Stop, nil
@@ -95,8 +90,9 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) 
 	)
 }
 
-// startScheduler 注册并启动后台任务，返回 Scheduler 供调用方 defer Stop。
-func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service) *scheduler.Scheduler {
+// startScheduler 注册后台任务、挂上 jobmonitor（持久化 + 失败告警）并启动，
+// 返回 Scheduler 供调用方 defer Stop。
+func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, hub *notify.Hub) *scheduler.Scheduler {
 	sched := scheduler.New()
 
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() error {
@@ -125,6 +121,11 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 	}); err != nil {
 		log.Fatalf("register acme-renew task: %v", err)
 	}
+
+	// 观察者：落库 + 连续失败达阈值经 Hub 告警。须在 Start 前注入并预热。
+	mon := jobmonitor.New(gormDB, hub.For(notify.ModuleSchedAlrt))
+	sched.SetObserver(mon, cfg.SchedulerAlertFailThreshold)
+	mon.Hydrate(sched)
 
 	sched.Start()
 	return sched
