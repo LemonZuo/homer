@@ -70,6 +70,7 @@ CREATE TABLE `acme_domain` (
   `account_id`   BIGINT       NOT NULL DEFAULT 0      COMMENT 'ACME CA 账号 ID',
   `provider`     VARCHAR(64)  NOT NULL                COMMENT 'lego DNS provider key（alidns/cloudflare/dnspod...）',
   `san_providers` VARCHAR(1024) NOT NULL DEFAULT ''   COMMENT '按域名指定 provider 的覆盖表 JSON {"b.com":"alidns"}；空=全用 provider',
+  `cas_enabled`  VARCHAR(1)   NOT NULL DEFAULT '0'    COMMENT '是否参与阿里云 CAS（开启后签发/续期自动上传，手动按钮才可用）：1/0',
   `enabled`      VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用自动续期：1/0',
   `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

@@ -640,8 +640,16 @@ export default function AcmePage() {
                   variant="outline"
                   className="h-9 w-full sm:h-8 sm:w-8"
                   onClick={() => startUploadCAS(d)}
-                  disabled={busy !== null || !d.not_after || revoked}
-                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '上传当前证书到 CAS'}
+                  disabled={busy !== null || !d.not_after || revoked || !d.cas_enabled}
+                  title={
+                    !d.cas_enabled
+                      ? '请先在编辑里开启「上传到阿里云 CAS」'
+                      : !d.not_after
+                        ? '当前域名还没有证书'
+                        : revoked
+                          ? '当前证书已吊销'
+                          : '上传当前证书到 CAS'
+                  }
                 >
                   {uploadingCAS ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -157,6 +157,8 @@ type ACMESafelineDeployConfig struct {
 // account_id 引用 ACMEAccount.ID；provider 引用 ACMECredential.Provider。
 // san_providers 是可选的「按域名指定 DNS provider」覆盖表，JSON：{"b.com":"alidns"}；
 // 未列出的域名走 provider（默认）。用于一张证书的域名跨多个 DNS 服务商的场景。
+// cas_enabled 控制本域名的证书是否参与阿里云 CAS：开启后签发/续期自动上传，
+// 手动上传按钮也只有开启时才能用；关闭则两条路径都被拦截。
 type ACMEDomain struct {
 	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
 	MainDomain   string    `gorm:"column:main_domain;size:255;uniqueIndex" json:"main_domain"`
@@ -164,6 +166,7 @@ type ACMEDomain struct {
 	AccountID    int64     `gorm:"column:account_id;index" json:"account_id"`
 	Provider     string    `gorm:"column:provider;size:64" json:"provider"`
 	SanProviders string    `gorm:"column:san_providers;size:1024" json:"san_providers"`
+	CASEnabled   BoolFlag  `gorm:"column:cas_enabled;type:varchar(1);default:'0'" json:"cas_enabled"`
 	Enabled      BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`

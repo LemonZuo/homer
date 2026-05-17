@@ -33,10 +33,20 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 		return nil, nil, fmt.Errorf("connect db: %w", err)
 	}
 	if err := gormDB.AutoMigrate(
+		&model.BirthdayRemind{},
+		&model.EventReminder{},
 		&model.SmsForwarder{},
 		&model.NotifyChannel{},
 		&model.NotifyBinding{},
 		&model.SchedulerJobState{},
+		&model.ACMECredential{},
+		&model.ACMEAccount{},
+		&model.ACMEDomain{},
+		&model.ACMECert{},
+		&model.ACMEIssueTask{},
+		&model.ACMEDeployTarget{},
+		&model.ACMEDeployConfig{},
+		&model.SSHCredential{},
 	); err != nil {
 		return nil, nil, fmt.Errorf("migrate: %w", err)
 	}

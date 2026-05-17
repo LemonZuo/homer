@@ -5,6 +5,7 @@ export interface Domain {
   account_id: number
   provider: string
   san_providers?: string
+  cas_enabled?: boolean
   enabled: boolean
   created_at: string
   updated_at: string

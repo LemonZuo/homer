@@ -450,8 +450,13 @@ func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, ch
 		return nil, fmt.Errorf("查询证书记录失败：%w", err)
 	}
 
-	// 自动上传 CAS（失败不回滚签发，仅记日志）。前端仍保留手动上传按钮，方便补传或重传。
-	if s.cas != nil && s.cas.Configured() {
+	// 自动上传 CAS（失败不回滚签发，仅记日志）。按域名开关 cas_enabled 控制；
+	// 关闭时手动「上传 CAS」按钮也会被后端拒绝。
+	if !bool(d.CASEnabled) {
+		logf(logw, "已跳过自动上传 CAS（域名未开启 CAS）")
+	} else if s.cas == nil || !s.cas.Configured() {
+		logf(logw, "已跳过自动上传 CAS（阿里云 CAS 未配置）")
+	} else {
 		name := buildCASName(time.Now())
 		id, err := s.cas.UploadCertificate(name, string(full), string(key))
 		if err != nil {
@@ -472,6 +477,9 @@ func (s *Service) UploadCASTaskAsync(domainID int64) (int64, error) {
 	var d model.ACMEDomain
 	if err := s.db.First(&d, domainID).Error; err != nil {
 		return 0, err
+	}
+	if !bool(d.CASEnabled) {
+		return 0, errors.New("当前域名未开启「上传到阿里云 CAS」，请先在编辑里启用")
 	}
 	cert, err := s.GetCertByDomain(domainID)
 	if err != nil {
