@@ -320,8 +320,8 @@ jobs:
             echo
             echo "| 架构 | 文件 | 体积 | SHA256 |"
             echo "| --- | --- | --- | --- |"
-            echo "| linux/amd64 | \`server-linux-amd64\` | ${amd64_size:-—} | \`${amd64_sum:-—}\` |"
-            echo "| linux/arm64 | \`server-linux-arm64\` | ${arm64_size:-—} | \`${arm64_sum:-—}\` |"
+            echo "| linux/amd64 | \`server‑linux‑amd64\` | ${amd64_size:-—} | \`${amd64_sum:-—}\` |"
+            echo "| linux/arm64 | \`server‑linux‑arm64\` | ${arm64_size:-—} | \`${arm64_sum:-—}\` |"
             echo
             echo "校验文件：\`sha256sums.txt\`。"
             echo
