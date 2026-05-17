@@ -15,7 +15,6 @@ export function CredentialsDrawer({
   open,
   onOpenChange,
   credentials,
-  usage,
   onAdd,
   onEdit,
   onDelete,
@@ -23,7 +22,6 @@ export function CredentialsDrawer({
   open: boolean
   onOpenChange: (o: boolean) => void
   credentials: Credential[]
-  usage: Record<string, number>
   onAdd: () => void
   onEdit: (c: Credential) => void
   onDelete: (c: Credential) => void
@@ -57,12 +55,12 @@ export function CredentialsDrawer({
                       <span className="truncate font-mono text-[13px] font-medium">{c.provider}</span>
                       <span
                         className={
-                          usage[c.provider]
+                          c.ref_count
                             ? 'shrink-0 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400'
                             : 'shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground'
                         }
                       >
-                        {usage[c.provider] ? `${usage[c.provider]} 个域名` : '未使用'}
+                        {c.ref_count ? `${c.ref_count} 个域名` : '未使用'}
                       </span>
                     </div>
                     <div

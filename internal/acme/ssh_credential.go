@@ -23,12 +23,42 @@ func NewSSHCredentialStore(db *gorm.DB) *SSHCredentialStore {
 	return &SSHCredentialStore{db: db}
 }
 
+// List 返回所有凭证；RefCount 为「凭证模式」引用该凭证的 SSH 机器数。
 func (s *SSHCredentialStore) List() ([]model.SSHCredential, error) {
 	var rows []model.SSHCredential
 	if err := s.db.Order("id DESC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	counts, err := s.credentialUsage()
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		rows[i].RefCount = counts[rows[i].ID]
+	}
 	return rows, nil
+}
+
+// credentialUsage 统计每个 credential id 被多少台「凭证模式」SSH 机器引用。
+func (s *SSHCredentialStore) credentialUsage() (map[int64]int64, error) {
+	var targets []model.ACMEDeployTarget
+	if err := s.db.Where("kind = ?", DeployKindSSH).Find(&targets).Error; err != nil {
+		return nil, err
+	}
+	counts := make(map[int64]int64)
+	for _, row := range targets {
+		var auth struct {
+			AuthSource   string `json:"auth_source"`
+			CredentialID int64  `json:"credential_id"`
+		}
+		if json.Unmarshal([]byte(row.AuthJSON), &auth) != nil {
+			continue
+		}
+		if auth.AuthSource == "credential" && auth.CredentialID > 0 {
+			counts[auth.CredentialID]++
+		}
+	}
+	return counts, nil
 }
 
 func (s *SSHCredentialStore) Get(id int64) (*model.SSHCredential, error) {

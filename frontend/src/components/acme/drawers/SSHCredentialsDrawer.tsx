@@ -15,7 +15,6 @@ export function SSHCredentialsDrawer({
   open,
   onOpenChange,
   credentials,
-  usage,
   onAdd,
   onEdit,
   onDelete,
@@ -23,7 +22,6 @@ export function SSHCredentialsDrawer({
   open: boolean
   onOpenChange: (o: boolean) => void
   credentials: SSHCredential[]
-  usage: Record<number, number>
   onAdd: () => void
   onEdit: (c: SSHCredential) => void
   onDelete: (c: SSHCredential) => void
@@ -57,12 +55,12 @@ export function SSHCredentialsDrawer({
                     <span className="truncate font-mono text-[13px] font-medium">{c.name}</span>
                     <span
                       className={
-                        usage[c.id]
+                        c.ref_count
                           ? 'shrink-0 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400'
                           : 'shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground'
                       }
                     >
-                      {usage[c.id] ? `${usage[c.id]} 台机器` : '未使用'}
+                      {c.ref_count ? `${c.ref_count} 台机器` : '未使用'}
                     </span>
                   </div>
                   <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">

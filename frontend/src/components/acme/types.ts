@@ -26,6 +26,7 @@ export interface AcmeAccount {
   enabled: boolean
   created_at: string
   updated_at: string
+  ref_count: number
 }
 
 export interface Credential {
@@ -34,6 +35,7 @@ export interface Credential {
   envs_json: string
   created_at: string
   updated_at: string
+  ref_count: number
 }
 
 export interface DeployTarget {
@@ -58,6 +60,7 @@ export interface SSHCredential {
   passphrase: string
   created_at?: string
   updated_at?: string
+  ref_count?: number
 }
 
 export interface SSHTarget {

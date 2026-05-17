@@ -22,10 +22,26 @@ func NewAccountStore(db *gorm.DB) *AccountStore {
 	return &AccountStore{db: db}
 }
 
+// List 返回所有账号；RefCount 为引用该账号的域名数。
 func (s *AccountStore) List() ([]model.ACMEAccount, error) {
 	var rows []model.ACMEAccount
 	if err := s.db.Order("id DESC").Find(&rows).Error; err != nil {
 		return nil, err
+	}
+	var counts []struct {
+		AccountID int64
+		N         int64
+	}
+	if err := s.db.Model(&model.ACMEDomain{}).
+		Select("account_id, COUNT(*) AS n").Group("account_id").Scan(&counts).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]int64, len(counts))
+	for _, c := range counts {
+		byID[c.AccountID] = c.N
+	}
+	for i := range rows {
+		rows[i].RefCount = byID[rows[i].ID]
 	}
 	return rows, nil
 }

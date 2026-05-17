@@ -11,6 +11,7 @@ type ACMECredential struct {
 	EnvsJSON  string    `gorm:"column:envs_json;type:text" json:"envs_json"`
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	RefCount  int64     `gorm:"-" json:"ref_count"`
 }
 
 func (ACMECredential) TableName() string { return "acme_credential" }
@@ -28,6 +29,7 @@ type ACMEAccount struct {
 	Enabled      BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	RefCount     int64     `gorm:"-" json:"ref_count"`
 }
 
 func (ACMEAccount) TableName() string { return "acme_account" }
@@ -82,6 +84,7 @@ type SSHCredential struct {
 	Passphrase string    `gorm:"column:passphrase;type:text" json:"passphrase"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	RefCount   int64     `gorm:"-" json:"ref_count"`
 }
 
 func (SSHCredential) TableName() string { return "ssh_credential" }

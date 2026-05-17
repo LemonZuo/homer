@@ -58,10 +58,26 @@ func (s *CredentialStore) Providers() []string {
 }
 
 // List 返回所有凭证记录（envs_json 原样回前端，方便编辑）。
+// RefCount 为引用该 provider 的域名数。
 func (s *CredentialStore) List() ([]model.ACMECredential, error) {
 	var rows []model.ACMECredential
 	if err := s.db.Order("provider").Find(&rows).Error; err != nil {
 		return nil, err
+	}
+	var counts []struct {
+		Provider string
+		N        int64
+	}
+	if err := s.db.Model(&model.ACMEDomain{}).
+		Select("provider, COUNT(*) AS n").Group("provider").Scan(&counts).Error; err != nil {
+		return nil, err
+	}
+	byProvider := make(map[string]int64, len(counts))
+	for _, c := range counts {
+		byProvider[c.Provider] = c.N
+	}
+	for i := range rows {
+		rows[i].RefCount = byProvider[rows[i].Provider]
 	}
 	return rows, nil
 }

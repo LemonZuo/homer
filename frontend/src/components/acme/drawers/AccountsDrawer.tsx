@@ -66,6 +66,16 @@ export function AccountsDrawer({
                       >
                         {a.enabled ? '启用' : '停用'}
                       </span>
+                      <span
+                        className={cn(
+                          'shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                          a.ref_count
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {a.ref_count ? `${a.ref_count} 个域名` : '未使用'}
+                      </span>
                     </div>
                     <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
                       {caLabel(a.ca)} · {a.email}

@@ -842,12 +842,6 @@ export default function AcmePage() {
         open={credDrawerOpen}
         onOpenChange={setCredDrawerOpen}
         credentials={credentials}
-        usage={domains.reduce<Record<string, number>>((acc, d) => {
-          if (d.provider) {
-            acc[d.provider] = (acc[d.provider] ?? 0) + 1
-          }
-          return acc
-        }, {})}
         onAdd={() => {
           setCredEditTarget(null)
           setCredEditOpen(true)
@@ -943,12 +937,6 @@ export default function AcmePage() {
         open={sshCredDrawerOpen}
         onOpenChange={setSSHCredDrawerOpen}
         credentials={sshCredentials}
-        usage={sshTargets.reduce<Record<number, number>>((acc, t) => {
-          if (t.auth_source === 'credential' && t.credential_id) {
-            acc[t.credential_id] = (acc[t.credential_id] ?? 0) + 1
-          }
-          return acc
-        }, {})}
         onAdd={() => {
           setSSHCredEditTarget(null)
           setSSHCredEditOpen(true)
