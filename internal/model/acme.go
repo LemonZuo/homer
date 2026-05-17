@@ -204,11 +204,19 @@ type ACMEIssueTask struct {
 	DomainID   int64      `gorm:"column:domain_id;index" json:"domain_id"`
 	MainDomain string     `gorm:"column:main_domain;size:255" json:"main_domain"`
 	Kind       string     `gorm:"column:kind;size:32" json:"kind"`           // issue | renew | revoke | upload_cas | deploy_ssh | deploy_safeline | deploy
-	Status     string     `gorm:"column:status;size:16;index" json:"status"` // pending | running | success | failed
+	Status     string     `gorm:"column:status;size:16;index" json:"status"` // pending | running | success | failed | retrying
 	StartedAt  time.Time  `gorm:"column:started_at;autoCreateTime" json:"started_at"`
 	FinishedAt *time.Time `gorm:"column:finished_at" json:"finished_at"`
 	LogText    string     `gorm:"column:log_text;type:mediumtext" json:"log_text"`
 	ErrorMsg   string     `gorm:"column:error_msg;size:1024" json:"error_msg"`
+
+	// 失败重试。仅持久化部署配置触发的部署任务参与重试（config_id>0）。
+	// attempt=已执行次数，max_attempt=允许总次数（1=不重试），
+	// next_retry_at=下次可重试时刻，由 acme-deploy-retry cron 扫描拉起。
+	Attempt     int        `gorm:"column:attempt;not null;default:0" json:"attempt"`
+	MaxAttempt  int        `gorm:"column:max_attempt;not null;default:1" json:"max_attempt"`
+	ConfigID    int64      `gorm:"column:config_id;not null;default:0" json:"config_id"`
+	NextRetryAt *time.Time `gorm:"column:next_retry_at;index" json:"next_retry_at"`
 }
 
 func (ACMEIssueTask) TableName() string { return "acme_issue_task" }

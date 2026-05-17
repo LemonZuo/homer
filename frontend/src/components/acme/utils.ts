@@ -219,6 +219,7 @@ export const STATUS_STYLE: Record<string, string> = {
   running: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
   success: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
   failed: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
+  retrying: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -226,6 +227,7 @@ export const STATUS_LABEL: Record<string, string> = {
   running: '运行中',
   success: '成功',
   failed: '失败',
+  retrying: '重试中',
 }
 
 export const KIND_LABEL: Record<string, string> = {

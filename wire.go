@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -97,6 +98,8 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) 
 		acme.NewSSEHub(),
 		cfg.ACMEDataDir,
 		cfg.ACMERenewBeforeDays,
+		cfg.ACMEDeployRetry,
+		time.Duration(cfg.ACMEDeployRetryBackoffSec)*time.Second,
 	)
 }
 
@@ -130,6 +133,19 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 		return nil
 	}); err != nil {
 		log.Fatalf("register acme-renew task: %v", err)
+	}
+
+	if err := sched.Register("acme-deploy-retry", cfg.ACMEDeployRetryCron, func() error {
+		n, err := acmeSvc.RetryDeployTasks()
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			log.Printf("acme deploy 重试拉起：%d 个任务", n)
+		}
+		return nil
+	}); err != nil {
+		log.Fatalf("register acme-deploy-retry task: %v", err)
 	}
 
 	// 观察者：落库 + 连续失败达阈值经 Hub 告警。须在 Start 前注入并预热。

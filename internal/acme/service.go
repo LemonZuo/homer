@@ -33,11 +33,17 @@ type Service struct {
 	dataDir        string
 	renewDays      int
 
+	deployRetry        int           // 部署任务允许总执行次数（含首次），1=不重试
+	deployRetryBackoff time.Duration // 退避基数，实际间隔 = backoff * 已执行次数
+
 	issueMu sync.Mutex // 串行化签发（lego logger / env 是全局状态）
 }
 
-func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, sshCreds *SSHCredentialStore, accounts *AccountStore, deployTargets *DeployTargetStore, deployConfigs *DeployConfigStore, deployRegistry *DeployRegistry, casSvc *cas.Service, hub *SSEHub, dataDir string, renewDays int) *Service {
-	return &Service{db: db, manager: mgr, credstore: store, sshCredstore: sshCreds, accountStore: accounts, deployTargets: deployTargets, deployConfigs: deployConfigs, deployRegistry: deployRegistry, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays}
+func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, sshCreds *SSHCredentialStore, accounts *AccountStore, deployTargets *DeployTargetStore, deployConfigs *DeployConfigStore, deployRegistry *DeployRegistry, casSvc *cas.Service, hub *SSEHub, dataDir string, renewDays int, deployRetry int, deployRetryBackoff time.Duration) *Service {
+	if deployRetry < 1 {
+		deployRetry = 1
+	}
+	return &Service{db: db, manager: mgr, credstore: store, sshCredstore: sshCreds, accountStore: accounts, deployTargets: deployTargets, deployConfigs: deployConfigs, deployRegistry: deployRegistry, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays, deployRetry: deployRetry, deployRetryBackoff: deployRetryBackoff}
 }
 
 func (s *Service) Hub() *SSEHub                        { return s.hub }
@@ -526,6 +532,8 @@ func (s *Service) DeployConfigTaskAsync(configID int64) (int64, error) {
 		MainDomain: d.MainDomain,
 		Kind:       deployTaskKind(cfg.Kind),
 		Status:     "pending",
+		MaxAttempt: s.deployRetry,
+		ConfigID:   cfg.ID,
 	}
 	if err := s.db.Create(task).Error; err != nil {
 		return 0, err
@@ -562,6 +570,8 @@ func (s *Service) DeployConfigsByDomainAsync(domainID int64, kind string) ([]int
 			MainDomain: d.MainDomain,
 			Kind:       deployTaskKind(cfg.Kind),
 			Status:     "pending",
+			MaxAttempt: s.deployRetry,
+			ConfigID:   cfg.ID,
 		}
 		if err := s.db.Create(task).Error; err != nil {
 			return nil, err
@@ -666,6 +676,8 @@ func (s *Service) submitAutoDeploy(logw *teeWriter, d model.ACMEDomain, cert mod
 			MainDomain: d.MainDomain,
 			Kind:       deployTaskKind(cfg.Kind),
 			Status:     "pending",
+			MaxAttempt: s.deployRetry,
+			ConfigID:   cfg.ID,
 		}
 		if err := s.db.Create(task).Error; err != nil {
 			logf(logw, "创建自动部署任务失败（%s）：%v", deployConfigName(cfg), err)
@@ -772,11 +784,28 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 	s.issueMu.Lock()
 	defer s.issueMu.Unlock()
 
+	var task model.ACMEIssueTask
+	if err := s.db.First(&task, taskID).Error; err != nil {
+		return
+	}
+	attempt := task.Attempt + 1
+	maxAttempt := task.MaxAttempt
+	if maxAttempt < 1 {
+		maxAttempt = 1
+	}
+
 	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).
-		Updates(map[string]any{"status": "running"}).Error
+		Updates(map[string]any{"status": "running", "attempt": attempt, "next_retry_at": nil}).Error
 
 	logBuf := &bytes.Buffer{}
+	if strings.TrimSpace(task.LogText) != "" {
+		logBuf.WriteString(task.LogText)
+	}
 	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
+
+	if attempt > 1 {
+		logf(logw, "—— 第 %d/%d 次尝试 ——", attempt, maxAttempt)
+	}
 
 	driver, err := s.deployRegistry.Get(cfg.Kind)
 	if err == nil {
@@ -800,22 +829,44 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 		}
 	}
 
-	finish := time.Now()
-	upd := map[string]any{
-		"finished_at": &finish,
-		"log_text":    logBuf.String(),
-	}
-	if err != nil {
-		logf(logw, "部署失败：%v", err)
-		upd["status"] = "failed"
-		upd["error_msg"] = truncate(err.Error(), 1000)
-		upd["log_text"] = logBuf.String()
-	} else {
+	if err == nil {
 		logf(logw, "部署完成")
-		upd["status"] = "success"
-		upd["log_text"] = logBuf.String()
+		finish := time.Now()
+		_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
+			"status":        "success",
+			"finished_at":   &finish,
+			"log_text":      logBuf.String(),
+			"next_retry_at": nil,
+		}).Error
+		s.hub.Close(taskID)
+		return
 	}
-	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(upd).Error
+
+	// 仅持久化配置触发的任务（config_id>0）且仍有剩余次数才安排重试。
+	canRetry := task.ConfigID > 0 && attempt < maxAttempt
+	if canRetry {
+		next := time.Now().Add(s.deployRetryBackoff * time.Duration(attempt))
+		logf(logw, "部署失败：%v", err)
+		logf(logw, "已安排第 %d/%d 次重试，约 %s 后", attempt+1, maxAttempt, next.Format("15:04:05"))
+		_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
+			"status":        "retrying",
+			"error_msg":     truncate(err.Error(), 1000),
+			"log_text":      logBuf.String(),
+			"next_retry_at": &next,
+		}).Error
+		s.hub.Close(taskID)
+		return
+	}
+
+	logf(logw, "部署失败：%v", err)
+	finish := time.Now()
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
+		"status":        "failed",
+		"error_msg":     truncate(err.Error(), 1000),
+		"finished_at":   &finish,
+		"log_text":      logBuf.String(),
+		"next_retry_at": nil,
+	}).Error
 	s.hub.Close(taskID)
 }
 
@@ -848,6 +899,47 @@ func (s *Service) RenewExpiring() ([]int64, error) {
 		}
 	}
 	return taskIDs, nil
+}
+
+// RetryDeployTasks 由 cron 调用：拉起到期的待重试部署任务。
+// 只扫 status='retrying' 且 next_retry_at<=now 的行（历史数据无此状态，零影响），
+// 双保险再校验 attempt<max_attempt 且 config_id>0。返回本轮拉起的任务数。
+func (s *Service) RetryDeployTasks() (int, error) {
+	now := time.Now()
+	var tasks []model.ACMEIssueTask
+	if err := s.db.
+		Where("status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ? AND attempt < max_attempt AND config_id > 0", "retrying", now).
+		Order("id ASC").Find(&tasks).Error; err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, t := range tasks {
+		cfg, err := s.deployConfigs.Get(t.ConfigID)
+		if err != nil {
+			finish := time.Now()
+			_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", t.ID).Updates(map[string]any{
+				"status":        "failed",
+				"error_msg":     truncate(fmt.Sprintf("重试时部署配置已不可用：%v", err), 1000),
+				"finished_at":   &finish,
+				"next_retry_at": nil,
+			}).Error
+			continue
+		}
+		d, cert, target, err := s.prepareDeploy(*cfg)
+		if err != nil {
+			finish := time.Now()
+			_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", t.ID).Updates(map[string]any{
+				"status":        "failed",
+				"error_msg":     truncate(fmt.Sprintf("重试时准备部署失败：%v", err), 1000),
+				"finished_at":   &finish,
+				"next_retry_at": nil,
+			}).Error
+			continue
+		}
+		s.runDeploy(t.ID, d, *cert, *target, *cfg)
+		n++
+	}
+	return n, nil
 }
 
 // ----- helpers -----

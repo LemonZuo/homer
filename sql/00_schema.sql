@@ -148,14 +148,19 @@ CREATE TABLE `acme_issue_task` (
   `domain_id`    BIGINT       NOT NULL,
   `main_domain`  VARCHAR(255) NOT NULL DEFAULT '',
   `kind`         VARCHAR(32)  NOT NULL COMMENT 'issue | renew | revoke | upload_cas | deploy_ssh | deploy_safeline | deploy',
-  `status`       VARCHAR(16)  NOT NULL COMMENT 'pending | running | success | failed',
+  `status`       VARCHAR(16)  NOT NULL COMMENT 'pending | running | success | failed | retrying',
   `started_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `finished_at`  DATETIME     NULL,
   `log_text`     MEDIUMTEXT   NOT NULL,
   `error_msg`    VARCHAR(1024) NOT NULL DEFAULT '',
+  `attempt`      INT          NOT NULL DEFAULT 0 COMMENT '已执行次数',
+  `max_attempt`  INT          NOT NULL DEFAULT 1 COMMENT '允许总次数，1=不重试',
+  `config_id`    BIGINT       NOT NULL DEFAULT 0 COMMENT '触发的持久化部署配置 id，>0 才参与重试',
+  `next_retry_at` DATETIME    NULL COMMENT '下次可重试时刻',
   PRIMARY KEY (`id`),
   KEY `idx_domain_started` (`domain_id`, `started_at`),
-  KEY `idx_status` (`status`)
+  KEY `idx_status` (`status`),
+  KEY `idx_retry` (`status`, `next_retry_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发/续期任务流水';
 
 

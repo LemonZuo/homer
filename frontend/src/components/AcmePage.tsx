@@ -736,6 +736,11 @@ export default function AcmePage() {
               )}
             >
               {STATUS_LABEL[t.status] || t.status}
+              {(t.max_attempt ?? 1) > 1 && (t.attempt ?? 0) > 0 && (
+                <span className="ml-1 opacity-70">
+                  {t.attempt}/{t.max_attempt}
+                </span>
+              )}
             </span>
             <span className="font-mono">#{t.id}</span>
             <span className="font-medium">{t.main_domain}</span>

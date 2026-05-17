@@ -30,6 +30,12 @@ type Config struct {
 	ACMERenewBeforeDays int    // 剩余天数 ≤ 此值则续期
 	ACMERenewCron       string // cron 表达式
 
+	// 部署任务失败重试。仅作用于持久化部署配置触发的任务（手动单条 / 按域名 / 续期后自动）；
+	// 临时部署（ad-hoc，无法重建配置）不重试。重试由 cron 择时拉起，不在任务内 sleep。
+	ACMEDeployRetry           int    // 允许总执行次数（含首次），1=不重试
+	ACMEDeployRetryBackoffSec int    // 退避基数秒，实际间隔 = backoff * 已执行次数
+	ACMEDeployRetryCron       string // 扫描待重试任务的 cron
+
 	// 后台任务 cron。
 	BirthdayRemindCron string
 	EventRemindCron    string
@@ -58,6 +64,10 @@ func Load() *Config {
 		ACMEDataDir:         env("ACME_DATA_DIR", "./data/acme"),
 		ACMERenewBeforeDays: envInt("ACME_RENEW_BEFORE_DAYS", 30),
 		ACMERenewCron:       env("ACME_RENEW_CRON", "0 0 3 * * *"),
+
+		ACMEDeployRetry:           envInt("ACME_DEPLOY_RETRY", 3),
+		ACMEDeployRetryBackoffSec: envInt("ACME_DEPLOY_RETRY_BACKOFF_SEC", 10),
+		ACMEDeployRetryCron:       env("ACME_DEPLOY_RETRY_CRON", "0 * * * * *"),
 
 		BirthdayRemindCron: env("BIRTHDAY_REMIND_CRON", "0 0 9 * * *"),
 		EventRemindCron:    env("EVENT_REMIND_CRON", "0 0 9 * * *"),

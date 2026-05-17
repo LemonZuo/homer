@@ -147,6 +147,9 @@ export interface Task {
   finished_at: string | null
   log_text: string
   error_msg: string
+  attempt?: number
+  max_attempt?: number
+  next_retry_at?: string | null
 }
 
 export interface ProviderSchema {
