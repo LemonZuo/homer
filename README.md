@@ -111,15 +111,14 @@ cron 使用 `robfig/cron/v3` 的秒级格式，必须是 6 段，例如：
 
 ## 数据库初始化
 
-首次部署时先准备好数据库，再按顺序导入 SQL。这里相当于把值班台、档案柜和任务清单先摆好：
+首次部署时先准备好数据库，再导入 SQL。这里相当于把值班台、档案柜和任务清单先摆好：
 
 ```sh
 mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS homer DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -uroot -p homer < sql/001_birthday_remind.sql
-mysql -uroot -p homer < sql/002_acme.sql
+mysql -uroot -p homer < sql/schema.sql
 ```
 
-注意：`sql/002_acme.sql` 包含 `DROP TABLE IF EXISTS`，适合全新初始化。已有数据的环境不要直接重跑，应先按 SQL 内容整理增量迁移。这条提醒不有趣，但很重要。
+注意：`sql/schema.sql` 大部分表使用 `DROP TABLE IF EXISTS`，适合全新初始化。已有数据的环境不要直接重跑，应先按 SQL 内容整理增量迁移。这条提醒不有趣，但很重要。
 
 当前后端启动时只会自动迁移 `sms_forwarder`，其他业务表依赖 `sql/` 里的建表语句。
 
@@ -222,11 +221,10 @@ DB_CHARSET=utf8mb4
 2. 初始化数据库：
 
 ```sh
-mysql -h 192.168.1.10 -P 3306 -u root -p homer < sql/001_birthday_remind.sql
-mysql -h 192.168.1.10 -P 3306 -u root -p homer < sql/002_acme.sql
+mysql -h 192.168.1.10 -P 3306 -u root -p homer < sql/schema.sql
 ```
 
-把示例里的 host、port、user 和库名替换成你的实际值；`-p` 会让 MySQL 客户端交互式询问密码。再次提醒：`sql/002_acme.sql` 包含 `DROP TABLE IF EXISTS`，只适合全新库初始化。
+把示例里的 host、port、user 和库名替换成你的实际值；`-p` 会让 MySQL 客户端交互式询问密码。再次提醒：`sql/schema.sql` 大部分表使用 `DROP TABLE IF EXISTS`，只适合全新库初始化。
 
 3. 启动服务：
 

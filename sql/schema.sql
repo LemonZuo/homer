@@ -1,4 +1,35 @@
--- ACME 自动签发模块。
+-- Homer 数据库 schema（首次建表）。
+-- 全新部署直接执行本文件即可。
+-- 注意：acme / sms / ssh / notify / scheduler 等表使用 DROP TABLE IF EXISTS，
+-- 已有数据的环境不要直接重跑，请按需整理增量迁移。
+-- sys_birthday_remind 沿用老 ruoyi 表结构，仅 CREATE IF NOT EXISTS，可与老库共存。
+
+
+-- ============================================================
+-- 生日提醒
+-- ============================================================
+-- 复用老 ruoyi 项目的表 `sys_birthday_remind`，结构保持原样。
+-- 字段语义：
+--   remind_birthday          : 公历生日字符串 yyyy-MM-dd（用户输入）
+--   remind_chinese_birthday  : 农历生日中文字符串，由后端 BeforeSave 自动算
+--   remind_zodiac            : 生肖，由后端 BeforeSave 自动算
+--   is_remind                : varchar('0'/'1'); Go 侧用 BoolFlag 自动转 bool
+-- 全新部署时使用以下 DDL；老库已有数据时直接复用，无需建表。
+CREATE TABLE IF NOT EXISTS `sys_birthday_remind` (
+  `remind_id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '唯一标识',
+  `remind_name`             VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '姓名',
+  `remind_birthday`         VARCHAR(10)  NOT NULL DEFAULT ''     COMMENT '公历生日 yyyy-MM-dd',
+  `remind_chinese_birthday` VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '农历生日（后端自动）',
+  `remind_zodiac`           VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '生肖（后端自动）',
+  `is_remind`               VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否提醒：1=是 0=否',
+  PRIMARY KEY (`remind_id`),
+  KEY `idx_chinese_birthday` (`remind_chinese_birthday`, `is_remind`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='生日提醒';
+
+
+-- ============================================================
+-- ACME 自动签发
+-- ============================================================
 -- 老 Java 项目用 SSH 调远端 acme.sh，无数据模型；本仓库迁移到 lego 后需要自建表。
 -- ACME CA 账号（Let's Encrypt / ZeroSSL / 自定义 directory）存 acme_account 表；
 -- ZeroSSL 的 EAB KID/HMAC 也存库，不再从 env 读取。
@@ -127,7 +158,10 @@ CREATE TABLE `acme_issue_task` (
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发/续期任务流水';
 
--- 短信转发器（SmsForwarder Android）服务端配置。
+
+-- ============================================================
+-- 短信转发器（SmsForwarder Android）
+-- ============================================================
 -- 老 Java 项目里用 application.yml 单实例配置；本仓库改为多实例存库 + 前端切换。
 -- 对接服务端「客户端安全措施」全部 4 种模式（auth_mode）：
 --   0 无、1 签名(sign_key)、2 RSA(rsa_public_key)、3 SM4(sm4_key)。
@@ -151,7 +185,10 @@ CREATE TABLE `sms_forwarder` (
   KEY `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短信转发器服务端配置';
 
--- SSH 登录凭证：可复用的认证身份（密码 / 私钥）。
+
+-- ============================================================
+-- SSH 登录凭证
+-- ============================================================
 -- 多台 acme_deploy_target 可引用同一条凭证，避免重复输入。
 -- 引用关系存在 acme_deploy_target.auth_json 里：{"auth_source":"credential","credential_id":42}。
 -- 不在 acme_deploy_target 加 FK 列，保持 driver 多态：safeline 等其他 kind 不感知此表。
@@ -170,7 +207,10 @@ CREATE TABLE `ssh_credential` (
   UNIQUE KEY `uk_name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SSH 登录凭证（可被多台机器复用）';
 
--- 事项提醒：一次性日期提醒（会议/体检/办事截止等），与生日提醒隔离。
+
+-- ============================================================
+-- 事项提醒（一次性日期）
+-- ============================================================
 -- 触发规则：事项当天前 lead_days 天起，每天 cron 推送一次。
 -- 去重：last_notified_at 记录最近一次发送时间，同一天命中则不重复推。
 -- 过期：event_date < today 直接跳过；如需归档由人工删除。
@@ -190,7 +230,10 @@ CREATE TABLE `event_reminder` (
   KEY `idx_enabled_event_date` (`enabled`, `event_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事项提醒（一次性日期）';
 
--- 通知通道与模块绑定。
+
+-- ============================================================
+-- 通知通道与模块绑定
+-- ============================================================
 -- 通道类型决定 config_json 结构：
 --   wework:  {"corp_id","agent_id","secret","tag_id"}
 --   email:   {"api_key","from","to"}（Resend）
@@ -220,7 +263,11 @@ CREATE TABLE `notify_binding` (
   UNIQUE KEY `uk_notify_bind` (`module`, `channel_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模块 → 通道 多对多绑定';
 
--- 调度任务执行状态：重启后面板/healthz 仍可见最近一次结果。
+
+-- ============================================================
+-- 调度任务执行状态
+-- ============================================================
+-- 重启后面板/healthz 仍可见最近一次结果。
 -- 历史环形仍只在内存，这里只保留「最近一次」+ 连续失败计数（告警防抖用）。
 
 DROP TABLE IF EXISTS `scheduler_job_state`;
