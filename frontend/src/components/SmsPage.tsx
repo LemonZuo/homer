@@ -8,6 +8,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
 import { Label } from './ui/label'
+import { Select } from './ui/select'
 import { Switch } from './ui/switch'
 import {
   Dialog,
@@ -339,18 +340,12 @@ function ForwarderEditDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="fw-auth">客户端安全措施</Label>
-            <select
+            <Select<number>
               id="fw-auth"
-              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
               value={authMode}
-              onChange={(e) => setAuthMode(Number(e.target.value) as AuthMode)}
-            >
-              {AUTH_MODES.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setAuthMode(v as AuthMode)}
+              options={AUTH_MODES.map((m) => ({ value: m.value, label: m.label }))}
+            />
             <p className="text-[11px] text-muted-foreground">
               需与服务端「设置 - 客户端安全措施」一致
             </p>
@@ -629,18 +624,13 @@ export default function SmsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            className="h-9 min-w-[140px] flex-1 rounded-md border border-input bg-background px-3 text-[13px] sm:flex-none"
-            value={selectedID ?? ''}
-            onChange={(e) => setSelectedID(e.target.value ? Number(e.target.value) : null)}
-          >
-            {enabledList.length === 0 && <option value="">无可用转发器</option>}
-            {enabledList.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+          <Select<number>
+            className="h-9 min-w-[140px] flex-1 sm:flex-none"
+            value={selectedID ?? 0}
+            onChange={(v) => setSelectedID(v)}
+            placeholder="无可用转发器"
+            options={enabledList.map((f) => ({ value: f.id, label: f.name }))}
+          />
           <Button variant="outline" size="sm" onClick={() => setManageOpen(true)}>
             <Settings2 className="mr-1.5 h-3.5 w-3.5" />
             管理
@@ -824,22 +814,16 @@ export default function SmsPage() {
           <div className="mt-3 flex items-center justify-between text-[12px] text-muted-foreground">
             <div>第 {pageNum} 页 · 本页 {list.length} 条</div>
             <div className="flex items-center gap-2">
-              <select
-                className="rounded-md border border-border bg-background px-2 py-1 text-[12px]"
+              <Select<number>
+                className="h-8 w-auto text-[12px]"
                 value={pageSize}
-                onChange={(e) => {
-                  const n = Number(e.target.value)
+                onChange={(n) => {
                   setPageSize(n)
                   setPageNum(1)
                   runQuery({ pageSize: n, pageNum: 1 })
                 }}
-              >
-                {[10, 20, 50, 100].map((n) => (
-                  <option key={n} value={n}>
-                    {n}/页
-                  </option>
-                ))}
-              </select>
+                options={[10, 20, 50, 100].map((n) => ({ value: n, label: `${n}/页` }))}
+              />
               <Button
                 size="sm"
                 variant="outline"

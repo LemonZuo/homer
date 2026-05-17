@@ -5,6 +5,7 @@ import { api } from '../../../api'
 import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
 import { Label } from '../../ui/label'
+import { Select } from '../../ui/select'
 import {
   Dialog,
   DialogContent,
@@ -125,19 +126,15 @@ export function CredentialEditDialog({
             {target ? (
               <Input id="cred-provider" value={provider} disabled />
             ) : (
-              <select
+              <Select<string>
                 id="cred-provider"
-                className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
                 value={providerMode === 'custom' ? '__custom__' : provider}
-                onChange={(e) => onPresetChange(e.target.value)}
-              >
-                {PROVIDER_SCHEMAS.map((p) => (
-                  <option key={p.key} value={p.key}>
-                    {p.label}
-                  </option>
-                ))}
-                <option value="__custom__">自定义（手动填 provider key）</option>
-              </select>
+                onChange={onPresetChange}
+                options={[
+                  ...PROVIDER_SCHEMAS.map((p) => ({ value: p.key, label: p.label })),
+                  { value: '__custom__', label: '自定义（手动填 provider key）' },
+                ]}
+              />
             )}
             {providerMode === 'custom' && !target && (
               <Input

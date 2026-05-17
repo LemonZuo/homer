@@ -5,6 +5,7 @@ import { api } from '../../../api'
 import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
 import { Label } from '../../ui/label'
+import { Select } from '../../ui/select'
 import { Switch } from '../../ui/switch'
 import {
   Dialog,
@@ -123,21 +124,16 @@ export function SafelineDeployConfigEditDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="safeline-deploy-target">雷池实例</Label>
-            <select
+            <Select<number>
               id="safeline-deploy-target"
-              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
-              value={targetID ? String(targetID) : ''}
-              onChange={(e) => setTargetID(Number(e.target.value))}
-            >
-              {selectableTargets.length === 0 && (
-                <option value="">（暂无启用的雷池实例）</option>
-              )}
-              {selectableTargets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.base_url})
-                </option>
-              ))}
-            </select>
+              value={targetID}
+              onChange={setTargetID}
+              placeholder="（暂无启用的雷池实例）"
+              options={selectableTargets.map((t) => ({
+                value: t.id,
+                label: `${t.name} (${t.base_url})`,
+              }))}
+            />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
             <div className="grid gap-1.5">
@@ -155,15 +151,15 @@ export function SafelineDeployConfigEditDialog({
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="safeline-cert-type">证书类型</Label>
-              <select
+              <Select<string>
                 id="safeline-cert-type"
                 value={certType}
-                onChange={(e) => setCertType(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
-              >
-                <option value="2">手动上传证书（2）</option>
-                <option value="1">类型 1（兼容）</option>
-              </select>
+                onChange={setCertType}
+                options={[
+                  { value: '2', label: '手动上传证书（2）' },
+                  { value: '1', label: '类型 1（兼容）' },
+                ]}
+              />
             </div>
           </div>
           <div className="flex items-center justify-between">

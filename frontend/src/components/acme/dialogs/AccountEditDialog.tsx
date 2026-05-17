@@ -5,6 +5,7 @@ import { api } from '../../../api'
 import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
 import { Label } from '../../ui/label'
+import { Select } from '../../ui/select'
 import { Switch } from '../../ui/switch'
 import {
   Dialog,
@@ -116,16 +117,16 @@ export function AccountEditDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="account-ca">CA</Label>
-            <select
+            <Select<string>
               id="account-ca"
-              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
               value={ca}
-              onChange={(e) => setCA(e.target.value)}
-            >
-              <option value="letsencrypt">Let's Encrypt</option>
-              <option value="zerossl">ZeroSSL</option>
-              <option value="custom">自定义 ACME directory</option>
-            </select>
+              onChange={setCA}
+              options={[
+                { value: 'letsencrypt', label: "Let's Encrypt" },
+                { value: 'zerossl', label: 'ZeroSSL' },
+                { value: 'custom', label: '自定义 ACME directory' },
+              ]}
+            />
           </div>
           {ca === 'custom' && (
             <div className="grid gap-1.5">

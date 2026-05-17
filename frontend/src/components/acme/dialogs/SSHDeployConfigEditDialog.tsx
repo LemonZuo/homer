@@ -6,6 +6,7 @@ import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
 import { Textarea } from '../../ui/textarea'
 import { Label } from '../../ui/label'
+import { Select } from '../../ui/select'
 import { Switch } from '../../ui/switch'
 import {
   Dialog,
@@ -131,21 +132,16 @@ export function SSHDeployConfigEditDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="deploy-config-target">SSH 机器</Label>
-            <select
+            <Select<number>
               id="deploy-config-target"
-              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
-              value={targetID ? String(targetID) : ''}
-              onChange={(e) => setTargetID(Number(e.target.value))}
-            >
-              {selectableTargets.length === 0 && (
-                <option value="">（暂无启用的 SSH 机器）</option>
-              )}
-              {selectableTargets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.username}@{t.host}:{t.port || 22})
-                </option>
-              ))}
-            </select>
+              value={targetID}
+              onChange={setTargetID}
+              placeholder="（暂无启用的 SSH 机器）"
+              options={selectableTargets.map((t) => ({
+                value: t.id,
+                label: `${t.name} (${t.username}@${t.host}:${t.port || 22})`,
+              }))}
+            />
           </div>
           <div className="grid gap-2">
             <Label>远端路径</Label>

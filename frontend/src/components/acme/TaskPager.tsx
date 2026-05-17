@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '../ui/button'
+import { Select } from '../ui/select'
 import { TASK_PAGE_SIZES } from './utils'
 
 export function TaskPager({
@@ -22,17 +23,12 @@ export function TaskPager({
       <span className="font-mono">
         {page} / {pages}（共 {total} 条）
       </span>
-      <select
-        className="ml-auto h-8 rounded-md border border-input bg-background px-2 text-[12px] sm:ml-0"
+      <Select<number>
+        className="ml-auto h-8 w-auto text-[12px] sm:ml-0"
         value={pageSize}
-        onChange={(e) => onPageSizeChange(Number(e.target.value))}
-      >
-        {TASK_PAGE_SIZES.map((s) => (
-          <option key={s} value={s}>
-            {s} 条/页
-          </option>
-        ))}
-      </select>
+        onChange={onPageSizeChange}
+        options={TASK_PAGE_SIZES.map((s) => ({ value: s, label: `${s} 条/页` }))}
+      />
       <div className="flex w-full gap-2 sm:contents">
         <Button
           size="sm"
