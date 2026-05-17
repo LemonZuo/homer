@@ -17,6 +17,8 @@ export const colorMap: Record<string, ColorSet> = {
   amber:   { dot: 'bg-amber-500',   border: 'border-amber-500/40 hover:border-amber-500/80', halo: 'hover:shadow-[0_0_24px_0_rgb(245_158_11_/_0.35)]', picker: 'border-amber-500/45 bg-amber-500/10 text-amber-950 dark:text-amber-50' },
   rose:    { dot: 'bg-rose-500',    border: 'border-rose-500/40 hover:border-rose-500/80',   halo: 'hover:shadow-[0_0_24px_0_rgb(244_63_94_/_0.35)]', picker: 'border-rose-500/45 bg-rose-500/10 text-rose-950 dark:text-rose-50' },
   violet:  { dot: 'bg-violet-500',  border: 'border-violet-500/40 hover:border-violet-500/80', halo: 'hover:shadow-[0_0_24px_0_rgb(139_92_246_/_0.35)]', picker: 'border-violet-500/45 bg-violet-500/10 text-violet-950 dark:text-violet-50' },
+  purple:  { dot: 'bg-purple-500',  border: 'border-purple-500/40 hover:border-purple-500/80', halo: 'hover:shadow-[0_0_24px_0_rgb(168_85_247_/_0.35)]', picker: 'border-purple-500/45 bg-purple-500/10 text-purple-950 dark:text-purple-50' },
+  indigo:  { dot: 'bg-indigo-500',  border: 'border-indigo-500/40 hover:border-indigo-500/80', halo: 'hover:shadow-[0_0_24px_0_rgb(99_102_241_/_0.35)]', picker: 'border-indigo-500/45 bg-indigo-500/10 text-indigo-950 dark:text-indigo-50' },
   claude:  { dot: 'bg-[#d97757]',    border: 'border-[#d97757]/45 hover:border-[#d97757]/85', halo: 'hover:shadow-[0_0_24px_0_rgb(217_119_87_/_0.35)]', picker: 'border-[#d97757]/45 bg-[#d97757]/10 text-stone-950 dark:text-stone-50' },
 }
 
