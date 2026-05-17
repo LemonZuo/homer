@@ -15,6 +15,7 @@ export function CredentialsDrawer({
   open,
   onOpenChange,
   credentials,
+  usage,
   onAdd,
   onEdit,
   onDelete,
@@ -22,6 +23,7 @@ export function CredentialsDrawer({
   open: boolean
   onOpenChange: (o: boolean) => void
   credentials: Credential[]
+  usage: Record<string, number>
   onAdd: () => void
   onEdit: (c: Credential) => void
   onDelete: (c: Credential) => void
@@ -51,7 +53,18 @@ export function CredentialsDrawer({
               <Card key={c.id} className="px-4 py-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
-                    <div className="font-mono text-[13px] font-medium">{c.provider}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-mono text-[13px] font-medium">{c.provider}</span>
+                      <span
+                        className={
+                          usage[c.provider]
+                            ? 'shrink-0 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400'
+                            : 'shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground'
+                        }
+                      >
+                        {usage[c.provider] ? `${usage[c.provider]} 个域名` : '未使用'}
+                      </span>
+                    </div>
                     <div
                       className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground"
                       title={c.envs_json}

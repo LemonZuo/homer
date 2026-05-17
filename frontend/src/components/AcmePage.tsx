@@ -842,6 +842,12 @@ export default function AcmePage() {
         open={credDrawerOpen}
         onOpenChange={setCredDrawerOpen}
         credentials={credentials}
+        usage={domains.reduce<Record<string, number>>((acc, d) => {
+          if (d.provider) {
+            acc[d.provider] = (acc[d.provider] ?? 0) + 1
+          }
+          return acc
+        }, {})}
         onAdd={() => {
           setCredEditTarget(null)
           setCredEditOpen(true)

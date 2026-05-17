@@ -98,10 +98,24 @@ func (s *CredentialStore) Upsert(provider, envsJSON string) (*model.ACMECredenti
 	return &row, nil
 }
 
-// Delete 按 id 删除。
+// Delete 按 id 删除；仍被 acme_domain 引用的 provider 拒绝删除。
 func (s *CredentialStore) Delete(id int64) error {
 	if id <= 0 {
 		return errors.New("id 无效")
+	}
+	var row model.ACMECredential
+	if err := s.db.First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	var count int64
+	if err := s.db.Model(&model.ACMEDomain{}).Where("provider = ?", row.Provider).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("仍有 %d 个域名使用该 DNS provider 凭证，不能删除", count)
 	}
 	return s.db.Delete(&model.ACMECredential{}, id).Error
 }
