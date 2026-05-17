@@ -286,7 +286,7 @@ export default function NotifyPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 pb-32 pt-4 sm:px-8 sm:pt-10">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+        <div className="hidden sm:block">
           <div className="flex items-center gap-3">
             <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
             <h1 className="text-[28px] font-bold leading-none tracking-tight">通知渠道</h1>
