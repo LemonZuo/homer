@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Edit3, Loader2, Plus, Send, Trash2 } from 'lucide-react'
+import { Edit3, Loader2, Plus, RefreshCw, Send, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
 import { getColorSet } from '../colors'
@@ -203,6 +203,7 @@ export default function NotifyPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [delTarget, setDelTarget] = useState<Channel | null>(null)
   const [testingID, setTestingID] = useState<number | null>(null)
+  const [loading, setLoading] = useState(false)
 
   const typeLabel = useCallback(
     (t: string) => types.find((x) => x.type === t)?.label ?? t,
@@ -237,11 +238,18 @@ export default function NotifyPage() {
     }
   }, [])
 
-  useEffect(() => {
-    loadMeta()
-    loadChannels()
-    loadBindings()
+  const reloadAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      await Promise.all([loadMeta(), loadChannels(), loadBindings()])
+    } finally {
+      setLoading(false)
+    }
   }, [loadMeta, loadChannels, loadBindings])
+
+  useEffect(() => {
+    reloadAll()
+  }, [reloadAll])
 
   const doDelete = useCallback(async () => {
     if (!delTarget) return
@@ -276,11 +284,12 @@ export default function NotifyPage() {
       try {
         await api.put(`/notify/bindings/${module}`, { channel_ids: next })
         setBindings((b) => ({ ...b, [module]: next }))
+        loadChannels()
       } catch (e: any) {
         toast.error(e?.response?.data?.error || e?.message || '保存绑定失败')
       }
     },
-    [bindings],
+    [bindings, loadChannels],
   )
 
   return (
@@ -295,17 +304,46 @@ export default function NotifyPage() {
             统一管理通道与每个模块的绑定，改动即时生效
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => {
-            setEditTarget(null)
-            setEditOpen(true)
-          }}
-        >
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          新增通道
-        </Button>
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-10 w-full sm:h-8 sm:w-auto"
+            onClick={reloadAll}
+            disabled={loading}
+          >
+            {loading ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            刷新
+          </Button>
+          <Button
+            size="sm"
+            className="hidden sm:inline-flex"
+            onClick={() => {
+              setEditTarget(null)
+              setEditOpen(true)
+            }}
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            新增通道
+          </Button>
+        </div>
       </div>
+
+      <Button
+        size="icon"
+        onClick={() => {
+          setEditTarget(null)
+          setEditOpen(true)
+        }}
+        className="fixed bottom-[calc(env(safe-area-inset-bottom)+6rem)] right-5 z-30 h-12 w-12 rounded-full shadow-lg active:scale-95 sm:hidden"
+        aria-label="新增通道"
+      >
+        <Plus className="h-5 w-5" />
+      </Button>
 
       <Card className="mb-4 px-4 py-4">
         <div className="mb-3 text-[13px] font-medium">通道</div>
