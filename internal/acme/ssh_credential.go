@@ -26,7 +26,7 @@ func NewSSHCredentialStore(db *gorm.DB) *SSHCredentialStore {
 // List 返回所有凭证；RefCount 为「凭证模式」引用该凭证的 SSH 机器数。
 func (s *SSHCredentialStore) List() ([]model.SSHCredential, error) {
 	var rows []model.SSHCredential
-	if err := s.db.Order("id DESC").Find(&rows).Error; err != nil {
+	if err := s.db.Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	counts, err := s.credentialUsage()

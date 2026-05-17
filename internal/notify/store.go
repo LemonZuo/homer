@@ -28,7 +28,7 @@ func validChannelType(t string) bool {
 // ListChannels 返回所有通道；RefCount 为引用该通道的模块绑定数。
 func (s *Store) ListChannels() ([]model.NotifyChannel, error) {
 	var rows []model.NotifyChannel
-	if err := s.db.Order("id DESC").Find(&rows).Error; err != nil {
+	if err := s.db.Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	var counts []struct {

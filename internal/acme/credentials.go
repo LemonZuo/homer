@@ -61,7 +61,7 @@ func (s *CredentialStore) Providers() []string {
 // RefCount 为引用该 provider 的域名数。
 func (s *CredentialStore) List() ([]model.ACMECredential, error) {
 	var rows []model.ACMECredential
-	if err := s.db.Order("provider").Find(&rows).Error; err != nil {
+	if err := s.db.Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	var counts []struct {

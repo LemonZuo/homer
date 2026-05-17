@@ -25,7 +25,7 @@ func NewAccountStore(db *gorm.DB) *AccountStore {
 // List 返回所有账号；RefCount 为引用该账号的域名数。
 func (s *AccountStore) List() ([]model.ACMEAccount, error) {
 	var rows []model.ACMEAccount
-	if err := s.db.Order("id DESC").Find(&rows).Error; err != nil {
+	if err := s.db.Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	var counts []struct {

@@ -79,7 +79,7 @@ func NewDeployTargetStore(db *gorm.DB, registry *DeployRegistry) *DeployTargetSt
 
 func (s *DeployTargetStore) List(kind string) ([]model.ACMEDeployTarget, error) {
 	var rows []model.ACMEDeployTarget
-	q := s.db.Order("id DESC")
+	q := s.db.Order("id ASC")
 	if strings.TrimSpace(kind) != "" {
 		q = q.Where("kind = ?", strings.ToLower(strings.TrimSpace(kind)))
 	}
@@ -190,7 +190,7 @@ func NewDeployConfigStore(db *gorm.DB, targets *DeployTargetStore, registry *Dep
 
 func (s *DeployConfigStore) ListByDomain(domainID int64, kind string) ([]model.ACMEDeployConfig, error) {
 	var rows []model.ACMEDeployConfig
-	q := s.db.Where("domain_id = ?", domainID).Order("id DESC")
+	q := s.db.Where("domain_id = ?", domainID).Order("id ASC")
 	if strings.TrimSpace(kind) != "" {
 		q = q.Where("kind = ?", strings.ToLower(strings.TrimSpace(kind)))
 	}

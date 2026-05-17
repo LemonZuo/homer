@@ -58,10 +58,10 @@ type DomainView struct {
 	IssuedAt   *time.Time `json:"issued_at,omitempty"`
 }
 
-// ListDomains 列出所有域名（按 id 倒序），附带最近一次证书摘要。
+// ListDomains 列出所有域名（按 id 升序），附带最近一次证书摘要。
 func (s *Service) ListDomains() ([]DomainView, error) {
 	var items []model.ACMEDomain
-	if err := s.db.Order("id DESC").Find(&items).Error; err != nil {
+	if err := s.db.Order("id ASC").Find(&items).Error; err != nil {
 		return nil, err
 	}
 	out := make([]DomainView, 0, len(items))
