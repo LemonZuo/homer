@@ -220,18 +220,133 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [checksums, docker]
+    needs: [checksums, docker, meta]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download binaries
         uses: actions/download-artifact@v4
         with:
           name: binaries
           path: dist
+
+      - name: Generate changelog (git-cliff)
+        id: cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGELOG_LATEST.md
+
+      - name: Compose release notes
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          COMMIT: ${{ needs.meta.outputs.commit }}
+          BUILD_ID: ${{ needs.meta.outputs.build_id }}
+          REPO: ${{ github.repository }}
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          set -euo pipefail
+
+          repo_lc="${REPO,,}"
+          name_lc="${repo_lc##*/}"
+          ghcr_image="ghcr.io/${repo_lc}"
+          dh_image=""
+          if [ -n "${DH_USER:-}" ]; then
+            dh_image="${DH_USER}/${name_lc}"
+          fi
+
+          prev_tag=$(git describe --tags --abbrev=0 --exclude="${VERSION}" 2>/dev/null || true)
+          if [ -n "${prev_tag}" ]; then
+            compare_url="https://github.com/${REPO}/compare/${prev_tag}...${VERSION}"
+          else
+            compare_url="https://github.com/${REPO}/commits/${VERSION}"
+          fi
+
+          amd64_sum=""
+          arm64_sum=""
+          if [ -f dist/sha256sums.txt ]; then
+            amd64_sum=$(awk '/server-linux-amd64$/ {print $1}' dist/sha256sums.txt || true)
+            arm64_sum=$(awk '/server-linux-arm64$/ {print $1}' dist/sha256sums.txt || true)
+          fi
+
+          amd64_size=""
+          arm64_size=""
+          if [ -f dist/server-linux-amd64 ]; then
+            amd64_size=$(du -h dist/server-linux-amd64 | awk '{print $1}')
+          fi
+          if [ -f dist/server-linux-arm64 ]; then
+            arm64_size=$(du -h dist/server-linux-arm64 | awk '{print $1}')
+          fi
+
+          {
+            echo "## homer ${VERSION} 🍋"
+            echo
+            if [ -n "${prev_tag}" ]; then
+              echo "自 \`${prev_tag}\` 起的变更："
+            else
+              echo "首个发布版本："
+            fi
+            echo
+
+            if [ -s CHANGELOG_LATEST.md ]; then
+              cat CHANGELOG_LATEST.md
+            else
+              echo "_本次发布无可分类的 conventional commits。_"
+            fi
+            echo
+
+            echo "### 🐳 Docker"
+            echo
+            echo '```sh'
+            echo "docker pull ${ghcr_image}:${VERSION}"
+            echo "docker pull ${ghcr_image}:latest"
+            if [ -n "${dh_image}" ]; then
+              echo "docker pull ${dh_image}:${VERSION}"
+              echo "docker pull ${dh_image}:latest"
+            fi
+            echo '```'
+            echo
+            echo "镜像同时支持 \`linux/amd64\` 与 \`linux/arm64\`。"
+            echo
+
+            echo "### 🧱 二进制"
+            echo
+            echo "| 架构 | 文件 | 体积 | SHA256 |"
+            echo "| --- | --- | --- | --- |"
+            echo "| linux/amd64 | \`server-linux-amd64\` | ${amd64_size:-—} | \`${amd64_sum:-—}\` |"
+            echo "| linux/arm64 | \`server-linux-arm64\` | ${arm64_size:-—} | \`${arm64_sum:-—}\` |"
+            echo
+            echo "校验文件：\`sha256sums.txt\`。"
+            echo
+
+            echo "### 🔍 构建信息"
+            echo
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Commit | \`${COMMIT}\` |"
+            echo "| Build ID | \`${BUILD_ID}\` |"
+            echo "| Go | \`${{ env.GO_VERSION }}\` |"
+            echo "| Node | \`${{ env.NODE_VERSION }}\` |"
+            echo
+            echo "运行后可用 \`/healthz\` 或 \`/api/buildinfo\` 验证。"
+            echo
+
+            echo "---"
+            echo
+            echo "**Full Changelog**: ${compare_url}"
+          } > release_notes.md
+
+          echo "preview <<<"
+          cat release_notes.md
+          echo ">>>"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -240,6 +355,6 @@ jobs:
             dist/server-linux-amd64
             dist/server-linux-arm64
             dist/sha256sums.txt
-          generate_release_notes: true
+          body_path: release_notes.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
