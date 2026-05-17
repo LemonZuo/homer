@@ -15,6 +15,7 @@ type NotifyChannel struct {
 	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	RefCount   int64     `gorm:"-" json:"ref_count"`
 }
 
 func (NotifyChannel) TableName() string { return "notify_channel" }

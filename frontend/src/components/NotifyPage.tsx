@@ -7,6 +7,7 @@ import { Card } from './ui/card'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
+import { Select } from './ui/select'
 import { Switch } from './ui/switch'
 import {
   Dialog,
@@ -34,6 +35,7 @@ interface Channel {
   type: string
   config_json: string
   enabled: boolean
+  ref_count: number
 }
 
 interface ModuleMeta {
@@ -148,21 +150,16 @@ function ChannelDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="ch-type">通道类型</Label>
-            <select
+            <Select
               id="ch-type"
-              className="h-9 rounded-md border border-input bg-background px-3 text-[13px]"
               value={type}
-              onChange={(e) => {
-                setType(e.target.value)
+              onChange={(v) => {
+                setType(v)
                 setCfg({})
               }}
-            >
-              {types.map((t) => (
-                <option key={t.type} value={t.type}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+              options={types.map((t) => ({ value: t.type, label: t.label }))}
+              placeholder="请选择通道类型"
+            />
           </div>
           {fields.map((f) => (
             <div key={f} className="grid gap-1.5">
@@ -322,7 +319,7 @@ export default function NotifyPage() {
               <Card key={ch.id} className="px-4 py-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate font-mono text-[13px] font-medium">{ch.name}</span>
                       <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                         {typeLabel(ch.type)}
@@ -337,6 +334,11 @@ export default function NotifyPage() {
                       >
                         {ch.enabled ? '启用' : '停用'}
                       </span>
+                      {ch.ref_count > 0 && (
+                        <span className="shrink-0 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                          {ch.ref_count}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2 sm:contents">
@@ -367,7 +369,9 @@ export default function NotifyPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="flex-1 hover:text-destructive sm:flex-none"
+                      className="flex-1 hover:text-destructive disabled:hover:text-current sm:flex-none"
+                      disabled={ch.ref_count > 0}
+                      title={ch.ref_count > 0 ? '仍被模块绑定，请先解绑' : undefined}
                       onClick={() => setDelTarget(ch)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
