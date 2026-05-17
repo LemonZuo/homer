@@ -188,7 +188,7 @@ go build -ldflags="-s -w" -o bin/server .
 PKG=github.com/LemonZuo/homer/internal/buildinfo
 go build \
   -trimpath \
-  -ldflags="-s -w -X ${PKG}.Version=v0.1.0 -X ${PKG}.Commit=$(git rev-parse HEAD)" \
+  -ldflags="-s -w -X ${PKG}.Version=v0.1.0 -X ${PKG}.Commit=$(git rev-parse --short HEAD) -X ${PKG}.BuildID=$(git rev-parse HEAD | head -c 12)" \
   -o bin/server .
 ```
 
@@ -317,7 +317,7 @@ ACME 签发产物既会写入数据库，也会使用 `ACME_DATA_DIR` 作为本�
 
 - 推送 `v*` tag 时构建前端、Linux amd64 / arm64 二进制、多架构 Docker 镜像，并创建 GitHub Release。
 - 手动触发 workflow 时构建 `dev-<sha>` 版本镜像。
-- release 二进制通过 `-X github.com/LemonZuo/homer/internal/buildinfo.Version` 和 `Commit` 注入版本信息，前端会展示 `/api/version` 返回的版本号。
+- release 二进制通过 `-X github.com/LemonZuo/homer/internal/buildinfo.Version`、`Commit`（短 git hash）和 `BuildID`（每次构建唯一短 hash，区分同 commit 的多次构建）注入版本信息，前端会展示 `/api/version` 返回的版本号。
 
 ## 部署注意事项
 

@@ -43,9 +43,29 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      commit: ${{ steps.ver.outputs.commit }}
+      build_id: ${{ steps.ver.outputs.build_id }}
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "commit=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          build_id=$(echo "${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%dT%H%M%SZ)" | sha256sum | cut -c1-12)
+          echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.arch }}
-    needs: frontend
+    needs: [frontend, meta]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -67,29 +87,20 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - name: Resolve version
-        id: ver
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          fi
-          echo "commit=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-
       - name: Build
         env:
           CGO_ENABLED: '0'
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
-          VERSION: ${{ steps.ver.outputs.version }}
-          COMMIT: ${{ steps.ver.outputs.commit }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          COMMIT: ${{ needs.meta.outputs.commit }}
+          BUILD_ID: ${{ needs.meta.outputs.build_id }}
         run: |
           mkdir -p dist
           PKG=github.com/LemonZuo/homer/internal/buildinfo
           go build \
             -trimpath \
-            -ldflags="-s -w -X ${PKG}.Version=${VERSION} -X ${PKG}.Commit=${COMMIT}" \
+            -ldflags="-s -w -X ${PKG}.Version=${VERSION} -X ${PKG}.Commit=${COMMIT} -X ${PKG}.BuildID=${BUILD_ID}" \
             -o "dist/server-linux-${GOARCH}" .
           ls -la dist
 

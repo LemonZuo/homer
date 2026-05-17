@@ -13,7 +13,7 @@ import (
 var frontendFS embed.FS
 
 func main() {
-	log.Printf("homer %s (commit %s) starting", buildinfo.Version, buildinfo.Commit)
+	log.Printf("homer %s (commit %s, build %s) starting", buildinfo.Version, buildinfo.Commit, buildinfo.BuildID)
 
 	cfg := config.Load()
 
