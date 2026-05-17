@@ -1,4 +1,6 @@
 import type {
+  CASDeployConfig,
+  CASTarget,
   DeployConfig,
   DeployTarget,
   ProviderSchema,
@@ -92,10 +94,24 @@ export function deployTargetToSafeline(t: DeployTarget): SafelineTarget {
   }
 }
 
+export function deployTargetToCAS(t: DeployTarget): CASTarget {
+  const auth = safeParseJSON(t.auth_json)
+  return {
+    id: t.id,
+    name: t.name,
+    access_key_id: String(auth.access_key_id ?? ''),
+    access_key_secret: String(auth.access_key_secret ?? ''),
+    enabled: t.enabled,
+    created_at: t.created_at ?? '',
+    updated_at: t.updated_at ?? '',
+  }
+}
+
 export function splitDeployTargets(rows: DeployTarget[]) {
   return {
     ssh: rows.filter((t) => t.kind === 'ssh').map(deployTargetToSSH),
     safeline: rows.filter((t) => t.kind === 'safeline').map(deployTargetToSafeline),
+    cas: rows.filter((t) => t.kind === 'upload_cas').map(deployTargetToCAS),
   }
 }
 
@@ -137,6 +153,21 @@ export function safelineTargetToDeployTarget(t: SafelineTarget): DeployTarget {
   }
 }
 
+export function casTargetToDeployTarget(t: CASTarget): DeployTarget {
+  return {
+    id: t.id,
+    name: t.name,
+    kind: 'upload_cas',
+    endpoint: '',
+    auth_json: JSON.stringify({
+      access_key_id: t.access_key_id,
+      access_key_secret: t.access_key_secret,
+    }),
+    config_json: '{}',
+    enabled: t.enabled,
+  }
+}
+
 export function deployConfigToSSH(c: DeployConfig): SSHDeployConfig {
   const cfg = safeParseJSON(c.config_json)
   return {
@@ -173,10 +204,26 @@ export function deployConfigToSafeline(c: DeployConfig): SafelineDeployConfig {
   }
 }
 
+export function deployConfigToCAS(c: DeployConfig): CASDeployConfig {
+  const state = safeParseJSON(c.state_json)
+  return {
+    id: c.id,
+    domain_id: c.domain_id,
+    target_id: c.target_id,
+    name: c.name,
+    cert_id: Number(state.cert_id ?? 0) || 0,
+    auto_deploy: c.auto_deploy,
+    enabled: c.enabled,
+    created_at: c.created_at ?? '',
+    updated_at: c.updated_at ?? '',
+  }
+}
+
 export function splitDeployConfigs(rows: DeployConfig[]) {
   return {
     ssh: rows.filter((c) => c.kind === 'ssh').map(deployConfigToSSH),
     safeline: rows.filter((c) => c.kind === 'safeline').map(deployConfigToSafeline),
+    cas: rows.filter((c) => c.kind === 'upload_cas').map(deployConfigToCAS),
   }
 }
 
@@ -214,6 +261,20 @@ export function safelineConfigToDeployConfig(c: SafelineDeployConfig): DeployCon
   }
 }
 
+export function casConfigToDeployConfig(c: CASDeployConfig): DeployConfig {
+  return {
+    id: c.id,
+    domain_id: c.domain_id,
+    target_id: c.target_id,
+    kind: 'upload_cas',
+    name: c.name,
+    config_json: '{}',
+    state_json: JSON.stringify({ cert_id: c.cert_id || 0 }),
+    auto_deploy: c.auto_deploy,
+    enabled: c.enabled,
+  }
+}
+
 export const STATUS_STYLE: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
   running: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
@@ -237,6 +298,7 @@ export const KIND_LABEL: Record<string, string> = {
   upload_cas: '上传 CAS',
   deploy_ssh: '部署 SSH',
   deploy_safeline: '部署雷池',
+  deploy_upload_cas: '部署 CAS',
 }
 
 export const TASK_PAGE_SIZES = [5, 10, 20, 50, 100]
@@ -302,6 +364,19 @@ export function safelineTargetSummary(t?: SafelineTarget) {
 }
 
 export function safelineConfigTitle(cfg: SafelineDeployConfig) {
+  return cfg.name?.trim() || `配置 #${cfg.id}`
+}
+
+export function casTargetByID(targets: CASTarget[], id: number) {
+  return targets.find((t) => t.id === id)
+}
+
+export function casTargetSummary(t?: CASTarget) {
+  if (!t) return '阿里云 CAS 实例不存在'
+  return `${t.name} · ${t.access_key_id || '未配置 AK'}`
+}
+
+export function casConfigTitle(cfg: CASDeployConfig) {
   return cfg.name?.trim() || `配置 #${cfg.id}`
 }
 

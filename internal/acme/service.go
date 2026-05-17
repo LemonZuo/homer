@@ -13,13 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LemonZuo/homer/internal/cas"
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"gorm.io/gorm"
 )
 
-// Service ACME 业务编排：域名 CRUD、签发、续期、落盘、上传 CAS、SSE 日志。
+// Service ACME 业务编排：域名 CRUD、签发、续期、落盘、部署、SSE 日志。
 type Service struct {
 	db             *gorm.DB
 	manager        *Manager
@@ -29,7 +28,6 @@ type Service struct {
 	deployTargets  *DeployTargetStore
 	deployConfigs  *DeployConfigStore
 	deployRegistry *DeployRegistry
-	cas            *cas.Service
 	hub            *SSEHub
 	dataDir        string
 	renewDays      int
@@ -40,11 +38,11 @@ type Service struct {
 	issueMu sync.Mutex // 串行化签发（lego logger / env 是全局状态）
 }
 
-func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, sshCreds *SSHCredentialStore, accounts *AccountStore, deployTargets *DeployTargetStore, deployConfigs *DeployConfigStore, deployRegistry *DeployRegistry, casSvc *cas.Service, hub *SSEHub, dataDir string, renewDays int, deployRetry int, deployRetryBackoff time.Duration) *Service {
+func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, sshCreds *SSHCredentialStore, accounts *AccountStore, deployTargets *DeployTargetStore, deployConfigs *DeployConfigStore, deployRegistry *DeployRegistry, hub *SSEHub, dataDir string, renewDays int, deployRetry int, deployRetryBackoff time.Duration) *Service {
 	if deployRetry < 1 {
 		deployRetry = 1
 	}
-	return &Service{db: db, manager: mgr, credstore: store, sshCredstore: sshCreds, accountStore: accounts, deployTargets: deployTargets, deployConfigs: deployConfigs, deployRegistry: deployRegistry, cas: casSvc, hub: hub, dataDir: dataDir, renewDays: renewDays, deployRetry: deployRetry, deployRetryBackoff: deployRetryBackoff}
+	return &Service{db: db, manager: mgr, credstore: store, sshCredstore: sshCreds, accountStore: accounts, deployTargets: deployTargets, deployConfigs: deployConfigs, deployRegistry: deployRegistry, hub: hub, dataDir: dataDir, renewDays: renewDays, deployRetry: deployRetry, deployRetryBackoff: deployRetryBackoff}
 }
 
 func (s *Service) Hub() *SSEHub                        { return s.hub }
@@ -59,7 +57,6 @@ type DomainView struct {
 	model.ACMEDomain
 	NotAfter   *time.Time `json:"not_after,omitempty"`
 	NotBefore  *time.Time `json:"not_before,omitempty"`
-	CASCertID  int64      `json:"cas_cert_id,omitempty"`
 	CertStatus string     `json:"cert_status,omitempty"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 	IssuedAt   *time.Time `json:"issued_at,omitempty"`
@@ -82,7 +79,6 @@ func (s *Service) ListDomains() ([]DomainView, error) {
 			v.NotAfter = &na
 			v.NotBefore = &nb
 			v.IssuedAt = &ia
-			v.CASCertID = c.CASCertID
 			v.CertStatus = c.Status
 			v.RevokedAt = c.RevokedAt
 		}
@@ -387,9 +383,6 @@ func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECer
 			return fmt.Errorf("更新证书吊销状态失败：%w", err)
 		}
 		logf(logw, "证书已被 CA 接受吊销")
-		if cert.CASCertID > 0 {
-			logf(logw, "注意：已上传的 CAS 证书 cert_id=%d 不会自动删除，CDN 也不会自动切换", cert.CASCertID)
-		}
 		return nil
 	}()
 
@@ -414,7 +407,7 @@ func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECer
 	s.hub.Close(taskID)
 }
 
-// persistCert 落盘到 ./data/acme/certs/<domain>/，写入 acme_cert 表，并上传 CAS。
+// persistCert 落盘到 ./data/acme/certs/<domain>/，写入 acme_cert 表。
 func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, chain []byte) (*model.ACMECert, error) {
 	notBefore, notAfter, serial := parseCertMeta(cert)
 	// 目录加 ID 后缀，避免「同一主域名多张证书」时互相覆盖
@@ -469,64 +462,7 @@ func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, ch
 		return nil, fmt.Errorf("查询证书记录失败：%w", err)
 	}
 
-	// 自动上传 CAS（失败不回滚签发，仅记日志）。按域名开关 cas_enabled 控制；
-	// 关闭时手动「上传 CAS」按钮也会被后端拒绝。
-	if !bool(d.CASEnabled) {
-		logf(logw, "已跳过自动上传 CAS（域名未开启 CAS）")
-	} else if s.cas == nil || !s.cas.Configured() {
-		logf(logw, "已跳过自动上传 CAS（阿里云 CAS 未配置）")
-	} else {
-		name := buildCASName(time.Now())
-		id, err := s.cas.UploadCertificate(name, string(full), string(key))
-		if err != nil {
-			logf(logw, "上传 CAS 失败（不影响本地证书）：%v", err)
-		} else {
-			logf(logw, "已上传 CAS：cert_id=%d, name=%s", id, name)
-			_ = s.db.Model(&model.ACMECert{}).Where("id = ?", rec.ID).
-				Update("cas_cert_id", id).Error
-			rec.CASCertID = id
-		}
-	}
-
 	return rec, nil
-}
-
-// UploadCASTaskAsync 异步把当前域名最近一次证书上传到 CAS。
-func (s *Service) UploadCASTaskAsync(domainID int64) (int64, error) {
-	var d model.ACMEDomain
-	if err := s.db.First(&d, domainID).Error; err != nil {
-		return 0, err
-	}
-	if !bool(d.CASEnabled) {
-		return 0, errors.New("当前域名未开启「上传到阿里云 CAS」，请先在编辑里启用")
-	}
-	cert, err := s.GetCertByDomain(domainID)
-	if err != nil {
-		return 0, err
-	}
-	if cert == nil {
-		return 0, errors.New("当前域名还没有可上传的证书")
-	}
-	if cert.Status == "revoked" {
-		return 0, errors.New("当前证书已吊销，不能上传 CAS")
-	}
-	if strings.TrimSpace(cert.FullchainPEM) == "" || strings.TrimSpace(cert.KeyPEM) == "" {
-		return 0, errors.New("当前证书内容不完整，无法上传 CAS")
-	}
-	if s.cas == nil || !s.cas.Configured() {
-		return 0, errors.New("阿里云 CAS 未配置")
-	}
-	task := &model.ACMEIssueTask{
-		DomainID:   d.ID,
-		MainDomain: d.MainDomain,
-		Kind:       "upload_cas",
-		Status:     "pending",
-	}
-	if err := s.db.Create(task).Error; err != nil {
-		return 0, err
-	}
-	go s.runUploadCAS(task.ID, d, *cert)
-	return task.ID, nil
 }
 
 // DeployConfigTaskAsync 异步按保存的部署配置发布当前域名最近一次证书。
@@ -739,60 +675,11 @@ func deployTaskKind(kind string) string {
 		return "deploy_ssh"
 	case DeployKindSafeline:
 		return "deploy_safeline"
+	case DeployKindUploadCAS:
+		return "deploy_upload_cas"
 	default:
 		return "deploy"
 	}
-}
-
-func (s *Service) runUploadCAS(taskID int64, d model.ACMEDomain, cert model.ACMECert) {
-	s.issueMu.Lock()
-	defer s.issueMu.Unlock()
-
-	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).
-		Updates(map[string]any{"status": "running"}).Error
-
-	logBuf := &bytes.Buffer{}
-	logw := &teeWriter{buf: logBuf, hub: s.hub, taskID: taskID}
-
-	logx.Info("acme upload-cas start", "task", taskID, "domain", d.MainDomain)
-	logf(logw, "开始上传 CAS：%s", d.MainDomain)
-
-	err := func() error {
-		if s.cas == nil || !s.cas.Configured() {
-			return errors.New("阿里云 CAS 未配置")
-		}
-		name := buildCASName(time.Now())
-		id, err := s.cas.UploadCertificate(name, cert.FullchainPEM, cert.KeyPEM)
-		if err != nil {
-			return fmt.Errorf("上传 CAS 失败：%w", err)
-		}
-		logf(logw, "已上传 CAS：cert_id=%d, name=%s", id, name)
-		if err := s.db.Model(&model.ACMECert{}).Where("id = ?", cert.ID).
-			Update("cas_cert_id", id).Error; err != nil {
-			return fmt.Errorf("更新 CAS cert_id 失败：%w", err)
-		}
-		return nil
-	}()
-
-	finish := time.Now()
-	upd := map[string]any{
-		"finished_at": &finish,
-		"log_text":    logBuf.String(),
-	}
-	if err != nil {
-		logf(logw, "上传 CAS 失败：%v", err)
-		logx.Error("acme upload-cas failed", "task", taskID, "domain", d.MainDomain, "err", err)
-		upd["status"] = "failed"
-		upd["error_msg"] = truncate(err.Error(), 1000)
-		upd["log_text"] = logBuf.String()
-	} else {
-		logf(logw, "上传 CAS 完成")
-		logx.Info("acme upload-cas done", "task", taskID, "domain", d.MainDomain)
-		upd["status"] = "success"
-		upd["log_text"] = logBuf.String()
-	}
-	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(upd).Error
-	s.hub.Close(taskID)
 }
 
 func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECert, target model.ACMEDeployTarget, cfg model.ACMEDeployConfig) {
@@ -1060,11 +947,6 @@ func assembleFullchain(cert, chain []byte) []byte {
 	}
 	buf.Write(chain)
 	return buf.Bytes()
-}
-
-// buildCASName CAS 内证书命名：<timestamp>。
-func buildCASName(ts time.Time) string {
-	return ts.Format("20060102150405")
 }
 
 func truncate(s string, n int) string {

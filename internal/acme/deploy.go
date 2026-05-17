@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	DeployKindSSH      = "ssh"
-	DeployKindSafeline = "safeline"
+	DeployKindSSH       = "ssh"
+	DeployKindSafeline  = "safeline"
+	DeployKindUploadCAS = "upload_cas"
 )
 
 var (

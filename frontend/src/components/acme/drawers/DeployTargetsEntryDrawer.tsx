@@ -1,6 +1,7 @@
 import { Edit3, KeyRound, Plus, RefreshCw, Server, ShieldCheck, Trash2 } from 'lucide-react'
 import { Card } from '../../ui/card'
 import { Button } from '../../ui/button'
+import { AliyunIcon } from '../../icons/AliyunIcon'
 import {
   Drawer,
   DrawerContent,
@@ -9,7 +10,7 @@ import {
   DrawerTitle,
 } from '../../ui/drawer'
 import { cn } from '../../../lib/utils'
-import type { SSHTarget, SafelineTarget } from '../types'
+import type { CASTarget, SSHTarget, SafelineTarget } from '../types'
 import { authLabel } from '../utils'
 
 export function DeployTargetsEntryDrawer({
@@ -17,6 +18,7 @@ export function DeployTargetsEntryDrawer({
   onOpenChange,
   sshTargets,
   safelineTargets,
+  casTargets,
   onAddSSH,
   onEditSSH,
   onDeleteSSH,
@@ -26,11 +28,16 @@ export function DeployTargetsEntryDrawer({
   onEditSafeline,
   onDeleteSafeline,
   onTestSafeline,
+  onAddCAS,
+  onEditCAS,
+  onDeleteCAS,
+  onTestCAS,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   sshTargets: SSHTarget[]
   safelineTargets: SafelineTarget[]
+  casTargets: CASTarget[]
   onAddSSH: () => void
   onEditSSH: (t: SSHTarget) => void
   onDeleteSSH: (t: SSHTarget) => void
@@ -40,6 +47,10 @@ export function DeployTargetsEntryDrawer({
   onEditSafeline: (t: SafelineTarget) => void
   onDeleteSafeline: (t: SafelineTarget) => void
   onTestSafeline: (t: SafelineTarget) => void
+  onAddCAS: () => void
+  onEditCAS: (t: CASTarget) => void
+  onDeleteCAS: (t: CASTarget) => void
+  onTestCAS: (t: CASTarget) => void
 }) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -184,6 +195,66 @@ export function DeployTargetsEntryDrawer({
                         variant="outline"
                         className="flex-1 hover:text-destructive sm:flex-none"
                         onClick={() => onDeleteSafeline(t)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-5">
+            <div>
+              <div className="text-[13px] font-medium">阿里云 CAS</div>
+              <div className="text-[11.5px] text-muted-foreground">{casTargets.length} 个实例</div>
+            </div>
+            <Button size="sm" onClick={onAddCAS}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加实例
+            </Button>
+          </div>
+          {casTargets.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+              还没有阿里云 CAS 实例
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {casTargets.map((t) => (
+                <Card key={t.id} className="px-4 py-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <AliyunIcon className="h-4 w-4 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-mono text-[13px] font-medium">{t.name}</span>
+                        <span
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                            t.enabled
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          {t.enabled ? '启用' : '停用'}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                        {t.access_key_id || '未配置 AK'}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 sm:contents">
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTestCAS(t)} disabled={!t.enabled}>
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditCAS(t)}>
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 hover:text-destructive sm:flex-none"
+                        onClick={() => onDeleteCAS(t)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>

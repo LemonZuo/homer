@@ -11,6 +11,7 @@ import (
 	"github.com/LemonZuo/homer/internal/acme"
 	acmesafeline "github.com/LemonZuo/homer/internal/acme/deployer/safeline"
 	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
+	acmealicas "github.com/LemonZuo/homer/internal/acme/deployer/alicas"
 	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/cas"
 	"github.com/LemonZuo/homer/internal/cdn"
@@ -62,7 +63,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 
 	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
 	casSvc := cas.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
-	acmeSvc := buildACMEService(gormDB, cfg, casSvc)
+	acmeSvc := buildACMEService(gormDB, cfg)
 
 	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, hub)
 
@@ -81,9 +82,13 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 }
 
 // buildACMEService 组装 ACME 依赖图（store / registry / driver / manager / SSE / service）。
-func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) *acme.Service {
+func buildACMEService(gormDB *gorm.DB, cfg *config.Config) *acme.Service {
 	sshCreds := acme.NewSSHCredentialStore(gormDB)
-	registry := acme.NewDeployRegistry(acmessh.NewDriver(sshCreds, gormDB), acmesafeline.NewDriver())
+	registry := acme.NewDeployRegistry(
+		acmessh.NewDriver(sshCreds, gormDB),
+		acmesafeline.NewDriver(),
+		acmealicas.NewDriver(),
+	)
 	targets := acme.NewDeployTargetStore(gormDB, registry)
 	configs := acme.NewDeployConfigStore(gormDB, targets, registry)
 	return acme.NewService(
@@ -95,7 +100,6 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) 
 		targets,
 		configs,
 		registry,
-		casSvc,
 		acme.NewSSEHub(),
 		cfg.ACMEDataDir,
 		cfg.ACMERenewBeforeDays,

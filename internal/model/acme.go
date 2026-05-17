@@ -157,12 +157,34 @@ type ACMESafelineDeployConfig struct {
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
+// ACMEUploadCASTarget 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployTarget。
+type ACMEUploadCASTarget struct {
+	ID              int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name            string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
+	AccessKeyID     string    `gorm:"column:access_key_id;size:255" json:"access_key_id"`
+	AccessKeySecret string    `gorm:"column:access_key_secret;type:text" json:"access_key_secret"`
+	Enabled         BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+// ACMEUploadCASDeployConfig 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployConfig。
+type ACMEUploadCASDeployConfig struct {
+	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
+	DomainID   int64     `gorm:"column:domain_id;index" json:"domain_id"`
+	TargetID   int64     `gorm:"column:target_id;index" json:"target_id"`
+	Name       string    `gorm:"column:name;size:64" json:"name"`
+	CertID     int64     `gorm:"column:cert_id;default:0" json:"cert_id"`
+	AutoDeploy BoolFlag  `gorm:"column:auto_deploy;type:varchar(1);default:'0'" json:"auto_deploy"`
+	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
 // ACMEDomain 自动签发的域名配置。
 // account_id 引用 ACMEAccount.ID；provider 引用 ACMECredential.Provider。
 // san_providers 是可选的「按域名指定 DNS provider」覆盖表，JSON：{"b.com":"alidns"}；
 // 未列出的域名走 provider（默认）。用于一张证书的域名跨多个 DNS 服务商的场景。
-// cas_enabled 控制本域名的证书是否参与阿里云 CAS：开启后签发/续期自动上传，
-// 手动上传按钮也只有开启时才能用；关闭则两条路径都被拦截。
 type ACMEDomain struct {
 	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
 	MainDomain   string    `gorm:"column:main_domain;size:255;index:idx_main_domain" json:"main_domain"`
@@ -170,7 +192,6 @@ type ACMEDomain struct {
 	AccountID    int64     `gorm:"column:account_id;index" json:"account_id"`
 	Provider     string    `gorm:"column:provider;size:64" json:"provider"`
 	SanProviders string    `gorm:"column:san_providers;size:1024" json:"san_providers"`
-	CASEnabled   BoolFlag  `gorm:"column:cas_enabled;type:varchar(1);default:'0'" json:"cas_enabled"`
 	Enabled      BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
@@ -189,7 +210,6 @@ type ACMECert struct {
 	Serial       string     `gorm:"column:serial;size:128" json:"serial"`
 	NotBefore    time.Time  `gorm:"column:not_before" json:"not_before"`
 	NotAfter     time.Time  `gorm:"column:not_after" json:"not_after"`
-	CASCertID    int64      `gorm:"column:cas_cert_id" json:"cas_cert_id"`
 	Status       string     `gorm:"column:status;size:16" json:"status"` // active | revoked
 	RevokedAt    *time.Time `gorm:"column:revoked_at" json:"revoked_at"`
 	IssuedAt     time.Time  `gorm:"column:issued_at;autoCreateTime" json:"issued_at"`

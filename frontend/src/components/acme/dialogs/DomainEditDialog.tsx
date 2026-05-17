@@ -38,7 +38,6 @@ export function DomainEditDialog({
   const [accountID, setAccountID] = useState<number>(0)
   const [provider, setProvider] = useState('')
   const [overrides, setOverrides] = useState<Record<string, string>>({})
-  const [casEnabled, setCasEnabled] = useState(false)
   const [enabled, setEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
@@ -62,14 +61,12 @@ export function DomainEditDialog({
         ov = {}
       }
       setOverrides(ov)
-      setCasEnabled(!!target.cas_enabled)
       setEnabled(target.enabled)
     } else {
       setDomains([])
       setAccountID(accounts[0]?.id || 0)
       setProvider(providers[0] || '')
       setOverrides({})
-      setCasEnabled(false)
       setEnabled(true)
     }
     setDraft('')
@@ -153,7 +150,6 @@ export function DomainEditDialog({
       account_id: accountID,
       provider,
       san_providers: Object.keys(sp).length ? JSON.stringify(sp) : '',
-      cas_enabled: casEnabled,
       enabled,
     }
     setSaving(true)
@@ -305,14 +301,6 @@ export function DomainEditDialog({
               </div>
             </div>
           )}
-          <div className="flex items-center justify-between">
-            <Label htmlFor="cas-enabled">上传到阿里云 CAS</Label>
-            <Switch
-              id="cas-enabled"
-              checked={casEnabled}
-              onChange={(v) => setCasEnabled(v)}
-            />
-          </div>
           <div className="flex items-center justify-between">
             <Label htmlFor="enabled">启用自动续期</Label>
             <Switch

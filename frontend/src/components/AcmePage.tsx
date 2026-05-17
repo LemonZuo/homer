@@ -12,7 +12,6 @@ import {
   Server,
   ShieldCheck,
   Trash2,
-  UploadCloud,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -33,6 +32,8 @@ import {
 import { cn } from '../lib/utils'
 import type {
   AcmeAccount,
+  CASDeployConfig,
+  CASTarget,
   Credential,
   Domain,
   SSHCredential,
@@ -67,6 +68,8 @@ import { AccountEditDialog } from './acme/dialogs/AccountEditDialog'
 import { CredentialEditDialog } from './acme/dialogs/CredentialEditDialog'
 import { SSHDeployConfigEditDialog } from './acme/dialogs/SSHDeployConfigEditDialog'
 import { SafelineDeployConfigEditDialog } from './acme/dialogs/SafelineDeployConfigEditDialog'
+import { CASTargetEditDialog } from './acme/dialogs/CASTargetEditDialog'
+import { CASDeployConfigEditDialog } from './acme/dialogs/CASDeployConfigEditDialog'
 import { CredentialsDrawer } from './acme/drawers/CredentialsDrawer'
 import { AccountsDrawer } from './acme/drawers/AccountsDrawer'
 import { DeployTargetsEntryDrawer } from './acme/drawers/DeployTargetsEntryDrawer'
@@ -78,6 +81,7 @@ export default function AcmePage() {
   const [accounts, setAccounts] = useState<AcmeAccount[]>([])
   const [sshTargets, setSSHTargets] = useState<SSHTarget[]>([])
   const [safelineTargets, setSafelineTargets] = useState<SafelineTarget[]>([])
+  const [casTargets, setCASTargets] = useState<CASTarget[]>([])
   const [sshCredentials, setSSHCredentials] = useState<SSHCredential[]>([])
   const [providers, setProviders] = useState<string[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
@@ -108,6 +112,12 @@ export default function AcmePage() {
   const [safeDeployEditOpen, setSafeDeployEditOpen] = useState(false)
   const [safeDeployEditTarget, setSafeDeployEditTarget] = useState<SafelineDeployConfig | null>(null)
   const [safeDeployDeletePending, setSafeDeployDeletePending] = useState<SafelineDeployConfig | null>(null)
+  const [casDeployDomain, setCASDeployDomain] = useState<Domain | null>(null)
+  const [casDeployConfigs, setCASDeployConfigs] = useState<CASDeployConfig[]>([])
+  const [casDeployLoading, setCASDeployLoading] = useState(false)
+  const [casDeployEditOpen, setCASDeployEditOpen] = useState(false)
+  const [casDeployEditTarget, setCASDeployEditTarget] = useState<CASDeployConfig | null>(null)
+  const [casDeployDeletePending, setCASDeployDeletePending] = useState<CASDeployConfig | null>(null)
   const [logTaskID, setLogTaskID] = useState<number | null>(null)
 
   const [credDrawerOpen, setCredDrawerOpen] = useState(false)
@@ -126,6 +136,9 @@ export default function AcmePage() {
   const [safeEditOpen, setSafeEditOpen] = useState(false)
   const [safeEditTarget, setSafeEditTarget] = useState<SafelineTarget | null>(null)
   const [safeDeletePending, setSafeDeletePending] = useState<SafelineTarget | null>(null)
+  const [casEditOpen, setCASEditOpen] = useState(false)
+  const [casEditTarget, setCASEditTarget] = useState<CASTarget | null>(null)
+  const [casDeletePending, setCASDeletePending] = useState<CASTarget | null>(null)
   const [sshCredDrawerOpen, setSSHCredDrawerOpen] = useState(false)
   const [sshCredEditOpen, setSSHCredEditOpen] = useState(false)
   const [sshCredEditTarget, setSSHCredEditTarget] = useState<SSHCredential | null>(null)
@@ -165,6 +178,7 @@ export default function AcmePage() {
       setAccounts(a.data?.data ?? [])
       setSSHTargets(groupedTargets.ssh)
       setSafelineTargets(groupedTargets.safeline)
+      setCASTargets(groupedTargets.cas)
       setSSHCredentials(sc.data?.data ?? [])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载失败')
@@ -201,6 +215,7 @@ export default function AcmePage() {
       const groupedTargets = splitDeployTargets(data?.data ?? [])
       setSSHTargets(groupedTargets.ssh)
       setSafelineTargets(groupedTargets.safeline)
+      setCASTargets(groupedTargets.cas)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载部署目标失败')
     }
@@ -231,16 +246,19 @@ export default function AcmePage() {
   const reloadDeployConfigs = useCallback(async (domainID: number) => {
     setDeployConfigLoading(true)
     setSafeDeployLoading(true)
+    setCASDeployLoading(true)
     try {
       const { data } = await api.get(`/acme/domains/${domainID}/deploy-configs`)
       const groupedConfigs = splitDeployConfigs(data?.data ?? [])
       setDeployConfigs(groupedConfigs.ssh)
       setSafeDeployConfigs(groupedConfigs.safeline)
+      setCASDeployConfigs(groupedConfigs.cas)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载部署配置失败')
     } finally {
       setDeployConfigLoading(false)
       setSafeDeployLoading(false)
+      setCASDeployLoading(false)
     }
   }, [])
 
@@ -296,6 +314,19 @@ export default function AcmePage() {
     }
   }
 
+  const onDeleteCASTarget = async () => {
+    const t = casDeletePending
+    if (!t) return
+    setCASDeletePending(null)
+    try {
+      await api.delete(`/acme/deploy/targets/${t.id}`)
+      toast.success('已删除')
+      await reloadDeployTargets()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+
   const onDeleteSSHDeployConfig = async () => {
     const cfg = deployDeletePending
     if (!cfg) return
@@ -313,6 +344,19 @@ export default function AcmePage() {
     const cfg = safeDeployDeletePending
     if (!cfg) return
     setSafeDeployDeletePending(null)
+    try {
+      await api.delete(`/acme/deploy/configs/${cfg.id}`)
+      toast.success('已删除')
+      if (deployEntryDomain) await reloadDeployConfigs(deployEntryDomain.id)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+
+  const onDeleteCASDeployConfig = async () => {
+    const cfg = casDeployDeletePending
+    if (!cfg) return
+    setCASDeployDeletePending(null)
     try {
       await api.delete(`/acme/deploy/configs/${cfg.id}`)
       toast.success('已删除')
@@ -394,25 +438,11 @@ export default function AcmePage() {
     }
   }
 
-  const startUploadCAS = async (d: Domain) => {
-    setBusy(`upload-cas-${d.id}`)
-    try {
-      const { data } = await api.post(`/acme/domains/${d.id}/upload-cas`)
-      const taskID = data?.data?.task_id as number
-      toast.success(`已提交上传 CAS，任务 #${taskID}`)
-      await reloadTasks()
-      setLogTaskID(taskID)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '提交上传 CAS 失败')
-    } finally {
-      setBusy(null)
-    }
-  }
-
   const openDeployConfigs = (d: Domain) => {
     setDeployEntryDomain(d)
     setDeployDomain(d)
     setSafeDeployDomain(d)
+    setCASDeployDomain(d)
     void reloadDeployConfigs(d.id)
   }
 
@@ -444,6 +474,23 @@ export default function AcmePage() {
       setLogTaskID(taskID)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '提交雷池部署失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startDeployCASConfig = async (cfg: CASDeployConfig) => {
+    if (!casDeployDomain) return
+    setBusy(`deploy-cas-config-${cfg.id}`)
+    try {
+      const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
+      const taskID = data?.data?.task_id as number
+      toast.success(`已提交 CAS 上传，任务 #${taskID}`)
+      await reloadTasks()
+      await reloadDeployConfigs(casDeployDomain.id)
+      setLogTaskID(taskID)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '提交 CAS 上传失败')
     } finally {
       setBusy(null)
     }
@@ -505,7 +552,7 @@ export default function AcmePage() {
             <h1 className="text-[28px] font-bold leading-none tracking-tight">ACME 签发</h1>
           </div>
           <p className="mt-2 text-[12.5px] text-muted-foreground">
-            自动签发与续期，并上传 CAS
+            自动签发与续期，配置部署目标后一键分发
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
@@ -598,7 +645,6 @@ export default function AcmePage() {
                   }
                 : { cls: 'bg-muted text-muted-foreground', text: '未签发' }
           const issuing = busy === `issue-${d.id}`
-          const uploadingCAS = busy === `upload-cas-${d.id}`
           const issueLabel = revoked || days !== null ? '重签' : '签发'
           return (
             <Card
@@ -660,28 +706,6 @@ export default function AcmePage() {
                     <Play className="mr-1.5 h-3.5 w-3.5" />
                   )}
                   {issueLabel}
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-9 w-full sm:h-8 sm:w-8"
-                  onClick={() => startUploadCAS(d)}
-                  disabled={busy !== null || !d.not_after || revoked || !d.cas_enabled}
-                  title={
-                    !d.cas_enabled
-                      ? '请先在编辑里开启「上传到阿里云 CAS」'
-                      : !d.not_after
-                        ? '当前域名还没有证书'
-                        : revoked
-                          ? '当前证书已吊销'
-                          : '上传当前证书到 CAS'
-                  }
-                >
-                  {uploadingCAS ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <UploadCloud className="h-3.5 w-3.5" />
-                  )}
                 </Button>
                 <Button
                   size="icon"
@@ -956,6 +980,7 @@ export default function AcmePage() {
         onOpenChange={setTargetEntryOpen}
         sshTargets={sshTargets}
         safelineTargets={safelineTargets}
+        casTargets={casTargets}
         onAddSSH={() => {
           setSSHEditTarget(null)
           setSSHEditOpen(true)
@@ -984,6 +1009,23 @@ export default function AcmePage() {
         }}
         onDeleteSafeline={(t) => setSafeDeletePending(t)}
         onTestSafeline={async (t) => {
+          try {
+            await api.post(`/acme/deploy/targets/${t.id}/test`)
+            toast.success('连接正常')
+          } catch (e: any) {
+            toast.error(e?.response?.data?.error || e?.message || '连接失败')
+          }
+        }}
+        onAddCAS={() => {
+          setCASEditTarget(null)
+          setCASEditOpen(true)
+        }}
+        onEditCAS={(t) => {
+          setCASEditTarget(t)
+          setCASEditOpen(true)
+        }}
+        onDeleteCAS={(t) => setCASDeletePending(t)}
+        onTestCAS={async (t) => {
           try {
             await api.post(`/acme/deploy/targets/${t.id}/test`)
             toast.success('连接正常')
@@ -1039,14 +1081,17 @@ export default function AcmePage() {
             setDeployEntryDomain(null)
             setDeployDomain(null)
             setSafeDeployDomain(null)
+            setCASDeployDomain(null)
           }
         }}
         domain={deployEntryDomain}
         sshConfigs={deployConfigs}
         safelineConfigs={safeDeployConfigs}
+        casConfigs={casDeployConfigs}
         sshTargets={sshTargets}
         safelineTargets={safelineTargets}
-        loading={deployConfigLoading || safeDeployLoading}
+        casTargets={casTargets}
+        loading={deployConfigLoading || safeDeployLoading || casDeployLoading}
         busy={busy}
         onAddSSH={() => {
           setDeployEditTarget(null)
@@ -1078,6 +1123,16 @@ export default function AcmePage() {
         }}
         onDeleteSafeline={(cfg) => setSafeDeployDeletePending(cfg)}
         onDeploySafeline={(cfg) => void startDeploySafelineConfig(cfg)}
+        onAddCAS={() => {
+          setCASDeployEditTarget(null)
+          setCASDeployEditOpen(true)
+        }}
+        onEditCAS={(cfg) => {
+          setCASDeployEditTarget(cfg)
+          setCASDeployEditOpen(true)
+        }}
+        onDeleteCAS={(cfg) => setCASDeployDeletePending(cfg)}
+        onDeployCAS={(cfg) => void startDeployCASConfig(cfg)}
         onDeployAll={() => void startDeployAllConfigs()}
       />
 
@@ -1098,6 +1153,24 @@ export default function AcmePage() {
         domain={safeDeployDomain}
         config={safeDeployEditTarget}
         targets={safelineTargets}
+        onSaved={() => {
+          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
+        }}
+      />
+
+      <CASTargetEditDialog
+        open={casEditOpen}
+        onOpenChange={setCASEditOpen}
+        target={casEditTarget}
+        onSaved={reloadDeployTargets}
+      />
+
+      <CASDeployConfigEditDialog
+        open={casDeployEditOpen}
+        onOpenChange={setCASDeployEditOpen}
+        domain={casDeployDomain}
+        config={casDeployEditTarget}
+        targets={casTargets}
         onSaved={() => {
           if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
         }}
@@ -1195,6 +1268,54 @@ export default function AcmePage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={onDeleteSafelineTarget}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!casDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setCASDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除阿里云 CAS 实例</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除{' '}
+              <span className="font-mono font-medium text-foreground">
+                {casDeletePending?.name}
+              </span>{' '}
+              及其部署配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteCASTarget}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!casDeployDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setCASDeployDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除阿里云 CAS 部署配置</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除{' '}
+              <span className="font-mono font-medium text-foreground">
+                {casDeployDeletePending?.name || `#${casDeployDeletePending?.id}`}
+              </span>{' '}
+              的 CAS 部署配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteCASDeployConfig}>删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

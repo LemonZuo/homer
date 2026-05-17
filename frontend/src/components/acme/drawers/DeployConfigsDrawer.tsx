@@ -1,6 +1,7 @@
 import { Copy, Edit3, Loader2, Plus, Send, ShieldCheck, Trash2 } from 'lucide-react'
 import { Card } from '../../ui/card'
 import { Button } from '../../ui/button'
+import { AliyunIcon } from '../../icons/AliyunIcon'
 import {
   Drawer,
   DrawerContent,
@@ -10,6 +11,8 @@ import {
 } from '../../ui/drawer'
 import { cn } from '../../../lib/utils'
 import type {
+  CASDeployConfig,
+  CASTarget,
   Domain,
   SSHDeployConfig,
   SSHTarget,
@@ -17,6 +20,9 @@ import type {
   SafelineTarget,
 } from '../types'
 import {
+  casConfigTitle,
+  casTargetByID,
+  casTargetSummary,
   configPrimaryPath,
   configTitle,
   safelineConfigTitle,
@@ -32,8 +38,10 @@ export function DeployConfigsDrawer({
   domain,
   sshConfigs,
   safelineConfigs,
+  casConfigs,
   sshTargets,
   safelineTargets,
+  casTargets,
   loading,
   busy,
   onAddSSH,
@@ -45,6 +53,10 @@ export function DeployConfigsDrawer({
   onEditSafeline,
   onDeleteSafeline,
   onDeploySafeline,
+  onAddCAS,
+  onEditCAS,
+  onDeleteCAS,
+  onDeployCAS,
   onDeployAll,
 }: {
   open: boolean
@@ -52,8 +64,10 @@ export function DeployConfigsDrawer({
   domain: Domain | null
   sshConfigs: SSHDeployConfig[]
   safelineConfigs: SafelineDeployConfig[]
+  casConfigs: CASDeployConfig[]
   sshTargets: SSHTarget[]
   safelineTargets: SafelineTarget[]
+  casTargets: CASTarget[]
   loading: boolean
   busy: string | null
   onAddSSH: () => void
@@ -65,6 +79,10 @@ export function DeployConfigsDrawer({
   onEditSafeline: (cfg: SafelineDeployConfig) => void
   onDeleteSafeline: (cfg: SafelineDeployConfig) => void
   onDeploySafeline: (cfg: SafelineDeployConfig) => void
+  onAddCAS: () => void
+  onEditCAS: (cfg: CASDeployConfig) => void
+  onDeleteCAS: (cfg: CASDeployConfig) => void
+  onDeployCAS: (cfg: CASDeployConfig) => void
   onDeployAll: () => void
 }) {
   const revoked = domain?.cert_status === 'revoked'
@@ -77,7 +95,11 @@ export function DeployConfigsDrawer({
     const t = safelineTargetByID(safelineTargets, cfg.target_id)
     return cfg.enabled && Boolean(t?.enabled)
   }).length
-  const deployableCount = sshDeployableCount + safelineDeployableCount
+  const casDeployableCount = casConfigs.filter((cfg) => {
+    const t = casTargetByID(casTargets, cfg.target_id)
+    return cfg.enabled && Boolean(t?.enabled)
+  }).length
+  const deployableCount = sshDeployableCount + safelineDeployableCount + casDeployableCount
   const deployingAll = Boolean(domain && busy === `deploy-domain-${domain.id}`)
   const canDeployAll = hasCert && !revoked && deployableCount > 0 && busy === null
 
@@ -113,6 +135,10 @@ export function DeployConfigsDrawer({
             <Button size="sm" onClick={onAddSafeline} disabled={safelineTargets.length === 0}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               添加雷池
+            </Button>
+            <Button size="sm" onClick={onAddCAS} disabled={casTargets.length === 0}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加 CAS
             </Button>
           </div>
 
@@ -297,6 +323,92 @@ export function DeployConfigsDrawer({
                               variant="outline"
                               className="flex-1 hover:text-destructive sm:flex-none"
                               onClick={() => onDeleteSafeline(cfg)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    )
+                  })
+                )}
+              </section>
+
+              <section className="space-y-2 border-t border-border pt-5">
+                <div>
+                  <div className="text-[13px] font-medium">阿里云 CAS 部署</div>
+                  <div className="text-[11.5px] text-muted-foreground">
+                    上传到阿里云数字证书管理（每次新增）
+                  </div>
+                </div>
+                {casTargets.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+                    先添加阿里云 CAS 实例，再配置证书上传
+                  </p>
+                ) : casConfigs.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+                    还没有阿里云 CAS 部署配置
+                  </p>
+                ) : (
+                  casConfigs.map((cfg) => {
+                    const t = casTargetByID(casTargets, cfg.target_id)
+                    const deploying = busy === `deploy-cas-config-${cfg.id}`
+                    const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
+                    return (
+                      <Card key={cfg.id} className="px-4 py-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
+                          <AliyunIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate font-mono text-[13px] font-medium">
+                                {casConfigTitle(cfg)}
+                              </span>
+                              <span
+                                className={cn(
+                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                                  cfg.enabled
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                    : 'bg-muted text-muted-foreground',
+                                )}
+                              >
+                                {cfg.enabled ? '启用' : '停用'}
+                              </span>
+                              {cfg.auto_deploy && (
+                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                                  自动部署
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                              {casTargetSummary(t)}
+                            </div>
+                            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                              上次 cert_id={cfg.cert_id || '—'}
+                            </div>
+                          </div>
+                          <div className="flex gap-2 sm:contents">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 sm:flex-none"
+                              onClick={() => onDeployCAS(cfg)}
+                              disabled={!canDeploy}
+                              title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                            >
+                              {deploying ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <AliyunIcon className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditCAS(cfg)}>
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 hover:text-destructive sm:flex-none"
+                              onClick={() => onDeleteCAS(cfg)}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>

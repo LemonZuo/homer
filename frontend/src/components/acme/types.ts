@@ -5,13 +5,11 @@ export interface Domain {
   account_id: number
   provider: string
   san_providers?: string
-  cas_enabled?: boolean
   enabled: boolean
   created_at: string
   updated_at: string
   not_before?: string
   not_after?: string
-  cas_cert_id?: number
   cert_status?: string
   revoked_at?: string
   issued_at?: string
@@ -131,6 +129,28 @@ export interface SafelineDeployConfig {
   name: string
   cert_id: number
   cert_type: number
+  auto_deploy: boolean
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CASTarget {
+  id: number
+  name: string
+  access_key_id: string
+  access_key_secret: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CASDeployConfig {
+  id: number
+  domain_id: number
+  target_id: number
+  name: string
+  cert_id: number
   auto_deploy: boolean
   enabled: boolean
   created_at: string
