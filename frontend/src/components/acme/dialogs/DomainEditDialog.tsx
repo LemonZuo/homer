@@ -192,7 +192,7 @@ export function DomainEditDialog({
                     'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[11.5px]',
                     i === 0
                       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                      : 'border-border bg-muted text-foreground',
+                      : 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
                   )}
                   title={i === 0 ? '主域名' : 'SAN'}
                 >
