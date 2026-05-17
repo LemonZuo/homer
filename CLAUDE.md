@@ -77,6 +77,11 @@ go build -ldflags="-s -w" -o bin/server .   # -s -w 去掉符号表/调试信息
 
 `npm run build` 末尾会自动补回 `frontend/dist/.gitkeep`（vite `emptyOutDir` 会清掉），保证下次 fresh clone 时 `//go:embed` 不至于因目录为空报错。
 
+## 版本 tag 规则
+
+- patch 号不进位到两位：保持个位（0~9），满 9 后进位到 minor 并归零 patch。
+- 即 `v0.1.9` 的下一个 tag 是 `v0.2.0`，不是 `v0.1.10`。
+
 ## 注意事项
 
 - go.mod 要求 Go ≥ 1.25，开发用 `/opt/module/go/go1.25.0`
