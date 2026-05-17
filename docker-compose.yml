@@ -5,8 +5,6 @@ services:
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-8081}:${SERVER_PORT:-8081}"
-    env_file:
-      - .env
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       GIN_MODE: ${GIN_MODE:-release}
