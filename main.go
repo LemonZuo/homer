@@ -66,6 +66,7 @@ func main() {
 	}
 
 	r := router.Setup(gormDB, notifier, eventNotifier, cdnHandler, casHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, dist)
+	r.GET("/healthz", handler.Health(gormDB, sched))
 	log.Printf("server listening on %s", cfg.ListenURL())
 	if err := r.Run(cfg.ListenAddr()); err != nil {
 		log.Fatalf("run server: %v", err)
