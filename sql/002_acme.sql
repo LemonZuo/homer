@@ -189,3 +189,49 @@ CREATE TABLE `event_reminder` (
   PRIMARY KEY (`id`),
   KEY `idx_enabled_event_date` (`enabled`, `event_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事项提醒（一次性日期）';
+
+-- 通知通道与模块绑定。
+-- 通道类型决定 config_json 结构：
+--   wework:  {"corp_id","agent_id","secret","tag_id"}
+--   email:   {"api_key","from","to"}（Resend）
+--   webhook: {"url"}
+-- 凭证当前以明文形式存库（P0 加密待办）。
+-- module 取值：birthday | event | bypass | scheduler_alert，由代码常量约束。
+
+DROP TABLE IF EXISTS `notify_channel`;
+CREATE TABLE `notify_channel` (
+  `id`          BIGINT      NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(64) NOT NULL                COMMENT '通道名称，前端显示',
+  `type`        VARCHAR(16) NOT NULL                COMMENT 'wework | email | webhook',
+  `config_json` TEXT        NOT NULL                COMMENT '类型相关配置 JSON',
+  `enabled`     VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `created_at`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知通道（出站）';
+
+DROP TABLE IF EXISTS `notify_binding`;
+CREATE TABLE `notify_binding` (
+  `id`         BIGINT      NOT NULL AUTO_INCREMENT,
+  `module`     VARCHAR(32) NOT NULL                COMMENT 'birthday | event | bypass | scheduler_alert',
+  `channel_id` BIGINT      NOT NULL                COMMENT 'notify_channel.id',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_notify_bind` (`module`, `channel_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模块 → 通道 多对多绑定';
+
+-- 调度任务执行状态：重启后面板/healthz 仍可见最近一次结果。
+-- 历史环形仍只在内存，这里只保留「最近一次」+ 连续失败计数（告警防抖用）。
+
+DROP TABLE IF EXISTS `scheduler_job_state`;
+CREATE TABLE `scheduler_job_state` (
+  `name`         VARCHAR(64) NOT NULL                COMMENT '任务名（唯一）',
+  `last_start`   DATETIME    NULL                    COMMENT '最近一次开始时间',
+  `last_end`     DATETIME    NULL                    COMMENT '最近一次结束时间',
+  `last_ok`      VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '最近一次是否成功：1/0',
+  `last_err`     TEXT        NULL                    COMMENT '最近一次错误信息',
+  `last_trigger` VARCHAR(16) NOT NULL DEFAULT ''     COMMENT 'cron | manual',
+  `consec_fails` INT         NOT NULL DEFAULT 0      COMMENT '连续失败次数，成功清零',
+  `updated_at`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='调度任务最近一次执行状态';
