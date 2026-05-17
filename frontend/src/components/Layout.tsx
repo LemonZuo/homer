@@ -82,8 +82,8 @@ export default function Layout() {
       {/* 桌面端侧栏 */}
       <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-border bg-card/40 px-3 py-6 backdrop-blur-sm sm:flex">
         <div className="mb-6 flex items-center gap-2.5 px-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-sm">
-            <Logo className="h-5 w-5" />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-sm">
+            <Logo className="h-6 w-6" />
           </span>
           <div className="min-w-0 leading-tight">
             <div className="truncate text-[13px] font-semibold tracking-tight">
