@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fmt"
+	"io/fs"
 	"log"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"github.com/LemonZuo/homer/internal/acme"
@@ -10,11 +14,64 @@ import (
 	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
 	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/cas"
+	"github.com/LemonZuo/homer/internal/cdn"
 	"github.com/LemonZuo/homer/internal/config"
+	"github.com/LemonZuo/homer/internal/db"
 	"github.com/LemonZuo/homer/internal/event"
+	"github.com/LemonZuo/homer/internal/handler"
+	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
+	"github.com/LemonZuo/homer/internal/notify/email"
+	"github.com/LemonZuo/homer/internal/notify/wework"
+	"github.com/LemonZuo/homer/internal/router"
 	"github.com/LemonZuo/homer/internal/scheduler"
 )
+
+// retryWeWork 构造带统一重试（3 次 / 2s 指数退避）的企业微信 Notifier。
+func retryWeWork(corpID, agentID, secret, tagID string) notify.Notifier {
+	return notify.Retry(3, 2*time.Second, notify.WeWork(wework.New(corpID, agentID, secret, tagID)))
+}
+
+// retryEmail 构造带统一重试（3 次 / 2s 指数退避）的 Resend 邮件 Notifier。
+func retryEmail(apiKey, from, to string) notify.Notifier {
+	return notify.Retry(3, 2*time.Second, notify.Email(email.NewResend(apiKey, from), to))
+}
+
+// buildServer 组装全部依赖（DB / notifier / service / handler / scheduler / router），
+// 返回可运行的 gin.Engine 与清理函数（停止调度器）。
+func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error) {
+	gormDB, err := db.New(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect db: %w", err)
+	}
+	if err := gormDB.AutoMigrate(&model.SmsForwarder{}); err != nil {
+		return nil, nil, fmt.Errorf("migrate sms_forwarder: %w", err)
+	}
+
+	notifier := retryWeWork(cfg.WeWorkBirthdayCorpID, cfg.WeWorkBirthdayAgentID, cfg.WeWorkBirthdaySecret, cfg.WeWorkBirthdayTagID)
+	eventNotifier := retryWeWork(cfg.WeWorkEventCorpID, cfg.WeWorkEventAgentID, cfg.WeWorkEventSecret, cfg.WeWorkEventTagID)
+
+	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
+	casSvc := cas.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
+	acmeSvc := buildACMEService(gormDB, cfg, casSvc)
+
+	bypassWeWork := retryWeWork(cfg.WeWorkBypassCorpID, cfg.WeWorkBypassAgentID, cfg.WeWorkBypassSecret, cfg.WeWorkBypassTagID)
+	bypassEmail := retryEmail(cfg.ResendAPIKey, cfg.BypassEmailFrom, cfg.BypassEmailTo)
+
+	sched := startScheduler(gormDB, cfg, notifier, eventNotifier, acmeSvc)
+
+	cdnHandler := handler.NewCDNHandler(cdnSvc)
+	casHandler := handler.NewCASHandler(casSvc, cdnSvc)
+	acmeHandler := handler.NewACMEHandler(acmeSvc)
+	bypassHandler := handler.NewBypassHandler(bypassWeWork, bypassEmail, cfg.BypassSubject)
+	smsHandler := handler.NewSMSHandler(gormDB)
+	schedulerHandler := handler.NewSchedulerHandler(sched)
+
+	r := router.Setup(gormDB, notifier, eventNotifier, cdnHandler, casHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, frontend)
+	r.GET("/healthz", handler.Health(gormDB, sched))
+
+	return r, sched.Stop, nil
+}
 
 // buildACMEService 组装 ACME 依赖图（store / registry / driver / manager / SSE / service）。
 func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) *acme.Service {
