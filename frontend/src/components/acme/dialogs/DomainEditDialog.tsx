@@ -189,10 +189,10 @@ export function DomainEditDialog({
                 <span
                   key={`${d}-${i}`}
                   className={cn(
-                    'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11.5px]',
+                    'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[11.5px]',
                     i === 0
-                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                      : 'bg-muted text-foreground',
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                      : 'border-border bg-muted text-foreground',
                   )}
                   title={i === 0 ? '主域名' : 'SAN'}
                 >
