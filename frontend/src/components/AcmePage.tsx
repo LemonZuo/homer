@@ -937,6 +937,7 @@ export default function AcmePage() {
         onOpenChange={setSSHEditOpen}
         target={sshEditTarget}
         credentials={sshCredentials}
+        sshTargets={sshTargets}
         onManageCredentials={() => setSSHCredDrawerOpen(true)}
         onSaved={reloadDeployTargets}
       />
@@ -992,6 +993,16 @@ export default function AcmePage() {
         }}
         onEditSSH={(cfg) => {
           setDeployEditTarget(cfg)
+          setDeployEditOpen(true)
+        }}
+        onCopySSH={(cfg) => {
+          setDeployEditTarget({
+            ...cfg,
+            id: 0,
+            name: `${cfg.name || '配置'} 副本`,
+            created_at: '',
+            updated_at: '',
+          })
           setDeployEditOpen(true)
         }}
         onDeleteSSH={(cfg) => setDeployDeletePending(cfg)}

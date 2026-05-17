@@ -27,6 +27,7 @@ export function SSHTargetEditDialog({
   onOpenChange,
   target,
   credentials,
+  sshTargets,
   onManageCredentials,
   onSaved,
 }: {
@@ -34,6 +35,7 @@ export function SSHTargetEditDialog({
   onOpenChange: (o: boolean) => void
   target: SSHTarget | null
   credentials: SSHCredential[]
+  sshTargets: SSHTarget[]
   onManageCredentials: () => void
   onSaved: () => void
 }) {
@@ -47,6 +49,7 @@ export function SSHTargetEditDialog({
   const [privateKey, setPrivateKey] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [enabled, setEnabled] = useState(true)
+  const [bastionID, setBastionID] = useState(0)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -65,7 +68,19 @@ export function SSHTargetEditDialog({
     setPrivateKey(target?.private_key ?? '')
     setPassphrase(target?.passphrase ?? '')
     setEnabled(target?.enabled ?? true)
+    setBastionID(target?.bastion_target_id ?? 0)
   }, [open, target])
+
+  // 单跳：候选必须是 启用 + 不是自己 + 自身不再依赖跳板（避免链）
+  const bastionOptions = sshTargets
+    .filter((t) => t.enabled && t.id !== (target?.id ?? 0) && !(t.bastion_target_id && t.bastion_target_id > 0))
+    .map((t) => ({ value: t.id, label: `${t.name} · ${t.host}:${t.port || 22}` }))
+
+  // 当前机器已被别人当跳板？若是，则本机不能再设置自己的跳板，否则链就破了
+  const upstreamRef = target?.id
+    ? sshTargets.find((t) => t.bastion_target_id === target.id)
+    : undefined
+  const bastionLocked = !!upstreamRef
 
   const save = async () => {
     const portNum = Number(port)
@@ -83,6 +98,7 @@ export function SSHTargetEditDialog({
       private_key: credential ? '' : privateKey.trim(),
       passphrase: credential ? '' : passphrase.trim(),
       enabled,
+      bastion_target_id: !bastionLocked && bastionID > 0 ? bastionID : 0,
       created_at: target?.created_at ?? '',
       updated_at: target?.updated_at ?? '',
     }
@@ -280,6 +296,27 @@ export function SSHTargetEditDialog({
               </div>
             </>
           )}
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-bastion">跳板机（可选）</Label>
+            <Select
+              id="ssh-bastion"
+              value={bastionLocked ? 0 : bastionID}
+              onChange={setBastionID}
+              placeholder="直连，不经过跳板机"
+              disabled={bastionLocked}
+              searchable
+              searchPlaceholder="按名称 / 主机搜索"
+              options={[
+                { value: 0, label: '直连，不经过跳板机' },
+                ...bastionOptions,
+              ]}
+            />
+            {bastionLocked && (
+              <p className="text-[11.5px] text-muted-foreground">
+                本机已被 {upstreamRef?.name} 用作跳板，不能再为自己设置跳板
+              </p>
+            )}
+          </div>
           <div className="flex items-center justify-between">
             <Label htmlFor="ssh-enabled">启用</Label>
             <Switch id="ssh-enabled" checked={enabled} onChange={(v) => setEnabled(v)} />

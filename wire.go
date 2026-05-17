@@ -81,7 +81,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 // buildACMEService 组装 ACME 依赖图（store / registry / driver / manager / SSE / service）。
 func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) *acme.Service {
 	sshCreds := acme.NewSSHCredentialStore(gormDB)
-	registry := acme.NewDeployRegistry(acmessh.NewDriver(sshCreds), acmesafeline.NewDriver())
+	registry := acme.NewDeployRegistry(acmessh.NewDriver(sshCreds, gormDB), acmesafeline.NewDriver())
 	targets := acme.NewDeployTargetStore(gormDB, registry)
 	configs := acme.NewDeployConfigStore(gormDB, targets, registry)
 	return acme.NewService(

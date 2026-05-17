@@ -7,9 +7,13 @@ export const DropdownMenu = DropdownMenuPrimitive.Root
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger
 export const DropdownMenuPortal = DropdownMenuPrimitive.Portal
 
+// 注：onOpenAutoFocus 在 Radix 运行时受 MenuContent 支持（composeEventHandlers 给 FocusScope.onMountAutoFocus），
+// 但被 MenuRootContentTypeProps 的 Omit 从公开类型剥离了。这里手动补回类型。
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & {
+    onOpenAutoFocus?: (event: Event) => void
+  }
 >(({ className, sideOffset = 6, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.Content

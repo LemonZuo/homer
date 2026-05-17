@@ -91,10 +91,20 @@ export function DeployTargetsEntryDrawer({
                           {t.enabled ? '启用' : '停用'}
                         </span>
                       </div>
-                      <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
-                        {t.auth_source === 'credential'
-                          ? `凭证@${t.host}:${t.port || 22} · 登录凭证`
-                          : `${t.username}@${t.host}:${t.port || 22} · ${authLabel(t.auth_type)}`}
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11.5px] text-muted-foreground">
+                        <span className="truncate">
+                          {t.auth_source === 'credential'
+                            ? `凭证@${t.host}:${t.port || 22} · 登录凭证`
+                            : `${t.username}@${t.host}:${t.port || 22} · ${authLabel(t.auth_type)}`}
+                        </span>
+                        {(t.bastion_target_id ?? 0) > 0 && (() => {
+                          const b = sshTargets.find((x) => x.id === t.bastion_target_id)
+                          return (
+                            <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                              经 {b ? b.name : `#${t.bastion_target_id}`}
+                            </span>
+                          )
+                        })()}
                       </div>
                     </div>
                     <div className="flex gap-2 sm:contents">

@@ -75,9 +75,9 @@ CREATE TABLE `acme_domain` (
   `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_main_domain` (`main_domain`),
+  KEY `idx_main_domain` (`main_domain`),
   KEY `idx_account_id` (`account_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 自动签发域名';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 自动签发域名（同一主域名可有多张证书并存）';
 
 DROP TABLE IF EXISTS `acme_safeline_target`;
 DROP TABLE IF EXISTS `acme_safeline_deploy_config`;

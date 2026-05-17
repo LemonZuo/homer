@@ -144,12 +144,37 @@ func (s *DeployTargetStore) Delete(id int64) error {
 	if id <= 0 {
 		return errors.New("id 无效")
 	}
+	if name, ok, err := s.findBastionRef(id); err != nil {
+		return err
+	} else if ok {
+		return fmt.Errorf("该机器被 %s 设为跳板机，请先去 %s 取消引用", name, name)
+	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("target_id = ?", id).Delete(&model.ACMEDeployConfig{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&model.ACMEDeployTarget{}, id).Error
 	})
+}
+
+// findBastionRef 查找是否有别的 SSH 机器把 id 当作跳板机引用，避免删除后另一台连不通。
+// 直接扫一遍 SSH 目标的 config_json，量小（个位数到几十）够用。
+func (s *DeployTargetStore) findBastionRef(id int64) (string, bool, error) {
+	var rows []model.ACMEDeployTarget
+	if err := s.db.Where("kind = ? AND id <> ?", DeployKindSSH, id).Find(&rows).Error; err != nil {
+		return "", false, err
+	}
+	for _, r := range rows {
+		cfg := map[string]any{}
+		if err := JSONUnmarshal([]byte(EmptyJSON(r.ConfigJSON)), &cfg); err != nil {
+			continue
+		}
+		v, _ := cfg["bastion_target_id"].(float64)
+		if int64(v) == id {
+			return r.Name, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func (s *DeployTargetStore) Test(ctx context.Context, id int64) error {

@@ -1,4 +1,4 @@
-import { Edit3, Loader2, Plus, Send, ShieldCheck, Trash2 } from 'lucide-react'
+import { Copy, Edit3, Loader2, Plus, Send, ShieldCheck, Trash2 } from 'lucide-react'
 import { Card } from '../../ui/card'
 import { Button } from '../../ui/button'
 import {
@@ -38,6 +38,7 @@ export function DeployConfigsDrawer({
   busy,
   onAddSSH,
   onEditSSH,
+  onCopySSH,
   onDeleteSSH,
   onDeploySSH,
   onAddSafeline,
@@ -57,6 +58,7 @@ export function DeployConfigsDrawer({
   busy: string | null
   onAddSSH: () => void
   onEditSSH: (cfg: SSHDeployConfig) => void
+  onCopySSH: (cfg: SSHDeployConfig) => void
   onDeleteSSH: (cfg: SSHDeployConfig) => void
   onDeploySSH: (cfg: SSHDeployConfig) => void
   onAddSafeline: () => void
@@ -178,6 +180,15 @@ export function DeployConfigsDrawer({
                             </div>
                           </div>
                           <div className="flex gap-2 sm:contents">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 sm:flex-none"
+                              onClick={() => onCopySSH(cfg)}
+                              title="基于当前配置复制一份"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </Button>
                             <Button
                               size="sm"
                               variant="outline"

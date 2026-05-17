@@ -399,7 +399,8 @@ func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECer
 // persistCert 落盘到 ./data/acme/certs/<domain>/，写入 acme_cert 表，并上传 CAS。
 func (s *Service) persistCert(logw *teeWriter, d model.ACMEDomain, cert, key, chain []byte) (*model.ACMECert, error) {
 	notBefore, notAfter, serial := parseCertMeta(cert)
-	dir := filepath.Join(s.dataDir, "certs", d.MainDomain)
+	// 目录加 ID 后缀，避免「同一主域名多张证书」时互相覆盖
+	dir := filepath.Join(s.dataDir, "certs", fmt.Sprintf("%s-%d", d.MainDomain, d.ID))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("创建证书目录失败：%w", err)
 	}

@@ -56,6 +56,7 @@ export function parseSSHEndpoint(endpoint: string): { host: string; port: number
 
 export function deployTargetToSSH(t: DeployTarget): SSHTarget {
   const auth = safeParseJSON(t.auth_json)
+  const cfg = safeParseJSON(t.config_json)
   const endpoint = parseSSHEndpoint(t.endpoint)
   return {
     id: t.id,
@@ -70,6 +71,7 @@ export function deployTargetToSSH(t: DeployTarget): SSHTarget {
     private_key: String(auth.private_key ?? ''),
     passphrase: String(auth.passphrase ?? ''),
     enabled: t.enabled,
+    bastion_target_id: Number(cfg.bastion_target_id ?? 0) || 0,
     created_at: t.created_at ?? '',
     updated_at: t.updated_at ?? '',
   }
@@ -109,13 +111,16 @@ export function sshTargetToDeployTarget(t: SSHTarget): DeployTarget {
         private_key: t.private_key,
         passphrase: t.passphrase,
       }
+  const cfg = t.bastion_target_id && t.bastion_target_id > 0
+    ? { bastion_target_id: t.bastion_target_id }
+    : {}
   return {
     id: t.id,
     name: t.name,
     kind: 'ssh',
     endpoint: `${t.host}:${t.port || 22}`,
     auth_json: JSON.stringify(auth),
-    config_json: '{}',
+    config_json: JSON.stringify(cfg),
     enabled: t.enabled,
   }
 }

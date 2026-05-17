@@ -112,7 +112,7 @@ export function SSHDeployConfigEditDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>{config ? '编辑部署配置' : '新增部署配置'}</DialogTitle>
+          <DialogTitle>{config?.id ? '编辑部署配置' : '新增部署配置'}</DialogTitle>
           <DialogDescription>
             {domain?.main_domain ?? '当前域名'} 的证书部署路径和部署命令，支持 {'{domain}'} 占位符
           </DialogDescription>
@@ -137,6 +137,8 @@ export function SSHDeployConfigEditDialog({
               value={targetID}
               onChange={setTargetID}
               placeholder="（暂无启用的 SSH 机器）"
+              searchable
+              searchPlaceholder="按名称 / 主机搜索"
               options={selectableTargets.map((t) => ({
                 value: t.id,
                 label: `${t.name} (${t.username}@${t.host}:${t.port || 22})`,

@@ -93,21 +93,25 @@ func (SSHCredential) TableName() string { return "ssh_credential" }
 // AuthSource:
 //   - "inline"（默认）：使用 Username + AuthType + Password|PrivateKey|Passphrase
 //   - "credential"：忽略 inline 字段，运行时从 ssh_credential 加载（按 CredentialID）
+//
+// BastionTargetID 可选：>0 表示先连这台 SSH 机器，再从它出网到当前目标（单跳，
+// 不支持跳板机链）。落在 acme_deploy_target.config_json 里，不是独立列。
 type ACMESSHTarget struct {
-	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
-	Name         string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
-	Host         string    `gorm:"column:host;size:255" json:"host"`
-	Port         int       `gorm:"column:port;default:22" json:"port"`
-	AuthSource   string    `gorm:"-" json:"auth_source"`   // inline | credential
-	CredentialID int64     `gorm:"-" json:"credential_id"` // auth_source=credential 时使用
-	Username     string    `gorm:"column:username;size:128" json:"username"`
-	AuthType     string    `gorm:"column:auth_type;size:16" json:"auth_type"` // password | key
-	Password     string    `gorm:"column:password;type:text" json:"password"`
-	PrivateKey   string    `gorm:"column:private_key;type:text" json:"private_key"`
-	Passphrase   string    `gorm:"column:passphrase;type:text" json:"passphrase"`
-	Enabled      BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID              int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name            string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
+	Host            string    `gorm:"column:host;size:255" json:"host"`
+	Port            int       `gorm:"column:port;default:22" json:"port"`
+	AuthSource      string    `gorm:"-" json:"auth_source"`       // inline | credential
+	CredentialID    int64     `gorm:"-" json:"credential_id"`     // auth_source=credential 时使用
+	BastionTargetID int64     `gorm:"-" json:"bastion_target_id"` // 0=直连；>0=经此 SSH 机器跳一次
+	Username        string    `gorm:"column:username;size:128" json:"username"`
+	AuthType        string    `gorm:"column:auth_type;size:16" json:"auth_type"` // password | key
+	Password        string    `gorm:"column:password;type:text" json:"password"`
+	PrivateKey      string    `gorm:"column:private_key;type:text" json:"private_key"`
+	Passphrase      string    `gorm:"column:passphrase;type:text" json:"passphrase"`
+	Enabled         BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 // ACMESSHDeployConfig 是旧 HTTP/UI 兼容视图；实际持久化使用 ACMEDeployConfig。
@@ -161,7 +165,7 @@ type ACMESafelineDeployConfig struct {
 // 手动上传按钮也只有开启时才能用；关闭则两条路径都被拦截。
 type ACMEDomain struct {
 	ID           int64     `gorm:"primaryKey;column:id" json:"id"`
-	MainDomain   string    `gorm:"column:main_domain;size:255;uniqueIndex" json:"main_domain"`
+	MainDomain   string    `gorm:"column:main_domain;size:255;index:idx_main_domain" json:"main_domain"`
 	SanDomains   string    `gorm:"column:san_domains;size:1024" json:"san_domains"`
 	AccountID    int64     `gorm:"column:account_id;index" json:"account_id"`
 	Provider     string    `gorm:"column:provider;size:64" json:"provider"`

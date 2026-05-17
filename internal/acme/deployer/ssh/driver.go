@@ -17,11 +17,14 @@ import (
 	"github.com/LemonZuo/homer/internal/acme"
 	"github.com/LemonZuo/homer/internal/model"
 	"golang.org/x/crypto/ssh"
+	"gorm.io/gorm"
 )
 
 // Driver 实现 acme.DeployDriver，把证书写到远端 SSH 机器并执行部署命令。
+// db 用于跳板机模式下按 BastionTargetID 反查另一台 SSH 机器。
 type Driver struct {
 	credentials *acme.SSHCredentialStore
+	db          *gorm.DB
 }
 
 // TargetAuth 是 acme_deploy_target.auth_json 在 SSH 场景下的结构。
@@ -41,8 +44,14 @@ type TargetAuth struct {
 // AuthSourceCredential 表示按凭证 id 解析认证信息。
 const AuthSourceCredential = "credential"
 
-func NewDriver(credentials *acme.SSHCredentialStore) *Driver {
-	return &Driver{credentials: credentials}
+// TargetConfig 是 acme_deploy_target.config_json 在 SSH 场景下的结构。
+// 目前只放跳板机字段，单跳；后续如要扩 keepalive、压缩等连接级参数也放这里。
+type TargetConfig struct {
+	BastionTargetID int64 `json:"bastion_target_id,omitempty"`
+}
+
+func NewDriver(credentials *acme.SSHCredentialStore, db *gorm.DB) *Driver {
+	return &Driver{credentials: credentials, db: db}
 }
 
 func (d *Driver) Kind() string  { return acme.DeployKindSSH }
@@ -53,7 +62,75 @@ func (d *Driver) ValidateTarget(target model.ACMEDeployTarget) error {
 	if err != nil {
 		return err
 	}
-	return validateTarget(*t)
+	if err := validateTarget(*t); err != nil {
+		return err
+	}
+	if t.BastionTargetID > 0 {
+		if t.BastionTargetID == t.ID {
+			return errors.New("跳板机不能是自己")
+		}
+		// 上游：已被别人当跳板的机器，自身不能再有跳板，否则单跳被绕成链
+		if t.ID > 0 {
+			if name, ok, err := d.findUpstreamRef(t.ID); err != nil {
+				return err
+			} else if ok {
+				return fmt.Errorf("当前机器已被 %s 设为跳板机，不能再为自己设置跳板机", name)
+			}
+		}
+		// 下游：所选跳板自身不能再有跳板
+		b, err := d.loadBastion(t.BastionTargetID)
+		if err != nil {
+			return err
+		}
+		if b.BastionTargetID > 0 {
+			return errors.New("所选跳板机已经设置了自己的跳板机，单跳模式不支持跳板机链")
+		}
+	}
+	return nil
+}
+
+// findUpstreamRef 反查是否有任何 SSH target 把 id 当作 bastion 在用。
+// 返回第一个引用者的 name，用于错误提示。
+func (d *Driver) findUpstreamRef(id int64) (string, bool, error) {
+	if d.db == nil {
+		return "", false, errors.New("跳板机模式未注入 DB")
+	}
+	var rows []model.ACMEDeployTarget
+	if err := d.db.Where("kind = ? AND id <> ?", acme.DeployKindSSH, id).Find(&rows).Error; err != nil {
+		return "", false, fmt.Errorf("扫描跳板机引用失败：%w", err)
+	}
+	for _, r := range rows {
+		cfg := TargetConfig{}
+		if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(r.ConfigJSON)), &cfg); err != nil {
+			continue
+		}
+		if cfg.BastionTargetID == id {
+			return r.Name, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// loadBastion 加载一台被引用作为跳板机的 SSH 目标，校验类型/启用状态，
+// 但不解析凭证（建连前再 resolveCredential）。
+func (d *Driver) loadBastion(id int64) (*model.ACMESSHTarget, error) {
+	if d.db == nil {
+		return nil, errors.New("跳板机模式未注入 DB")
+	}
+	var row model.ACMEDeployTarget
+	if err := d.db.First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("跳板机不存在：id=%d", id)
+		}
+		return nil, fmt.Errorf("加载跳板机失败：%w", err)
+	}
+	if row.Kind != acme.DeployKindSSH {
+		return nil, fmt.Errorf("跳板机必须是 SSH 类型：id=%d, kind=%s", id, row.Kind)
+	}
+	if !bool(row.Enabled) {
+		return nil, fmt.Errorf("跳板机已停用：%s", row.Name)
+	}
+	return targetFromDeployTarget(row)
 }
 
 func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, cfg model.ACMEDeployConfig) error {
@@ -69,25 +146,13 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	if err != nil {
 		return err
 	}
-	if err := d.resolveCredential(t); err != nil {
-		return err
-	}
-	auth, err := sshAuth(*t)
+	client, cleanup, err := d.dialSSH(nil, t)
 	if err != nil {
 		return err
 	}
-	cfg := &ssh.ClientConfig{
-		User:            t.Username,
-		Auth:            []ssh.AuthMethod{auth},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         15 * time.Second,
-	}
-	addr := fmt.Sprintf("%s:%d", t.Host, t.Port)
-	client, err := ssh.Dial("tcp", addr, cfg)
-	if err != nil {
-		return fmt.Errorf("连接 SSH 失败：%w", err)
-	}
-	return client.Close()
+	defer cleanup()
+	_ = client // 拨通即视为测试通过
+	return nil
 }
 
 func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
@@ -105,7 +170,7 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 	if req.Logf != nil {
 		req.Logf("SSH 目标：%s", targetSummary(*target))
 	}
-	if err := deployCert(req.Logf, *target, req.Cert, opts); err != nil {
+	if err := d.deployCert(req.Logf, target, req.Cert, opts); err != nil {
 		return nil, err
 	}
 	return &acme.DeployResult{}, nil
@@ -148,25 +213,30 @@ func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget
 	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.AuthJSON)), &auth); err != nil {
 		return nil, fmt.Errorf("解析 SSH 认证配置失败：%w", err)
 	}
+	cfg := TargetConfig{}
+	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.ConfigJSON)), &cfg); err != nil {
+		return nil, fmt.Errorf("解析 SSH 连接配置失败：%w", err)
+	}
 	host, port, err := splitEndpoint(target.Endpoint)
 	if err != nil {
 		return nil, err
 	}
 	out := &model.ACMESSHTarget{
-		ID:           target.ID,
-		Name:         target.Name,
-		Host:         host,
-		Port:         port,
-		AuthSource:   auth.AuthSource,
-		CredentialID: auth.CredentialID,
-		Username:     auth.Username,
-		AuthType:     auth.AuthType,
-		Password:     auth.Password,
-		PrivateKey:   auth.PrivateKey,
-		Passphrase:   auth.Passphrase,
-		Enabled:      target.Enabled,
-		CreatedAt:    target.CreatedAt,
-		UpdatedAt:    target.UpdatedAt,
+		ID:              target.ID,
+		Name:            target.Name,
+		Host:            host,
+		Port:            port,
+		AuthSource:      auth.AuthSource,
+		CredentialID:    auth.CredentialID,
+		BastionTargetID: cfg.BastionTargetID,
+		Username:        auth.Username,
+		AuthType:        auth.AuthType,
+		Password:        auth.Password,
+		PrivateKey:      auth.PrivateKey,
+		Passphrase:      auth.Passphrase,
+		Enabled:         target.Enabled,
+		CreatedAt:       target.CreatedAt,
+		UpdatedAt:       target.UpdatedAt,
 	}
 	normalizeTarget(out)
 	return out, nil
@@ -219,13 +289,14 @@ func deployTargetFromTarget(t model.ACMESSHTarget) model.ACMEDeployTarget {
 		auth.PrivateKey = t.PrivateKey
 		auth.Passphrase = t.Passphrase
 	}
+	cfg := TargetConfig{BastionTargetID: t.BastionTargetID}
 	return model.ACMEDeployTarget{
 		ID:         t.ID,
 		Name:       t.Name,
 		Kind:       acme.DeployKindSSH,
 		Endpoint:   net.JoinHostPort(t.Host, strconv.Itoa(t.Port)),
 		AuthJSON:   acme.MustJSON(auth),
-		ConfigJSON: "{}",
+		ConfigJSON: acme.MustJSON(cfg),
 		Enabled:    t.Enabled,
 		CreatedAt:  t.CreatedAt,
 		UpdatedAt:  t.UpdatedAt,
@@ -312,14 +383,16 @@ func targetSummary(t model.ACMESSHTarget) string {
 	return fmt.Sprintf("%s@%s:%d", t.Username, t.Host, t.Port)
 }
 
-func deployCert(logf func(string, ...any), target model.ACMESSHTarget, cert model.ACMECert, opts DeployOptions) error {
-	opts.normalize()
-	if err := opts.validate(); err != nil {
-		return err
+// dialSSH 拨号到目标 SSH 机器。若 target.BastionTargetID > 0，先连跳板机，
+// 再通过跳板机的 net.Conn 与最终目标握手（单跳，跳板机本身的 bastion 字段被忽略）。
+// 返回的 cleanup 会按 LIFO 顺序关闭所有 client。
+func (d *Driver) dialSSH(logf func(string, ...any), target *model.ACMESSHTarget) (*ssh.Client, func(), error) {
+	if err := d.resolveCredential(target); err != nil {
+		return nil, nil, err
 	}
-	auth, err := sshAuth(target)
+	auth, err := sshAuth(*target)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	cfg := &ssh.ClientConfig{
 		User:            target.Username,
@@ -327,15 +400,78 @@ func deployCert(logf func(string, ...any), target model.ACMESSHTarget, cert mode
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         15 * time.Second,
 	}
-	addr := fmt.Sprintf("%s:%d", target.Host, target.Port)
-	if logf != nil {
-		logf("连接 SSH：%s@%s", target.Username, addr)
+	addr := net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
+
+	// 直连
+	if target.BastionTargetID <= 0 {
+		if logf != nil {
+			logf("连接 SSH：%s@%s", target.Username, addr)
+		}
+		client, err := ssh.Dial("tcp", addr, cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("连接 SSH 失败：%w", err)
+		}
+		return client, func() { _ = client.Close() }, nil
 	}
-	client, err := ssh.Dial("tcp", addr, cfg)
+
+	// 经跳板机
+	bastion, err := d.loadBastion(target.BastionTargetID)
 	if err != nil {
-		return fmt.Errorf("连接 SSH 失败：%w", err)
+		return nil, nil, err
 	}
-	defer client.Close()
+	if err := d.resolveCredential(bastion); err != nil {
+		return nil, nil, err
+	}
+	bAuth, err := sshAuth(*bastion)
+	if err != nil {
+		return nil, nil, fmt.Errorf("跳板机认证准备失败：%w", err)
+	}
+	bCfg := &ssh.ClientConfig{
+		User:            bastion.Username,
+		Auth:            []ssh.AuthMethod{bAuth},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         15 * time.Second,
+	}
+	bAddr := net.JoinHostPort(bastion.Host, strconv.Itoa(bastion.Port))
+	if logf != nil {
+		logf("连接跳板机：%s@%s", bastion.Username, bAddr)
+	}
+	bClient, err := ssh.Dial("tcp", bAddr, bCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("连接跳板机失败：%w", err)
+	}
+	if logf != nil {
+		logf("经跳板机 %s 连接 SSH：%s@%s", bastion.Name, target.Username, addr)
+	}
+	tunnel, err := bClient.Dial("tcp", addr)
+	if err != nil {
+		_ = bClient.Close()
+		return nil, nil, fmt.Errorf("从跳板机连接目标失败：%w", err)
+	}
+	conn, chans, reqs, err := ssh.NewClientConn(tunnel, addr, cfg)
+	if err != nil {
+		_ = tunnel.Close()
+		_ = bClient.Close()
+		return nil, nil, fmt.Errorf("通过跳板机握手 SSH 失败：%w", err)
+	}
+	client := ssh.NewClient(conn, chans, reqs)
+	cleanup := func() {
+		_ = client.Close()
+		_ = bClient.Close()
+	}
+	return client, cleanup, nil
+}
+
+func (d *Driver) deployCert(logf func(string, ...any), target *model.ACMESSHTarget, cert model.ACMECert, opts DeployOptions) error {
+	opts.normalize()
+	if err := opts.validate(); err != nil {
+		return err
+	}
+	client, cleanup, err := d.dialSSH(logf, target)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	files := []struct {
 		label string
