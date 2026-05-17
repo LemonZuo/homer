@@ -12,8 +12,8 @@ Homer 是一个自用的小管家工具集，用来跑主动型、轻量级的�
 - 事项提醒：体检、续费、办事截止日这类一次性日期，提前几天开始提醒，同一天不重复吵你。
 - 调度面板：看每个任务几点跑、上次跑得怎样；需要时也可以点一下“现在就跑”。
 - ACME 证书管理：维护 ACME 账号、DNS provider 凭证、域名、签发任务、证书产物和续期任务。
-- 证书部署：证书签好以后，可以继续送到 SSH 机器或雷池 SafeLine，不用手动复制粘贴。
-- 阿里云 CAS / CDN：查看 CAS 证书，删除证书，将证书部署到 CDN，加速域名只读查看。
+- 证书部署：证书签好以后，可以继续送到 SSH 机器、雷池 SafeLine 或阿里云 CAS，不用手动复制粘贴；失败的部署任务有定时重试和手动重试。
+- 阿里云 CAS / CDN：查看 CAS 证书库存、删除证书、把证书一键部署到 CDN，加速域名只读查看。
 - 短信转发器：对接 SmsForwarder Android，查询配置、发送短信、查短信记录都走一个页面。
 - 12306Bypass webhook 转发：接收分流抢票助手 webhook，再转发到企业微信和 Resend 邮件。
 
@@ -36,18 +36,23 @@ homer/
 ├── main.go                 # 入口，组装配置、数据库、服务、路由和调度器
 ├── wire.go                 # ACME / scheduler 依赖组装
 ├── internal/
-│   ├── acme/               # ACME 签发、续期、部署、SSE 日志
+│   ├── acme/               # ACME 签发、续期、部署（SSH/SafeLine/alicas）、SSE 日志
+│   ├── aliyun/             # 阿里云 SDK 客户端封装
 │   ├── birthday/           # 生日提醒任务
-│   ├── cas/                # 阿里云 CAS 服务
-│   ├── cdn/                # 阿里云 CDN 服务
+│   ├── cas/                # 阿里云 CAS 证书查询/删除/部署到 CDN
+│   ├── cdn/                # 阿里云 CDN 加速域名查询
+│   ├── chinesedate/        # 农历/生肖换算
 │   ├── config/             # .env 配置加载
 │   ├── db/                 # GORM MySQL 初始化
 │   ├── event/              # 事项提醒任务
 │   ├── handler/            # HTTP handler
+│   ├── jobmonitor/         # 调度任务失败计数 + 告警门槛
+│   ├── logx/               # slog 结构化日志封装
 │   ├── model/              # GORM 模型
 │   ├── notify/             # 企业微信、邮件等通知适配
 │   ├── router/             # API 和 SPA 路由
 │   ├── scheduler/          # 进程内 cron 调度器
+│   ├── sms/                # SmsForwarder 适配
 │   └── web/                # embedded SPA handler
 ├── frontend/               # React 前端
 ├── sql/                    # 首次建表 SQL
@@ -84,23 +89,28 @@ DB_PASSWORD=
 DB_NAME=homer
 DB_CHARSET=utf8mb4
 SERVER_PORT=8081
+LOG_LEVEL=info
 ```
 
 可选配置按模块启用：
 
 | 配置项 | 用途 |
 | --- | --- |
-| `WEWORK_BIRTHDAY_*` | 生日提醒企业微信应用配置 |
+| `LOG_LEVEL` | slog 日志级别，可选 `debug` / `info` / `warn` / `error`，默认 `info` |
 | `BIRTHDAY_REMIND_CRON` | 生日提醒 cron，6 段格式：秒 分 时 日 月 周；留空则只支持手动触发 |
-| `WEWORK_EVENT_*` | 事项提醒企业微信应用配置 |
 | `EVENT_REMIND_CRON` | 事项提醒 cron；留空则只支持手动触发 |
 | `ALIYUN_CDN_ACCESS_KEY_ID` / `ALIYUN_CDN_ACCESS_KEY_SECRET` | 阿里云 CDN 加速域名管理 |
-| `ALIYUN_CAS_ACCESS_KEY_ID` / `ALIYUN_CAS_ACCESS_KEY_SECRET` | 阿里云 CAS 数字证书管理 |
+| `ALIYUN_CAS_ACCESS_KEY_ID` / `ALIYUN_CAS_ACCESS_KEY_SECRET` | 阿里云 CAS 证书列表和「CAS → CDN」部署的全局凭证；ACME 内部的 alicas 部署 driver 使用 per-target 凭证 |
 | `ACME_DATA_DIR` | ACME 账号私钥和签发工作目录，默认 `./data/acme` |
 | `ACME_RENEW_BEFORE_DAYS` | 证书剩余天数小于等于该值时自动续期，默认 `30` |
 | `ACME_RENEW_CRON` | ACME 自动续期检查 cron |
-| `WEWORK_BYPASS_*` | 12306Bypass webhook 的企业微信转发配置 |
-| `RESEND_API_KEY` / `BYPASS_EMAIL_*` | 12306Bypass webhook 的邮件转发配置 |
+| `ACME_KEY_TYPE` | 证书密钥类型，可选 `ec256` / `ec384` / `rsa2048` / `rsa4096` 等，默认 `ec256` |
+| `ACME_DEPLOY_RETRY` | 单次部署失败的自动重试次数（同次任务内立即重试），默认 `3` |
+| `ACME_DEPLOY_RETRY_BACKOFF_SEC` | 同次部署内重试之间的等待秒数，默认 `10` |
+| `ACME_DEPLOY_RETRY_CRON` | 失败部署任务的兜底重试 cron；留空则不启用 |
+| `SCHEDULER_ALERT_FAIL_THRESHOLD` | 调度任务连续失败多少次触发告警，默认 `1` |
+
+> 通知通道（企业微信应用、Webhook、邮件等）不再从 env 读取，统一在数据库里维护，通过 `/api/notify/*` 或 UI 配置；生日 / 事项 / 12306Bypass 等模块运行时按通道名引用即可。
 
 cron 使用 `robfig/cron/v3` 的秒级格式，必须是 6 段，例如：
 
@@ -119,6 +129,8 @@ mysql -uroot -p homer < sql/00_schema.sql
 ```
 
 注意：`sql/00_schema.sql` 大部分表使用 `DROP TABLE IF EXISTS`，适合全新初始化。已有数据的环境不要直接重跑，应先按 SQL 内容整理增量迁移。这条提醒不有趣，但很重要。
+
+`sql/0X_*.sql` 是增量迁移脚本（命名按时间顺序），全部用存储过程做幂等保护，可重复执行；新装库时按编号依次跑一遍即可。
 
 当前后端启动时只会自动迁移 `sms_forwarder`，其他业务表依赖 `sql/` 里的建表语句。
 
@@ -292,10 +304,17 @@ dist/server-linux-arm64
 | `POST /api/event/:id/notify` | 手动推送单条事项提醒 |
 | `GET /api/scheduler/jobs` | 调度任务列表 |
 | `POST /api/scheduler/jobs/:name/run` | 手动触发调度任务 |
+| `/api/notify/*` | 通知通道配置 |
 | `GET /api/cdn/domains` | 阿里云 CDN 加速域名 |
-| `/api/cas/certificates` | 阿里云 CAS 证书列表和删除 |
+| `/api/cas/certificates` | 阿里云 CAS 证书列表和删除（全局凭证） |
 | `POST /api/cas/deploy` | 将 CAS 证书部署到 CDN |
-| `/api/acme/*` | ACME 账号、凭证、域名、任务、部署配置 |
+| `/api/acme/accounts` | ACME 账号 CRUD |
+| `/api/acme/credentials` 、`/api/acme/ssh-credentials` | DNS provider 与 SSH 凭证 |
+| `/api/acme/domains` | 域名 CRUD、签发、吊销、证书查询 |
+| `/api/acme/{ssh,safeline,cas}-targets` | 各类部署目标 CRUD + 连通性测试 |
+| `/api/acme/domains/:id/{ssh,safeline,cas}-deploy-configs` | 域名 → 部署目标的绑定 |
+| `/api/acme/deploy/configs/:id/deploy` | 触发单个部署 |
+| `/api/acme/tasks` 、 `POST /api/acme/tasks/:id/retry` 、 `GET /api/acme/tasks/:id/stream` | 任务历史、手动重试、SSE 实时日志 |
 | `/api/sms/*` | SmsForwarder 配置、发送、查询 |
 | `POST /api/byPass/receive` | 12306Bypass webhook 接收入口 |
 
@@ -303,9 +322,10 @@ dist/server-linux-arm64
 
 1. 先创建 ACME 账号，也就是告诉 Homer 去哪里签证书。支持 Let's Encrypt、ZeroSSL 或自定义 ACME directory。ZeroSSL 的 EAB 信息存储在数据库中。
 2. 再创建 DNS provider 凭证，也就是告诉 Homer 怎么完成 DNS-01 校验。已实现深度校验的 provider 包括 `cloudflare`、`dnspod`、`alidns`、`tencentcloud`、`huaweicloud`。
-3. 创建域名配置，选择 ACME 账号和 DNS provider。
+3. 创建域名配置，选择 ACME 账号和 DNS provider；密钥类型默认走全局 `ACME_KEY_TYPE`。
 4. 手动签发一次确认链路可用，之后交给 `ACME_RENEW_CRON` 自动检查临期证书。
-5. 需要部署时，配置部署目标和部署配置。当前支持 SSH 和 SafeLine。
+5. 需要部署时，配置部署目标和部署配置。当前支持 SSH、雷池 SafeLine、阿里云 CAS（`alicas`）三种 driver。
+6. 部署失败会先按 `ACME_DEPLOY_RETRY` 在同次任务内重试；仍失败的会被 `ACME_DEPLOY_RETRY_CRON` 定时捞起来补，也可以在 UI 的任务历史里手动重试。
 
 ACME 签发产物既会写入数据库，也会使用 `ACME_DATA_DIR` 作为本地工作目录。生产部署时应确保该目录持久化。
 

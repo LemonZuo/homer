@@ -43,6 +43,7 @@ const JOB_META: Record<string, { icon: ComponentType<{ className?: string }>; la
   birthday: { icon: Cake, label: '生日提醒' },
   event: { icon: CalendarClock, label: '事项提醒' },
   'acme-renew': { icon: ShieldCheck, label: 'ACME 续期' },
+  'acme-deploy-retry': { icon: RefreshCw, label: '部署失败重试' },
 }
 
 function fmtTime(v?: string): string {

@@ -6,8 +6,9 @@
 
 个人「小管家」型工具集，跑一些**主动型**的轻量任务，例如：
 
-- 证书管理（ACME 自动续期、CAS 证书归档、加速域名管理）
+- 证书管理（ACME 自动续期、部署到 SSH / SafeLine / 阿里云 CAS、失败重试；阿里云 CAS 证书归档、CDN 加速域名只读查看）
 - 生日 / 纪念日提醒
+- SmsForwarder 短信转发、12306Bypass webhook 中转
 - 其他偶尔会扩进来的自用小功能
 
 姊妹项目 `account-vault` 负责**被动型**的凭证 CRUD；这里专门放需要后台调度、外部交互的功能，二者分仓维护以避免概念混淆。
@@ -24,16 +25,24 @@
 ```
 homer/
 ├── main.go
+├── wire.go          # ACME / scheduler 等依赖组装
 ├── go.mod / go.sum
 ├── .env / .env.example
 ├── internal/
+│   ├── acme/        # 签发、续期、部署 driver（ssh/safeline/alicas）、SSE
+│   ├── aliyun/      # 阿里云 SDK 客户端封装
 │   ├── buildinfo/   # 版本/commit 注入
-│   ├── config/
-│   ├── db/
-│   ├── model/       # 业务模型（按模块拆分文件即可）
+│   ├── cas/、cdn/   # 阿里云 CAS/CDN 查询与 CAS→CDN 部署
+│   ├── chinesedate/ # 农历/生肖
+│   ├── config/、db/
 │   ├── handler/     # crud.go 通用 CRUD；业务专用 handler 单独文件
-│   ├── router/
+│   ├── jobmonitor/  # 任务失败计数 + 告警门槛
+│   ├── logx/        # slog 结构化日志封装
+│   ├── model/       # 业务模型（按模块拆分文件即可）
+│   ├── notify/、sms/
+│   ├── router/、scheduler/
 │   └── web/
+├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程）
 └── frontend/
     ├── dist/        # vite 产物，被 go:embed 引用
     └── src/
@@ -86,5 +95,7 @@ go build -ldflags="-s -w" -o bin/server .   # -s -w 去掉符号表/调试信息
 
 - go.mod 要求 Go ≥ 1.25，开发用 `/opt/module/go/go1.25.0`
 - 默认面向可信网络环境；如证书等模块需要回连外网，应明确文档化端口暴露范围
-- 后台任务（cron / 续期 worker 等）建议集中在 `internal/scheduler/`（待建），主进程内启动，单 binary 不引入额外组件
+- 后台任务（cron / 续期 worker / 部署重试等）集中在 `internal/scheduler/`，主进程内启动，单 binary 不引入额外组件；任务失败计数走 `internal/jobmonitor/`
+- 日志统一走 `internal/logx`（slog 结构化），级别由 `LOG_LEVEL` env 控制
+- schema 变更走「`sql/0X_*.sql` 增量脚本 + GORM AutoMigrate」双轨：两边都要补，迁移脚本用存储过程做幂等
 - Tailwind 用的是 v4（`@import "tailwindcss";`），没有 `tailwind.config.js`，配置通过 CSS 变量即可
