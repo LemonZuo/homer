@@ -88,7 +88,7 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config, casSvc *cas.Service) 
 	configs := acme.NewDeployConfigStore(gormDB, targets, registry)
 	return acme.NewService(
 		gormDB,
-		acme.NewManager(cfg.ACMEDataDir),
+		acme.NewManager(cfg.ACMEDataDir, cfg.ACMEKeyType),
 		acme.NewCredentialStore(gormDB),
 		sshCreds,
 		acme.NewAccountStore(gormDB),

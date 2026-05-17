@@ -98,14 +98,33 @@ type Client struct {
 // Manager 维护 ACME 账号本地缓存；签发时按域名绑定的账号生成短期 Client。
 type Manager struct {
 	dataDir    string
+	keyType    certcrypto.KeyType
 	accountMu  sync.Mutex
 	cachedUser map[int64]*acmeUser
 }
 
-func NewManager(dataDir string) *Manager {
+func NewManager(dataDir, keyType string) *Manager {
 	// lego 默认 logger 输出到 stderr；我们的 Service 会再包一层带 io.Writer 的 logger。
 	legolog.Logger = nopLogger{}
-	return &Manager{dataDir: dataDir, cachedUser: map[int64]*acmeUser{}}
+	return &Manager{dataDir: dataDir, keyType: parseKeyType(keyType), cachedUser: map[int64]*acmeUser{}}
+}
+
+// parseKeyType 把配置字符串映射到 lego 的 KeyType，未知值回退 EC256。
+func parseKeyType(s string) certcrypto.KeyType {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "ec384", "p384":
+		return certcrypto.EC384
+	case "rsa2048", "2048":
+		return certcrypto.RSA2048
+	case "rsa3072", "3072":
+		return certcrypto.RSA3072
+	case "rsa4096", "4096":
+		return certcrypto.RSA4096
+	case "rsa8192", "8192":
+		return certcrypto.RSA8192
+	default:
+		return certcrypto.EC256
+	}
 }
 
 // EnsureAccount 加载或注册 ACME 账号。账号文件存 <dataDir>/account/{ca}/...
@@ -148,7 +167,7 @@ func (m *Manager) EnsureAccount(opts CAOptions) (*acmeUser, error) {
 	}
 	cfg := lego.NewConfig(user)
 	cfg.CADirURL = dirURL
-	cfg.Certificate.KeyType = certcrypto.RSA2048
+	cfg.Certificate.KeyType = m.keyType
 	client, err := lego.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("lego.NewClient: %w", err)
@@ -188,7 +207,7 @@ func (m *Manager) newClient(opts CAOptions, logw io.Writer) (*Client, error) {
 	}
 	cfg := lego.NewConfig(user)
 	cfg.CADirURL = dirURL
-	cfg.Certificate.KeyType = certcrypto.RSA2048
+	cfg.Certificate.KeyType = m.keyType
 	c, err := lego.NewClient(cfg)
 	if err != nil {
 		return nil, err

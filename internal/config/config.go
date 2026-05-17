@@ -32,6 +32,7 @@ type Config struct {
 	ACMEDataDir         string // ./data/acme
 	ACMERenewBeforeDays int    // 剩余天数 ≤ 此值则续期
 	ACMERenewCron       string // cron 表达式
+	ACMEKeyType         string // 证书密钥类型：ec256 | ec384 | rsa2048 | rsa3072 | rsa4096 | rsa8192（默认 ec256）
 
 	// 部署任务失败重试。仅作用于持久化部署配置触发的任务（手动单条 / 按域名 / 续期后自动）；
 	// 临时部署（ad-hoc，无法重建配置）不重试。重试由 cron 择时拉起，不在任务内 sleep。
@@ -69,6 +70,7 @@ func Load() *Config {
 		ACMEDataDir:         env("ACME_DATA_DIR", "./data/acme"),
 		ACMERenewBeforeDays: envInt("ACME_RENEW_BEFORE_DAYS", 30),
 		ACMERenewCron:       env("ACME_RENEW_CRON", "0 0 3 * * *"),
+		ACMEKeyType:         env("ACME_KEY_TYPE", "ec256"),
 
 		ACMEDeployRetry:           envInt("ACME_DEPLOY_RETRY", 3),
 		ACMEDeployRetryBackoffSec: envInt("ACME_DEPLOY_RETRY_BACKOFF_SEC", 10),
