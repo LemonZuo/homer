@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
 	acmeproviders "github.com/LemonZuo/homer/internal/acme/providers"
 
@@ -13,8 +12,7 @@ import (
 
 func (h *Handler) listCredentials(c *gin.Context) {
 	items, err := h.svc.Credentials().List()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if serverErr(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -26,8 +24,7 @@ func (h *Handler) upsertCredential(c *gin.Context) {
 		EnvsJSON  string `json:"envs_json"`
 		SkipCheck bool   `json:"skip_check"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &body) {
 		return
 	}
 	warn := ""
@@ -46,8 +43,7 @@ func (h *Handler) upsertCredential(c *gin.Context) {
 		}
 	}
 	row, err := h.svc.Credentials().Upsert(body.Provider, body.EnvsJSON)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	resp := gin.H{"data": row}
@@ -58,9 +54,8 @@ func (h *Handler) upsertCredential(c *gin.Context) {
 }
 
 func (h *Handler) deleteCredential(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	if err := h.svc.Credentials().Delete(id); err != nil {

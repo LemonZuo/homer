@@ -2,7 +2,6 @@ package acme
 
 import (
 	"net/http"
-	"strconv"
 
 	acmesvc "github.com/LemonZuo/homer/internal/acme"
 	"github.com/LemonZuo/homer/internal/model"
@@ -12,8 +11,7 @@ import (
 
 func (h *Handler) listFnOSTargets(c *gin.Context) {
 	items, err := h.fnosTargets.List()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if serverErr(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -21,43 +19,37 @@ func (h *Handler) listFnOSTargets(c *gin.Context) {
 
 func (h *Handler) upsertFnOSTarget(c *gin.Context) {
 	var t model.ACMEFnOSTarget
-	if err := c.ShouldBindJSON(&t); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &t) {
 		return
 	}
 	t.ID = 0
 	row, err := h.fnosTargets.Upsert(&t)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
 func (h *Handler) updateFnOSTarget(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	var t model.ACMEFnOSTarget
-	if err := c.ShouldBindJSON(&t); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &t) {
 		return
 	}
 	t.ID = id
 	row, err := h.fnosTargets.Upsert(&t)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
 func (h *Handler) deleteFnOSTarget(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	if err := h.fnosTargets.Delete(id); err != nil {
@@ -68,9 +60,8 @@ func (h *Handler) deleteFnOSTarget(c *gin.Context) {
 }
 
 func (h *Handler) testFnOSTarget(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	if err := h.fnosTargets.Test(id); err != nil {
@@ -81,48 +72,41 @@ func (h *Handler) testFnOSTarget(c *gin.Context) {
 }
 
 func (h *Handler) listFnOSDeployConfigs(c *gin.Context) {
-	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || domainID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	domainID, ok := parseID(c)
+	if !ok {
 		return
 	}
 	items, err := h.fnosDeploys.ListByDomain(domainID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if serverErr(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
 }
 
 func (h *Handler) upsertFnOSDeployConfig(c *gin.Context) {
-	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || domainID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	domainID, ok := parseID(c)
+	if !ok {
 		return
 	}
 	var cfg model.ACMEFnOSDeployConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &cfg) {
 		return
 	}
 	cfg.ID = 0
 	row, err := h.fnosDeploys.Upsert(domainID, &cfg)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
 func (h *Handler) updateFnOSDeployConfig(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	var cfg model.ACMEFnOSDeployConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &cfg) {
 		return
 	}
 	if cfg.DomainID <= 0 {
@@ -131,17 +115,15 @@ func (h *Handler) updateFnOSDeployConfig(c *gin.Context) {
 	}
 	cfg.ID = id
 	row, err := h.fnosDeploys.Upsert(cfg.DomainID, &cfg)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
 func (h *Handler) deleteFnOSDeployConfig(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	if err := h.fnosDeploys.Delete(id); err != nil {
@@ -152,28 +134,24 @@ func (h *Handler) deleteFnOSDeployConfig(c *gin.Context) {
 }
 
 func (h *Handler) deployFnOSConfig(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	taskID, err := h.svc.DeployConfigTaskAsync(id)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
 }
 
 func (h *Handler) deployFnOSConfigsByDomain(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	taskIDs, err := h.svc.DeployConfigsByDomainAsync(id, acmesvc.DeployKindFnOS)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_ids": taskIDs}})

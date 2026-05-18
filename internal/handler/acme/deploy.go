@@ -2,15 +2,13 @@ package acme
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
 func (h *Handler) listDeployTargets(c *gin.Context) {
 	items, err := h.svc.DeployTargets().List(c.Query("kind"))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if serverErr(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -18,43 +16,37 @@ func (h *Handler) listDeployTargets(c *gin.Context) {
 
 func (h *Handler) upsertDeployTarget(c *gin.Context) {
 	var body deployTargetPayload
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &body) {
 		return
 	}
 	t := body.toModel(0)
 	row, err := h.svc.DeployTargets().Upsert(&t)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
 func (h *Handler) updateDeployTarget(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	var body deployTargetPayload
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &body) {
 		return
 	}
 	t := body.toModel(id)
 	row, err := h.svc.DeployTargets().Upsert(&t)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
 func (h *Handler) deleteDeployTarget(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	if err := h.svc.DeployTargets().Delete(id); err != nil {
@@ -65,9 +57,8 @@ func (h *Handler) deleteDeployTarget(c *gin.Context) {
 }
 
 func (h *Handler) testDeployTarget(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	if err := h.svc.DeployTargets().Test(c.Request.Context(), id); err != nil {
@@ -78,48 +69,41 @@ func (h *Handler) testDeployTarget(c *gin.Context) {
 }
 
 func (h *Handler) listDeployConfigs(c *gin.Context) {
-	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || domainID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	domainID, ok := parseID(c)
+	if !ok {
 		return
 	}
 	items, err := h.svc.DeployConfigs().ListByDomain(domainID, c.Query("kind"))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if serverErr(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
 }
 
 func (h *Handler) upsertDeployConfig(c *gin.Context) {
-	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || domainID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	domainID, ok := parseID(c)
+	if !ok {
 		return
 	}
 	var body deployConfigPayload
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &body) {
 		return
 	}
 	cfg := body.toModel(0)
 	row, err := h.svc.DeployConfigs().Upsert(domainID, &cfg)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
 func (h *Handler) updateDeployConfig(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	var body deployConfigPayload
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+	if !bindJSON(c, &body) {
 		return
 	}
 	cfg := body.toModel(id)
@@ -128,17 +112,15 @@ func (h *Handler) updateDeployConfig(c *gin.Context) {
 		return
 	}
 	row, err := h.svc.DeployConfigs().Upsert(cfg.DomainID, &cfg)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
 func (h *Handler) deleteDeployConfig(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	if err := h.svc.DeployConfigs().Delete(id); err != nil {
@@ -149,28 +131,24 @@ func (h *Handler) deleteDeployConfig(c *gin.Context) {
 }
 
 func (h *Handler) deployConfig(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	taskID, err := h.svc.DeployConfigTaskAsync(id)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
 }
 
 func (h *Handler) deployConfigsByDomain(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	taskIDs, err := h.svc.DeployConfigsByDomainAsync(id, c.Query("kind"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if badReq(c, err) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_ids": taskIDs}})

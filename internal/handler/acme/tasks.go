@@ -19,8 +19,7 @@ func (h *Handler) listTasks(c *gin.Context) {
 		status = ""
 	}
 	items, total, err := h.svc.ListTasks(page, pageSize, status)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if serverErr(c, err) {
 		return
 	}
 	if page <= 0 {
@@ -33,14 +32,12 @@ func (h *Handler) listTasks(c *gin.Context) {
 }
 
 func (h *Handler) getTask(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	t, err := h.svc.GetTask(id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if serverErr(c, err) {
 		return
 	}
 	if t == nil {
@@ -51,9 +48,8 @@ func (h *Handler) getTask(c *gin.Context) {
 }
 
 func (h *Handler) retryTask(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	if err := h.svc.RetryDeployTaskNow(id); err != nil {
@@ -66,14 +62,12 @@ func (h *Handler) retryTask(c *gin.Context) {
 // streamTask SSE 推送任务日志。若任务已结束（FinishedAt 非空），
 // 直接一次性发完 log_text 并关闭；运行中则订阅 hub。
 func (h *Handler) streamTask(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+	id, ok := parseID(c)
+	if !ok {
 		return
 	}
 	t, err := h.svc.GetTask(id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if serverErr(c, err) {
 		return
 	}
 	if t == nil {
