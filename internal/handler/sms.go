@@ -3,8 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/sms"
 
@@ -13,22 +15,86 @@ import (
 )
 
 type SMSHandler struct {
-	DB   *gorm.DB
-	crud *CRUD[model.SmsForwarder]
+	DB *gorm.DB
 }
 
 func NewSMSHandler(db *gorm.DB) *SMSHandler {
-	return &SMSHandler{DB: db, crud: NewCRUD[model.SmsForwarder](db)}
+	return &SMSHandler{DB: db}
 }
 
 func (h *SMSHandler) Register(api *gin.RouterGroup) {
 	g := api.Group("/sms")
 	// 转发器配置 CRUD：/api/sms/forwarders
-	h.crud.Register(g, "/forwarders")
+	f := g.Group("/forwarders")
+	f.GET("", h.forwardersList)
+	f.POST("", h.forwarderCreate)
+	f.PUT("/:id", h.forwarderUpdate)
+	f.DELETE("/:id", h.forwarderDelete)
 	// 操作：均需带 target_id 指定使用哪台转发器
 	g.POST("/config/query", h.configQuery)
 	g.POST("/send", h.send)
 	g.POST("/query", h.query)
+}
+
+func (h *SMSHandler) forwardersList(c *gin.Context) {
+	var items []model.SmsForwarder
+	if err := h.DB.Order("id ASC").Find(&items).Error; err != nil {
+		logx.Error("sms forwarders list failed", "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *SMSHandler) forwarderCreate(c *gin.Context) {
+	var item model.SmsForwarder
+	if err := c.ShouldBindJSON(&item); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.DB.Create(&item).Error; err != nil {
+		logx.Error("sms forwarder create failed", "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": item})
+}
+
+func (h *SMSHandler) forwarderUpdate(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var item model.SmsForwarder
+	if err := c.ShouldBindJSON(&item); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.DB.Model(&model.SmsForwarder{}).
+		Where("id = ?", id).
+		Select("*").
+		Omit("id").
+		Updates(item).Error; err != nil {
+		logx.Error("sms forwarder update failed", "id", id, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": item})
+}
+
+func (h *SMSHandler) forwarderDelete(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.DB.Where("id = ?", id).Delete(&model.SmsForwarder{}).Error; err != nil {
+		logx.Error("sms forwarder delete failed", "id", id, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // resolve 根据 target_id 取出启用的转发器并构造客户端。

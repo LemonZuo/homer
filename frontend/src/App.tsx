@@ -1,10 +1,10 @@
 import { Suspense, lazy, type ReactElement } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
-import TableView from './components/TableView'
-import { tables } from './tables'
-import { getPage } from './pages'
+import { pages, getPage } from './pages'
 
+const BirthdayPage = lazy(() => import('./components/BirthdayPage'))
+const EventPage = lazy(() => import('./components/EventPage'))
 const CdnOpsPage = lazy(() => import('./components/CdnOpsPage'))
 const CertStorePage = lazy(() => import('./components/CertStorePage'))
 const AcmePage = lazy(() => import('./components/AcmePage'))
@@ -16,7 +16,7 @@ function Empty() {
   return (
     <div className="mx-auto max-w-md px-4 py-20 text-center text-muted-foreground">
       <p className="text-[15px] font-medium">还没有任何模块</p>
-      <p className="mt-2 text-[13px]">在 <code>src/tables.ts</code> 添加业务模块。</p>
+      <p className="mt-2 text-[13px]">在 <code>src/pages.ts</code> 添加业务模块。</p>
     </div>
   )
 }
@@ -30,6 +30,8 @@ function PageFallback() {
 }
 
 const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
+  birthday: () => <BirthdayPage />,
+  event: () => <EventPage />,
   cdn: () => <CdnOpsPage />,
   cas: () => <CertStorePage />,
   acme: () => <AcmePage />,
@@ -47,15 +49,14 @@ function CustomPage() {
 }
 
 export default function App() {
-  const first = tables[0]?.key
+  const first = pages[0]?.key
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route
           index
-          element={first ? <Navigate to={`/t/${first}`} replace /> : <Empty />}
+          element={first ? <Navigate to={`/p/${first}`} replace /> : <Empty />}
         />
-        <Route path="t/:tableKey" element={<TableView />} />
         <Route path="p/:pageKey" element={<CustomPage />} />
       </Route>
     </Routes>

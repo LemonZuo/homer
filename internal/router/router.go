@@ -7,25 +7,12 @@ import (
 	"github.com/LemonZuo/homer/internal/buildinfo"
 	"github.com/LemonZuo/homer/internal/handler"
 	acmehandler "github.com/LemonZuo/homer/internal/handler/acme"
-	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
-
-// TableMeta 描述前端展示和路由信息。
-type TableMeta struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Path  string `json:"path"`
-}
-
-var Tables = []TableMeta{
-	{Key: "birthday", Label: "生日提醒", Path: "birthday"},
-	{Key: "event", Label: "事项提醒", Path: "event"},
-}
 
 func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnopsHandler *handler.CDNOpsHandler, certstoreHandler *handler.CertStoreHandler, acmeHandler *acmehandler.Handler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, notifyHandler *handler.NotifyHandler, frontend fs.FS) *gin.Engine {
 	r := gin.Default()
@@ -37,10 +24,6 @@ func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier,
 
 	api := r.Group("/api")
 
-	api.GET("/tables", func(c *gin.Context) {
-		c.JSON(200, gin.H{"data": Tables})
-	})
-
 	api.GET("/version", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"version":  buildinfo.Version,
@@ -50,9 +33,7 @@ func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier,
 	})
 
 	handler.NewBirthdayHandler(db, notifier).Register(api)
-
-	handler.NewCRUD[model.EventReminder](db).Register(api, "/event")
-	api.POST("/event/:id/notify", handler.EventNotify(db, eventNotifier))
+	handler.NewEventHandler(db, eventNotifier).Register(api)
 
 	cdnopsHandler.Register(api)
 	certstoreHandler.Register(api)
