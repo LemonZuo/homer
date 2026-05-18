@@ -29,13 +29,13 @@ homer/
 ├── go.mod / go.sum
 ├── .env / .env.example
 ├── internal/
-│   ├── acme/        # 签发、续期、部署 driver（ssh/safeline/alicas/fnos）、SSE
+│   ├── acme/        # 签发、续期；已拆子包：deployer/{ssh,safeline}、providers/、core
 │   ├── aliyun/      # 阿里云 SDK 客户端封装
 │   ├── buildinfo/   # 版本/commit 注入
-│   ├── cas/、cdn/   # 阿里云 CAS/CDN 查询与 CAS→CDN 部署
+│   ├── certstore/、cdnops/  # 阿里云 CAS 证书库存、CDN 加速域名查询与 CAS→CDN 部署
 │   ├── chinesedate/ # 农历/生肖
 │   ├── config/、db/
-│   ├── handler/     # crud.go 通用 CRUD；业务专用 handler 单独文件
+│   ├── handler/     # 业务专用 handler 单独文件（通用 CRUD 已弃用删除）
 │   ├── jobmonitor/  # 任务失败计数 + 告警门槛
 │   ├── logx/        # slog 结构化日志封装
 │   ├── model/       # 业务模型（按模块拆分文件即可）
@@ -46,9 +46,9 @@ homer/
 └── frontend/
     ├── dist/        # vite 产物，被 go:embed 引用
     └── src/
-        ├── App.tsx
+        ├── App.tsx      # 路由 + 懒加载页面映射
         ├── api.ts
-        ├── tables.ts
+        ├── pages.ts     # 页面/导航登记表（每页自包含，无声明式 CRUD）
         ├── components/
         └── index.css
 ```

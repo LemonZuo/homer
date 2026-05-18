@@ -296,7 +296,6 @@ dist/server-linux-arm64
 | 路径 | 说明 |
 | --- | --- |
 | `GET /api/version` | 当前版本和 commit |
-| `GET /api/tables` | 前端通用表配置 |
 | `/api/birthday` | 生日提醒 CRUD |
 | `POST /api/birthday/:id/notify` | 手动推送单条生日提醒 |
 | `/api/event` | 事项提醒 CRUD |
@@ -304,15 +303,15 @@ dist/server-linux-arm64
 | `GET /api/scheduler/jobs` | 调度任务列表 |
 | `POST /api/scheduler/jobs/:name/run` | 手动触发调度任务 |
 | `/api/notify/*` | 通知通道配置 |
-| `GET /api/cdn/domains` | 阿里云 CDN 加速域名 |
-| `/api/cas/certificates` | 阿里云 CAS 证书列表和删除（全局凭证） |
-| `POST /api/cas/deploy` | 将 CAS 证书部署到 CDN |
+| `GET /api/cdnops/domains` | 阿里云 CDN 加速域名 |
+| `/api/certstore/certificates` | 阿里云 CAS 证书列表和删除（全局凭证） |
+| `POST /api/certstore/deploy` | 将 CAS 证书部署到 CDN |
 | `/api/acme/accounts` | ACME 账号 CRUD |
 | `/api/acme/credentials` 、`/api/acme/ssh-credentials` | DNS provider 与 SSH 凭证 |
 | `/api/acme/domains` | 域名 CRUD、签发、吊销、证书查询 |
-| `/api/acme/{ssh,safeline,cas,fnos}-targets` | 各类部署目标 CRUD + 连通性测试 |
-| `/api/acme/domains/:id/{ssh,safeline,cas,fnos}-deploy-configs` | 域名 → 部署目标的绑定 |
-| `/api/acme/deploy/configs/:id/deploy` | 触发单个部署 |
+| `/api/acme/deploy/targets` 、 `POST /api/acme/deploy/targets/:id/test` | 部署目标 CRUD（kind 区分 ssh/safeline/cas/fnos）+ 连通性测试 |
+| `/api/acme/domains/:id/deploy-configs` | 域名 → 部署目标的绑定 |
+| `POST /api/acme/domains/:id/deploy-configs/deploy` | 按域名触发部署 |
 | `/api/acme/tasks` 、 `POST /api/acme/tasks/:id/retry` 、 `GET /api/acme/tasks/:id/stream` | 任务历史、手动重试、SSE 实时日志 |
 | `/api/sms/*` | SmsForwarder 配置、发送、查询 |
 | `POST /api/byPass/receive` | 12306Bypass webhook 接收入口 |
