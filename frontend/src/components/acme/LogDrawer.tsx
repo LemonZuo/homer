@@ -20,7 +20,7 @@ export function LogDrawer({
 }) {
   const [lines, setLines] = useState<string[]>([])
   const [done, setDone] = useState<string | null>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const open = taskID !== null
 
   useEffect(() => {
@@ -42,7 +42,11 @@ export function LogDrawer({
   }, [taskID])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = scrollRef.current
+    if (!el) return
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
   }, [lines, done])
 
   const title = useMemo(() => (taskID ? `任务 #${taskID} 日志` : '日志'), [taskID])
@@ -87,9 +91,8 @@ export function LogDrawer({
             复制日志
           </Button>
         </DrawerHeader>
-        <div className="min-h-0 min-w-0 flex-1 overflow-auto px-4 pb-4" data-vaul-no-drag>
+        <div ref={scrollRef} className="min-h-0 min-w-0 flex-1 overflow-auto px-4 pb-4" data-vaul-no-drag>
           <pre className="m-0 w-full max-w-full cursor-text select-text whitespace-pre-wrap break-all rounded-lg border border-border bg-muted/40 p-3 font-mono text-[11.5px] leading-relaxed [overflow-wrap:anywhere]">{logText || '（暂无日志）'}</pre>
-          <div ref={bottomRef} />
         </div>
       </DrawerContent>
     </Drawer>
