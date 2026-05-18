@@ -1,34 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useState } from 'react'
 import {
-  Ban,
-  Edit3,
   KeyRound,
   Loader2,
-  Play,
   Plus,
   RefreshCw,
-  ScrollText,
-  Send,
   Server,
   ShieldCheck,
-  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
-import { avatarColor, getColorSet } from '../colors'
+import { getColorSet } from '../colors'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
-import { Select } from './ui/select'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from './ui/alert-dialog'
+import { ConfirmDialog } from './acme/ConfirmDialog'
 import { cn } from '../lib/utils'
 import type {
   AcmeAccount,
@@ -43,25 +27,12 @@ import type {
   SSHTarget,
   SafelineDeployConfig,
   SafelineTarget,
-  Task,
 } from './acme/types'
-import {
-  KIND_LABEL,
-  STATUS_LABEL,
-  STATUS_STYLE,
-  TASK_PAGE_SIZES,
-  TASK_PAGE_SIZE_KEY,
-  caLabel,
-  daysUntil,
-  fmtDate,
-  fmtDateTime,
-  readTaskPageSize,
-  splitDeployConfigs,
-  splitDeployTargets,
-} from './acme/utils'
-import { FieldRow } from './acme/FieldRow'
-import { TaskPager } from './acme/TaskPager'
+import { useAcmeData } from './acme/useAcmeData'
+import { makeDeleteHandler, type DeployConfigKind } from './acme/handlers'
 import { LogDrawer } from './acme/LogDrawer'
+import { DomainCard } from './acme/sections/DomainCard'
+import { TaskHistory } from './acme/sections/TaskHistory'
 import { DomainEditDialog } from './acme/dialogs/DomainEditDialog'
 import { SSHTargetEditDialog } from './acme/dialogs/SSHTargetEditDialog'
 import { SSHCredentialEditDialog } from './acme/dialogs/SSHCredentialEditDialog'
@@ -81,24 +52,42 @@ import { SSHCredentialsDrawer } from './acme/drawers/SSHCredentialsDrawer'
 import { DeployConfigsDrawer } from './acme/drawers/DeployConfigsDrawer'
 
 export default function AcmePage() {
-  const [domains, setDomains] = useState<Domain[]>([])
-  const [accounts, setAccounts] = useState<AcmeAccount[]>([])
-  const [sshTargets, setSSHTargets] = useState<SSHTarget[]>([])
-  const [safelineTargets, setSafelineTargets] = useState<SafelineTarget[]>([])
-  const [casTargets, setCASTargets] = useState<CASTarget[]>([])
-  const [fnosTargets, setFnOSTargets] = useState<FnOSTarget[]>([])
-  const [sshCredentials, setSSHCredentials] = useState<SSHCredential[]>([])
-  const [providers, setProviders] = useState<string[]>([])
-  const [credentials, setCredentials] = useState<Credential[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [taskPage, setTaskPage] = useState(1)
-  const [taskTotal, setTaskTotal] = useState(0)
-  const [taskPageSize, setTaskPageSize] = useState(readTaskPageSize)
-  const [taskStatus, setTaskStatus] = useState('')
-  const taskPageRef = useRef(1)
-  const taskPageSizeRef = useRef(readTaskPageSize())
-  const taskStatusRef = useRef('')
-  const [loading, setLoading] = useState(true)
+  const {
+    domains,
+    accounts,
+    sshTargets,
+    safelineTargets,
+    casTargets,
+    fnosTargets,
+    sshCredentials,
+    providers,
+    credentials,
+    loading,
+    accountSummary,
+    reloadAll,
+    reloadAccounts,
+    reloadCredentials,
+    reloadDeployTargets,
+    reloadSSHCredentials,
+    reloadDeployConfigs,
+    tasks,
+    taskPage,
+    taskTotal,
+    taskPageSize,
+    taskStatus,
+    loadTasks,
+    reloadTasks,
+    changeTaskPageSize,
+    changeTaskStatus,
+    deployConfigs,
+    deployConfigLoading,
+    safeDeployConfigs,
+    safeDeployLoading,
+    casDeployConfigs,
+    casDeployLoading,
+    fnosDeployConfigs,
+    fnosDeployLoading,
+  } = useAcmeData()
   const [busy, setBusy] = useState<string | null>(null)
 
   const [editOpen, setEditOpen] = useState(false)
@@ -106,26 +95,18 @@ export default function AcmePage() {
   const [deletePending, setDeletePending] = useState<Domain | null>(null)
   const [revokePending, setRevokePending] = useState<Domain | null>(null)
   const [deployDomain, setDeployDomain] = useState<Domain | null>(null)
-  const [deployConfigs, setDeployConfigs] = useState<SSHDeployConfig[]>([])
-  const [deployConfigLoading, setDeployConfigLoading] = useState(false)
   const [deployEditOpen, setDeployEditOpen] = useState(false)
   const [deployEditTarget, setDeployEditTarget] = useState<SSHDeployConfig | null>(null)
   const [deployDeletePending, setDeployDeletePending] = useState<SSHDeployConfig | null>(null)
   const [safeDeployDomain, setSafeDeployDomain] = useState<Domain | null>(null)
-  const [safeDeployConfigs, setSafeDeployConfigs] = useState<SafelineDeployConfig[]>([])
-  const [safeDeployLoading, setSafeDeployLoading] = useState(false)
   const [safeDeployEditOpen, setSafeDeployEditOpen] = useState(false)
   const [safeDeployEditTarget, setSafeDeployEditTarget] = useState<SafelineDeployConfig | null>(null)
   const [safeDeployDeletePending, setSafeDeployDeletePending] = useState<SafelineDeployConfig | null>(null)
   const [casDeployDomain, setCASDeployDomain] = useState<Domain | null>(null)
-  const [casDeployConfigs, setCASDeployConfigs] = useState<CASDeployConfig[]>([])
-  const [casDeployLoading, setCASDeployLoading] = useState(false)
   const [casDeployEditOpen, setCASDeployEditOpen] = useState(false)
   const [casDeployEditTarget, setCASDeployEditTarget] = useState<CASDeployConfig | null>(null)
   const [casDeployDeletePending, setCASDeployDeletePending] = useState<CASDeployConfig | null>(null)
   const [fnosDeployDomain, setFnOSDeployDomain] = useState<Domain | null>(null)
-  const [fnosDeployConfigs, setFnOSDeployConfigs] = useState<FnOSDeployConfig[]>([])
-  const [fnosDeployLoading, setFnOSDeployLoading] = useState(false)
   const [fnosDeployEditOpen, setFnOSDeployEditOpen] = useState(false)
   const [fnosDeployEditTarget, setFnOSDeployEditTarget] = useState<FnOSDeployConfig | null>(null)
   const [fnosDeployDeletePending, setFnOSDeployDeletePending] = useState<FnOSDeployConfig | null>(null)
@@ -159,298 +140,86 @@ export default function AcmePage() {
   const [sshCredDeletePending, setSSHCredDeletePending] = useState<SSHCredential | null>(null)
 
   const cs = getColorSet('emerald')
-  const accountSummary = useMemo(() => {
-    const m = new Map<number, AcmeAccount>()
-    for (const a of accounts) m.set(a.id, a)
-    return (id: number) => {
-      const a = m.get(id)
-      if (!a) return id ? `#${id}` : '未选择 CA'
-      const ca = caLabel(a.ca)
-      return a.name && a.name !== ca ? `${ca} / ${a.name}` : ca
-    }
-  }, [accounts])
 
-  const reloadAll = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [d, p, t, c, a, targets, sc] = await Promise.all([
-        api.get('/acme/domains'),
-        api.get('/acme/providers'),
-        api.get(`/acme/tasks?page=${taskPageRef.current}&page_size=${taskPageSizeRef.current}${taskStatusRef.current ? `&status=${taskStatusRef.current}` : ''}`),
-        api.get('/acme/credentials'),
-        api.get('/acme/accounts'),
-        api.get('/acme/deploy/targets'),
-        api.get('/acme/ssh-credentials'),
-      ])
-      const groupedTargets = splitDeployTargets(targets.data?.data ?? [])
-      setDomains(d.data?.data ?? [])
-      setProviders(p.data?.data ?? [])
-      setTasks(t.data?.data ?? [])
-      setTaskTotal(t.data?.total ?? 0)
-      setTaskPage(taskPageRef.current)
-      setCredentials(c.data?.data ?? [])
-      setAccounts(a.data?.data ?? [])
-      setSSHTargets(groupedTargets.ssh)
-      setSafelineTargets(groupedTargets.safeline)
-      setCASTargets(groupedTargets.cas)
-      setFnOSTargets(groupedTargets.fnos)
-      setSSHCredentials(sc.data?.data ?? [])
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const onDeleteSSHCredential = makeDeleteHandler({
+    get: () => sshCredDeletePending,
+    clear: () => setSSHCredDeletePending(null),
+    url: (c) => `/acme/ssh-credentials/${c.id}`,
+    reload: reloadSSHCredentials,
+  })
 
-  const reloadAccounts = useCallback(async () => {
-    try {
-      const { data } = await api.get('/acme/accounts')
-      setAccounts(data?.data ?? [])
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '加载 ACME 账号失败')
-    }
-  }, [])
+  const onDeleteCredential = makeDeleteHandler({
+    get: () => credDeletePending,
+    clear: () => setCredDeletePending(null),
+    url: (c) => `/acme/credentials/${c.id}`,
+    reload: reloadCredentials,
+  })
 
-  const reloadCredentials = useCallback(async () => {
-    try {
-      const [p, c] = await Promise.all([
-        api.get('/acme/providers'),
-        api.get('/acme/credentials'),
-      ])
-      setProviders(p.data?.data ?? [])
-      setCredentials(c.data?.data ?? [])
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '加载凭证失败')
-    }
-  }, [])
+  const onDeleteAccount = makeDeleteHandler({
+    get: () => accountDeletePending,
+    clear: () => setAccountDeletePending(null),
+    url: (a) => `/acme/accounts/${a.id}`,
+    reload: reloadAll,
+  })
 
-  const reloadDeployTargets = useCallback(async () => {
-    try {
-      const { data } = await api.get('/acme/deploy/targets')
-      const groupedTargets = splitDeployTargets(data?.data ?? [])
-      setSSHTargets(groupedTargets.ssh)
-      setSafelineTargets(groupedTargets.safeline)
-      setCASTargets(groupedTargets.cas)
-      setFnOSTargets(groupedTargets.fnos)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '加载部署目标失败')
-    }
-  }, [])
+  const onDeleteSSHTarget = makeDeleteHandler({
+    get: () => sshDeletePending,
+    clear: () => setSSHDeletePending(null),
+    url: (t) => `/acme/deploy/targets/${t.id}`,
+    reload: reloadDeployTargets,
+  })
 
-  const reloadSSHCredentials = useCallback(async () => {
-    try {
-      const { data } = await api.get('/acme/ssh-credentials')
-      setSSHCredentials(data?.data ?? [])
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '加载登录凭证失败')
-    }
-  }, [])
+  const onDeleteSafelineTarget = makeDeleteHandler({
+    get: () => safeDeletePending,
+    clear: () => setSafeDeletePending(null),
+    url: (t) => `/acme/deploy/targets/${t.id}`,
+    reload: reloadDeployTargets,
+  })
 
-  const onDeleteSSHCredential = async () => {
-    const c = sshCredDeletePending
-    if (!c) return
-    setSSHCredDeletePending(null)
-    try {
-      await api.delete(`/acme/ssh-credentials/${c.id}`)
-      toast.success('已删除')
-      await reloadSSHCredentials()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
+  const onDeleteCASTarget = makeDeleteHandler({
+    get: () => casDeletePending,
+    clear: () => setCASDeletePending(null),
+    url: (t) => `/acme/deploy/targets/${t.id}`,
+    reload: reloadDeployTargets,
+  })
 
-  const reloadDeployConfigs = useCallback(async (domainID: number) => {
-    setDeployConfigLoading(true)
-    setSafeDeployLoading(true)
-    setCASDeployLoading(true)
-    setFnOSDeployLoading(true)
-    try {
-      const { data } = await api.get(`/acme/domains/${domainID}/deploy-configs`)
-      const groupedConfigs = splitDeployConfigs(data?.data ?? [])
-      setDeployConfigs(groupedConfigs.ssh)
-      setSafeDeployConfigs(groupedConfigs.safeline)
-      setCASDeployConfigs(groupedConfigs.cas)
-      setFnOSDeployConfigs(groupedConfigs.fnos)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '加载部署配置失败')
-    } finally {
-      setDeployConfigLoading(false)
-      setSafeDeployLoading(false)
-      setCASDeployLoading(false)
-      setFnOSDeployLoading(false)
-    }
-  }, [])
+  const onDeleteFnOSTarget = makeDeleteHandler({
+    get: () => fnosDeletePending,
+    clear: () => setFnOSDeletePending(null),
+    url: (t) => `/acme/deploy/targets/${t.id}`,
+    reload: reloadDeployTargets,
+  })
 
-  const onDeleteCredential = async () => {
-    const c = credDeletePending
-    if (!c) return
-    setCredDeletePending(null)
-    try {
-      await api.delete(`/acme/credentials/${c.id}`)
-      toast.success('已删除')
-      await reloadCredentials()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
+  const reloadEntryConfigs = () =>
+    deployEntryDomain ? reloadDeployConfigs(deployEntryDomain.id) : undefined
 
-  const onDeleteAccount = async () => {
-    const a = accountDeletePending
-    if (!a) return
-    setAccountDeletePending(null)
-    try {
-      await api.delete(`/acme/accounts/${a.id}`)
-      toast.success('已删除')
-      await reloadAll()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
+  const onDeleteSSHDeployConfig = makeDeleteHandler({
+    get: () => deployDeletePending,
+    clear: () => setDeployDeletePending(null),
+    url: (cfg) => `/acme/deploy/configs/${cfg.id}`,
+    reload: reloadEntryConfigs,
+  })
 
-  const onDeleteSSHTarget = async () => {
-    const t = sshDeletePending
-    if (!t) return
-    setSSHDeletePending(null)
-    try {
-      await api.delete(`/acme/deploy/targets/${t.id}`)
-      toast.success('已删除')
-      await reloadDeployTargets()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
+  const onDeleteSafelineDeployConfig = makeDeleteHandler({
+    get: () => safeDeployDeletePending,
+    clear: () => setSafeDeployDeletePending(null),
+    url: (cfg) => `/acme/deploy/configs/${cfg.id}`,
+    reload: reloadEntryConfigs,
+  })
 
-  const onDeleteSafelineTarget = async () => {
-    const t = safeDeletePending
-    if (!t) return
-    setSafeDeletePending(null)
-    try {
-      await api.delete(`/acme/deploy/targets/${t.id}`)
-      toast.success('已删除')
-      await reloadDeployTargets()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
+  const onDeleteCASDeployConfig = makeDeleteHandler({
+    get: () => casDeployDeletePending,
+    clear: () => setCASDeployDeletePending(null),
+    url: (cfg) => `/acme/deploy/configs/${cfg.id}`,
+    reload: reloadEntryConfigs,
+  })
 
-  const onDeleteCASTarget = async () => {
-    const t = casDeletePending
-    if (!t) return
-    setCASDeletePending(null)
-    try {
-      await api.delete(`/acme/deploy/targets/${t.id}`)
-      toast.success('已删除')
-      await reloadDeployTargets()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
-
-  const onDeleteFnOSTarget = async () => {
-    const t = fnosDeletePending
-    if (!t) return
-    setFnOSDeletePending(null)
-    try {
-      await api.delete(`/acme/deploy/targets/${t.id}`)
-      toast.success('已删除')
-      await reloadDeployTargets()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
-
-  const onDeleteSSHDeployConfig = async () => {
-    const cfg = deployDeletePending
-    if (!cfg) return
-    setDeployDeletePending(null)
-    try {
-      await api.delete(`/acme/deploy/configs/${cfg.id}`)
-      toast.success('已删除')
-      if (deployEntryDomain) await reloadDeployConfigs(deployEntryDomain.id)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
-
-  const onDeleteSafelineDeployConfig = async () => {
-    const cfg = safeDeployDeletePending
-    if (!cfg) return
-    setSafeDeployDeletePending(null)
-    try {
-      await api.delete(`/acme/deploy/configs/${cfg.id}`)
-      toast.success('已删除')
-      if (deployEntryDomain) await reloadDeployConfigs(deployEntryDomain.id)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
-
-  const onDeleteCASDeployConfig = async () => {
-    const cfg = casDeployDeletePending
-    if (!cfg) return
-    setCASDeployDeletePending(null)
-    try {
-      await api.delete(`/acme/deploy/configs/${cfg.id}`)
-      toast.success('已删除')
-      if (deployEntryDomain) await reloadDeployConfigs(deployEntryDomain.id)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
-
-  const onDeleteFnOSDeployConfig = async () => {
-    const cfg = fnosDeployDeletePending
-    if (!cfg) return
-    setFnOSDeployDeletePending(null)
-    try {
-      await api.delete(`/acme/deploy/configs/${cfg.id}`)
-      toast.success('已删除')
-      if (deployEntryDomain) await reloadDeployConfigs(deployEntryDomain.id)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    }
-  }
-
-  useEffect(() => {
-    reloadAll()
-  }, [reloadAll])
-
-  const loadTasks = useCallback(async (page: number) => {
-    try {
-      const { data } = await api.get(
-        `/acme/tasks?page=${page}&page_size=${taskPageSizeRef.current}${taskStatusRef.current ? `&status=${taskStatusRef.current}` : ''}`,
-      )
-      setTasks(data?.data ?? [])
-      setTaskTotal(data?.total ?? 0)
-      setTaskPage(page)
-      taskPageRef.current = page
-    } catch {
-      /* silent */
-    }
-  }, [])
-
-  const reloadTasks = useCallback(async () => {
-    await loadTasks(taskPageRef.current)
-  }, [loadTasks])
-
-  const changeTaskPageSize = useCallback(
-    (size: number) => {
-      setTaskPageSize(size)
-      taskPageSizeRef.current = size
-      localStorage.setItem(TASK_PAGE_SIZE_KEY, String(size))
-      void loadTasks(1)
-    },
-    [loadTasks],
-  )
-
-  const changeTaskStatus = useCallback(
-    (status: string) => {
-      setTaskStatus(status)
-      taskStatusRef.current = status
-      void loadTasks(1)
-    },
-    [loadTasks],
-  )
+  const onDeleteFnOSDeployConfig = makeDeleteHandler({
+    get: () => fnosDeployDeletePending,
+    clear: () => setFnOSDeployDeletePending(null),
+    url: (cfg) => `/acme/deploy/configs/${cfg.id}`,
+    reload: reloadEntryConfigs,
+  })
 
   const startIssue = async (d: Domain) => {
     setBusy(`issue-${d.id}`)
@@ -492,68 +261,30 @@ export default function AcmePage() {
     void reloadDeployConfigs(d.id)
   }
 
-  const startDeploySSHConfig = async (cfg: SSHDeployConfig) => {
-    if (!deployDomain) return
-    setBusy(`deploy-ssh-config-${cfg.id}`)
-    try {
-      const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
-      const taskID = data?.data?.task_id as number
-      toast.success(`已提交 SSH 部署，任务 #${taskID}`)
-      await reloadTasks()
-      setLogTaskID(taskID)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '提交 SSH 部署失败')
-    } finally {
-      setBusy(null)
-    }
+  const DEPLOY_META: Record<
+    DeployConfigKind,
+    { word: string; reloadAfter: boolean; domain: () => Domain | null }
+  > = {
+    ssh: { word: ' SSH 部署', reloadAfter: false, domain: () => deployDomain },
+    safeline: { word: '雷池部署', reloadAfter: true, domain: () => safeDeployDomain },
+    cas: { word: ' CAS 上传', reloadAfter: true, domain: () => casDeployDomain },
+    fnos: { word: ' fnOS 部署', reloadAfter: true, domain: () => fnosDeployDomain },
   }
 
-  const startDeploySafelineConfig = async (cfg: SafelineDeployConfig) => {
-    if (!safeDeployDomain) return
-    setBusy(`deploy-safeline-config-${cfg.id}`)
+  const startDeployConfig = async (kind: DeployConfigKind, cfg: { id: number }) => {
+    const meta = DEPLOY_META[kind]
+    const dom = meta.domain()
+    if (!dom) return
+    setBusy(`deploy-${kind}-config-${cfg.id}`)
     try {
       const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
       const taskID = data?.data?.task_id as number
-      toast.success(`已提交雷池部署，任务 #${taskID}`)
+      toast.success(`已提交${meta.word}，任务 #${taskID}`)
       await reloadTasks()
-      await reloadDeployConfigs(safeDeployDomain.id)
+      if (meta.reloadAfter) await reloadDeployConfigs(dom.id)
       setLogTaskID(taskID)
     } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '提交雷池部署失败')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const startDeployCASConfig = async (cfg: CASDeployConfig) => {
-    if (!casDeployDomain) return
-    setBusy(`deploy-cas-config-${cfg.id}`)
-    try {
-      const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
-      const taskID = data?.data?.task_id as number
-      toast.success(`已提交 CAS 上传，任务 #${taskID}`)
-      await reloadTasks()
-      await reloadDeployConfigs(casDeployDomain.id)
-      setLogTaskID(taskID)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '提交 CAS 上传失败')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const startDeployFnOSConfig = async (cfg: FnOSDeployConfig) => {
-    if (!fnosDeployDomain) return
-    setBusy(`deploy-fnos-config-${cfg.id}`)
-    try {
-      const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
-      const taskID = data?.data?.task_id as number
-      toast.success(`已提交 fnOS 部署，任务 #${taskID}`)
-      await reloadTasks()
-      await reloadDeployConfigs(fnosDeployDomain.id)
-      setLogTaskID(taskID)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '提交 fnOS 部署失败')
+      toast.error(e?.response?.data?.error || e?.message || `提交${meta.word}失败`)
     } finally {
       setBusy(null)
     }
@@ -687,136 +418,22 @@ export default function AcmePage() {
       </Button>
 
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {domains.map((d) => {
-          const days = daysUntil(d.not_after)
-          const revoked = d.cert_status === 'revoked'
-          const expiring = days !== null && days <= 30
-          const expired = days !== null && days <= 0
-          const certBadge = revoked
-            ? { cls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', text: '已吊销' }
-            : expired
-            ? { cls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', text: '已过期' }
-            : expiring
-              ? {
-                  cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-                  text: `${days} 天到期`,
-                }
-              : days !== null
-                ? {
-                    cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-                    text: `${days} 天`,
-                  }
-                : { cls: 'bg-muted text-muted-foreground', text: '未签发' }
-          const issuing = busy === `issue-${d.id}`
-          const issueLabel = revoked || days !== null ? '重签' : '签发'
-          return (
-            <Card
-              key={d.id}
-              className={cn(
-                'group flex h-full flex-col overflow-hidden transition-[transform,box-shadow,border-color] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform hover:-translate-y-1',
-                cs.border,
-                cs.halo,
-              )}
-            >
-              <div className="flex items-center gap-3 px-4 pt-4">
-                <div
-                  className={cn(
-                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[13px] font-medium text-white shadow-sm',
-                    avatarColor(d.main_domain),
-                  )}
-                >
-                  {d.main_domain.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div
-                    className="truncate text-[14px] font-semibold tracking-tight"
-                    title={d.main_domain}
-                  >
-                    {d.main_domain}
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-muted-foreground line-clamp-2 sm:line-clamp-none sm:truncate">
-                    {accountSummary(d.account_id)} · {d.provider} · {d.enabled ? '自动续期' : '已停用'}
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    'shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                    certBadge.cls,
-                  )}
-                >
-                  {certBadge.text}
-                </span>
-              </div>
-
-              <div className="mt-3 space-y-0 px-4">
-                <FieldRow label="SAN" value={d.san_domains} />
-                <FieldRow label="到期" value={fmtDate(d.not_after)} />
-                <FieldRow label="签发" value={fmtDate(d.issued_at)} />
-                {revoked && <FieldRow label="吊销" value={fmtDate(d.revoked_at)} />}
-              </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2 px-4 pb-4 sm:flex sm:gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-9 sm:h-8 sm:flex-1"
-                  onClick={() => startIssue(d)}
-                  disabled={busy !== null}
-                >
-                  {issuing ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Play className="mr-1.5 h-3.5 w-3.5" />
-                  )}
-                  {issueLabel}
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-9 w-full sm:h-8 sm:w-8"
-                  onClick={() => openDeployConfigs(d)}
-                  disabled={busy !== null}
-                  title="部署配置"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-9 w-full sm:h-8 sm:w-8"
-                  onClick={() => {
-                    setEditTarget(d)
-                    setEditOpen(true)
-                  }}
-                  disabled={busy !== null}
-                  title="编辑域名"
-                >
-                  <Edit3 className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-9 w-full hover:text-destructive sm:h-8 sm:w-8"
-                  onClick={() => setRevokePending(d)}
-                  disabled={busy !== null || !d.not_after || revoked}
-                  title={!d.not_after ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : '吊销当前证书'}
-                >
-                  <Ban className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="h-9 w-full hover:text-destructive sm:h-8 sm:w-8"
-                  onClick={() => setDeletePending(d)}
-                  disabled={busy !== null}
-                  title="删除域名"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </Card>
-          )
-        })}
+        {domains.map((d) => (
+          <DomainCard
+            key={d.id}
+            d={d}
+            busy={busy}
+            accountSummary={accountSummary}
+            onIssue={startIssue}
+            onDeploy={openDeployConfigs}
+            onEdit={(dd) => {
+              setEditTarget(dd)
+              setEditOpen(true)
+            }}
+            onRevoke={setRevokePending}
+            onDelete={setDeletePending}
+          />
+        ))}
         {!loading && domains.length === 0 && (
           <Card className="col-span-full px-4 py-12 text-center text-[12.5px] text-muted-foreground">
             还没有域名，点击右上「新增域名」开始
@@ -824,102 +441,20 @@ export default function AcmePage() {
         )}
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h2 className="text-[14px] font-semibold tracking-tight">任务历史</h2>
-          <Select<string>
-            className="h-8 w-28 text-[12px]"
-            value={taskStatus}
-            onChange={changeTaskStatus}
-            options={[
-              { value: '', label: '全部状态' },
-              ...(['pending', 'running', 'success', 'failed', 'retrying'] as const).map(
-                (s) => ({ value: s, label: STATUS_LABEL[s] || s }),
-              ),
-            ]}
-          />
-        </div>
-        <div className="w-full sm:w-auto">
-          <TaskPager
-            page={taskPage}
-            pageSize={taskPageSize}
-            total={taskTotal}
-            onGo={(p) => void loadTasks(p)}
-            onPageSizeChange={changeTaskPageSize}
-          />
-        </div>
-      </div>
-      <div className="space-y-2">
-        {tasks.map((t) => (
-          <Card
-            key={t.id}
-            className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-[12.5px]"
-          >
-            <span
-              className={cn(
-                'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                STATUS_STYLE[t.status] || 'bg-muted text-muted-foreground',
-              )}
-            >
-              {STATUS_LABEL[t.status] || t.status}
-              {(t.max_attempt ?? 1) > 1 && (t.attempt ?? 0) > 0 && (
-                <span className="ml-1 opacity-70">
-                  {t.attempt}/{t.max_attempt}
-                </span>
-              )}
-            </span>
-            <span className="font-mono">#{t.id}</span>
-            <span className="font-medium">{t.main_domain}</span>
-            <span className="text-muted-foreground">{KIND_LABEL[t.kind] || t.kind}</span>
-            <span className="w-full font-mono text-[11.5px] text-muted-foreground sm:ml-auto sm:w-auto">
-              {fmtDateTime(t.started_at)}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-9 w-full sm:h-8 sm:w-auto"
-              onClick={() => setLogTaskID(t.id)}
-            >
-              <ScrollText className="mr-1.5 h-3.5 w-3.5" />
-              日志
-            </Button>
-            {(t.config_id ?? 0) > 0 &&
-              (t.status === 'failed' || t.status === 'retrying') && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-9 w-full sm:h-8 sm:w-auto"
-                  disabled={busy === `retry-${t.id}`}
-                  onClick={() => void retryTask(t.id)}
-                >
-                  {busy === `retry-${t.id}` ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  )}
-                  重试
-                </Button>
-              )}
-          </Card>
-        ))}
-        {!loading && tasks.length === 0 && (
-          <p className="py-6 text-center text-[12.5px] text-muted-foreground">
-            还没有任务
-          </p>
-        )}
-      </div>
-
-      {taskTotal > TASK_PAGE_SIZES[0] && (
-        <div className="mt-3 hidden justify-end sm:flex">
-          <TaskPager
-            page={taskPage}
-            pageSize={taskPageSize}
-            total={taskTotal}
-            onGo={(p) => void loadTasks(p)}
-            onPageSizeChange={changeTaskPageSize}
-          />
-        </div>
-      )}
+      <TaskHistory
+        tasks={tasks}
+        loading={loading}
+        taskStatus={taskStatus}
+        onStatusChange={changeTaskStatus}
+        taskPage={taskPage}
+        taskPageSize={taskPageSize}
+        taskTotal={taskTotal}
+        onGo={(p) => void loadTasks(p)}
+        onPageSizeChange={changeTaskPageSize}
+        onShowLog={setLogTaskID}
+        onRetry={(id) => void retryTask(id)}
+        busy={busy}
+      />
 
       <DomainEditDialog
         open={editOpen}
@@ -930,59 +465,34 @@ export default function AcmePage() {
         onSaved={reloadAll}
       />
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!deletePending}
-        onOpenChange={(o) => {
-          if (!o) setDeletePending(null)
-        }}
+        onClose={() => setDeletePending(null)}
+        onConfirm={onDelete}
+        title="删除域名配置"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除域名配置</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {deletePending?.main_domain}
-              </span>{' '}
-              的 ACME 配置、关联证书记录与任务流水。本地落盘的证书文件不会被删除。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDelete}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {deletePending?.main_domain}
+        </span>{' '}
+        的 ACME 配置、关联证书记录与任务流水。本地落盘的证书文件不会被删除。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!revokePending}
-        onOpenChange={(o) => {
-          if (!o) setRevokePending(null)
+        onClose={() => setRevokePending(null)}
+        onConfirm={() => {
+          if (revokePending) void startRevoke(revokePending)
         }}
+        title="吊销当前证书"
+        confirmText="吊销"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>吊销当前证书</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将向 CA 吊销{' '}
-              <span className="font-mono font-medium text-foreground">
-                {revokePending?.main_domain}
-              </span>{' '}
-              当前证书。吊销不可逆，且不会自动删除 CAS 证书或切换 CDN 配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (revokePending) void startRevoke(revokePending)
-              }}
-            >
-              吊销
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将向 CA 吊销{' '}
+        <span className="font-mono font-medium text-foreground">
+          {revokePending?.main_domain}
+        </span>{' '}
+        当前证书。吊销不可逆，且不会自动删除 CAS 证书或切换 CDN 配置。
+      </ConfirmDialog>
 
       <LogDrawer
         taskID={logTaskID}
@@ -1197,7 +707,7 @@ export default function AcmePage() {
           setDeployEditOpen(true)
         }}
         onDeleteSSH={(cfg) => setDeployDeletePending(cfg)}
-        onDeploySSH={(cfg) => void startDeploySSHConfig(cfg)}
+        onDeploySSH={(cfg) => void startDeployConfig('ssh', cfg)}
         onAddSafeline={() => {
           setSafeDeployEditTarget(null)
           setSafeDeployEditOpen(true)
@@ -1207,7 +717,7 @@ export default function AcmePage() {
           setSafeDeployEditOpen(true)
         }}
         onDeleteSafeline={(cfg) => setSafeDeployDeletePending(cfg)}
-        onDeploySafeline={(cfg) => void startDeploySafelineConfig(cfg)}
+        onDeploySafeline={(cfg) => void startDeployConfig('safeline', cfg)}
         onAddCAS={() => {
           setCASDeployEditTarget(null)
           setCASDeployEditOpen(true)
@@ -1217,7 +727,7 @@ export default function AcmePage() {
           setCASDeployEditOpen(true)
         }}
         onDeleteCAS={(cfg) => setCASDeployDeletePending(cfg)}
-        onDeployCAS={(cfg) => void startDeployCASConfig(cfg)}
+        onDeployCAS={(cfg) => void startDeployConfig('cas', cfg)}
         onAddFnOS={() => {
           setFnOSDeployEditTarget(null)
           setFnOSDeployEditOpen(true)
@@ -1227,7 +737,7 @@ export default function AcmePage() {
           setFnOSDeployEditOpen(true)
         }}
         onDeleteFnOS={(cfg) => setFnOSDeployDeletePending(cfg)}
-        onDeployFnOS={(cfg) => void startDeployFnOSConfig(cfg)}
+        onDeployFnOS={(cfg) => void startDeployConfig('fnos', cfg)}
         onDeployAll={() => void startDeployAllConfigs()}
       />
 
@@ -1293,269 +803,148 @@ export default function AcmePage() {
         }}
       />
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!deployDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setDeployDeletePending(null)
-        }}
+        onClose={() => setDeployDeletePending(null)}
+        onConfirm={onDeleteSSHDeployConfig}
+        title="删除部署配置"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除部署配置</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {deployDeletePending?.name || `#${deployDeletePending?.id}`}
-              </span>{' '}
-              的 SSH 部署配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteSSHDeployConfig}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {deployDeletePending?.name || `#${deployDeletePending?.id}`}
+        </span>{' '}
+        的 SSH 部署配置。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!safeDeployDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setSafeDeployDeletePending(null)
-        }}
+        onClose={() => setSafeDeployDeletePending(null)}
+        onConfirm={onDeleteSafelineDeployConfig}
+        title="删除雷池部署配置"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除雷池部署配置</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {safeDeployDeletePending?.name || `#${safeDeployDeletePending?.id}`}
-              </span>{' '}
-              的雷池部署配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteSafelineDeployConfig}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {safeDeployDeletePending?.name || `#${safeDeployDeletePending?.id}`}
+        </span>{' '}
+        的雷池部署配置。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!sshDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setSSHDeletePending(null)
-        }}
+        onClose={() => setSSHDeletePending(null)}
+        onConfirm={onDeleteSSHTarget}
+        title="删除 SSH 机器"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除 SSH 机器</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {sshDeletePending?.name}
-              </span>{' '}
-              的部署配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteSSHTarget}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {sshDeletePending?.name}
+        </span>{' '}
+        的部署配置。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!safeDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setSafeDeletePending(null)
-        }}
+        onClose={() => setSafeDeletePending(null)}
+        onConfirm={onDeleteSafelineTarget}
+        title="删除雷池实例"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除雷池实例</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {safeDeletePending?.name}
-              </span>{' '}
-              及其部署配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteSafelineTarget}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {safeDeletePending?.name}
+        </span>{' '}
+        及其部署配置。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!casDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setCASDeletePending(null)
-        }}
+        onClose={() => setCASDeletePending(null)}
+        onConfirm={onDeleteCASTarget}
+        title="删除阿里云 CAS 实例"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除阿里云 CAS 实例</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {casDeletePending?.name}
-              </span>{' '}
-              及其部署配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteCASTarget}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {casDeletePending?.name}
+        </span>{' '}
+        及其部署配置。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!casDeployDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setCASDeployDeletePending(null)
-        }}
+        onClose={() => setCASDeployDeletePending(null)}
+        onConfirm={onDeleteCASDeployConfig}
+        title="删除阿里云 CAS 部署配置"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除阿里云 CAS 部署配置</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {casDeployDeletePending?.name || `#${casDeployDeletePending?.id}`}
-              </span>{' '}
-              的 CAS 部署配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteCASDeployConfig}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {casDeployDeletePending?.name || `#${casDeployDeletePending?.id}`}
+        </span>{' '}
+        的 CAS 部署配置。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!fnosDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setFnOSDeletePending(null)
-        }}
+        onClose={() => setFnOSDeletePending(null)}
+        onConfirm={onDeleteFnOSTarget}
+        title="删除 fnOS 实例"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除 fnOS 实例</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {fnosDeletePending?.name}
-              </span>{' '}
-              及其部署配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteFnOSTarget}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {fnosDeletePending?.name}
+        </span>{' '}
+        及其部署配置。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!fnosDeployDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setFnOSDeployDeletePending(null)
-        }}
+        onClose={() => setFnOSDeployDeletePending(null)}
+        onConfirm={onDeleteFnOSDeployConfig}
+        title="删除 fnOS 部署配置"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除 fnOS 部署配置</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {fnosDeployDeletePending?.name || `#${fnosDeployDeletePending?.id}`}
-              </span>{' '}
-              的 fnOS 部署配置。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteFnOSDeployConfig}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {fnosDeployDeletePending?.name || `#${fnosDeployDeletePending?.id}`}
+        </span>{' '}
+        的 fnOS 部署配置。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!sshCredDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setSSHCredDeletePending(null)
-        }}
+        onClose={() => setSSHCredDeletePending(null)}
+        onConfirm={onDeleteSSHCredential}
+        title="删除登录凭证"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除登录凭证</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除登录凭证{' '}
-              <span className="font-mono font-medium text-foreground">
-                {sshCredDeletePending?.name}
-              </span>
-              ；引用了该凭证的机器将无法连接，请确认。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteSSHCredential}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除登录凭证{' '}
+        <span className="font-mono font-medium text-foreground">
+          {sshCredDeletePending?.name}
+        </span>
+        ；引用了该凭证的机器将无法连接，请确认。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!accountDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setAccountDeletePending(null)
-        }}
+        onClose={() => setAccountDeletePending(null)}
+        onConfirm={onDeleteAccount}
+        title="删除 CA 账号"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除 CA 账号</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除{' '}
-              <span className="font-mono font-medium text-foreground">
-                {accountDeletePending?.name}
-              </span>{' '}
-              账号；已被域名引用的账号不能删除。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteAccount}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除{' '}
+        <span className="font-mono font-medium text-foreground">
+          {accountDeletePending?.name}
+        </span>{' '}
+        账号；已被域名引用的账号不能删除。
+      </ConfirmDialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!credDeletePending}
-        onOpenChange={(o) => {
-          if (!o) setCredDeletePending(null)
-        }}
+        onClose={() => setCredDeletePending(null)}
+        onConfirm={onDeleteCredential}
+        title="删除 DNS 凭证"
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除 DNS 凭证</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除 provider{' '}
-              <span className="font-mono font-medium text-foreground">
-                {credDeletePending?.provider}
-              </span>{' '}
-              的凭证；已关联该 provider 的域名将无法继续签发，请确认。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onDeleteCredential}>删除</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        即将删除 provider{' '}
+        <span className="font-mono font-medium text-foreground">
+          {credDeletePending?.provider}
+        </span>{' '}
+        的凭证；已关联该 provider 的域名将无法继续签发，请确认。
+      </ConfirmDialog>
     </div>
   )
 }
