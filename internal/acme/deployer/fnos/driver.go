@@ -367,7 +367,7 @@ type deployScriptVars struct {
 // 设计取舍：
 //   - 全部通过位置参数传入，避免把 PEM 大文本塞进 here-doc；
 //   - 使用 set -euo pipefail + trap 清理临时文件，避免半路失败留垃圾；
-//   - psql 用 -tA + RETURNING domain 校验仅命中 1 行，多/少都视为失败。
+//   - psql 用 CTE 返回真实 UPDATE 命中行数，避免 RETURNING 的 command tag 干扰统计。
 func buildDeployScript(v deployScriptVars) string {
 	const tmpl = `#!/usr/bin/env bash
 set -euo pipefail
@@ -405,9 +405,9 @@ install -m 0600 "$TMP_KEY"  "$TARGET_DIR/$DOMAIN.key"
 echo "已覆盖 $DOMAIN.crt / $DOMAIN.key"
 
 NOW_MS=$(($(date +%%s%%N)/1000000))
-SQL="UPDATE cert SET valid_from=$VALID_FROM, valid_to=$VALID_TO, last_renew_time=$NOW_MS, updated_time=$NOW_MS, issued_by='$ISSUED_BY', encrypt_type='$ENCRYPT_TYPE', status='suc' WHERE domain='$DOMAIN' AND source='upload' RETURNING domain;"
-HITS=$(sudo -u postgres "$PSQL" -d "$DBNAME" -tA -c "$SQL" | wc -l)
-if [ "$HITS" -ne 1 ]; then
+SQL="WITH u AS (UPDATE cert SET valid_from=$VALID_FROM, valid_to=$VALID_TO, last_renew_time=$NOW_MS, updated_time=$NOW_MS, issued_by='$ISSUED_BY', encrypt_type='$ENCRYPT_TYPE', status='suc' WHERE domain='$DOMAIN' AND source='upload' RETURNING 1) SELECT count(*) FROM u;"
+HITS=$(sudo -u postgres "$PSQL" -d "$DBNAME" -v ON_ERROR_STOP=1 -tA -c "$SQL" | tr -d '[:space:]')
+if [ "$HITS" != "1" ]; then
   echo "psql 更新行数不为 1（实际 $HITS），请确认 cert 表里存在 domain='$DOMAIN' AND source='upload' 的行" >&2
   exit 1
 fi
