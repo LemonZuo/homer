@@ -136,6 +136,9 @@ func (h *SMSHandler) configQuery(c *gin.Context) {
 		return
 	}
 	raw, err := cli.Post("/config/query", nil)
+	if err != nil {
+		logx.Warn("sms upstream failed", "target_id", req.TargetID, "path", "/config/query", "err", err)
+	}
 	respond(c, raw, err)
 }
 
@@ -161,6 +164,9 @@ func (h *SMSHandler) send(c *gin.Context) {
 		"phone_numbers": strings.TrimSpace(req.PhoneNumbers),
 		"msg_content":   req.MsgContent,
 	})
+	if err != nil {
+		logx.Warn("sms upstream failed", "target_id", req.TargetID, "path", "/sms/send", "err", err)
+	}
 	respond(c, raw, err)
 }
 
@@ -188,6 +194,9 @@ func (h *SMSHandler) query(c *gin.Context) {
 		"page_size": req.PageSize,
 		"keyword":   req.Keyword,
 	})
+	if err != nil {
+		logx.Warn("sms upstream failed", "target_id", req.TargetID, "path", "/sms/query", "err", err)
+	}
 	respond(c, raw, err)
 }
 
