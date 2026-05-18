@@ -282,40 +282,6 @@ func TargetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget
 	return targetFromDeployTarget(target)
 }
 
-func deployTargetFromTarget(t model.ACMESSHTarget) model.ACMEDeployTarget {
-	normalizeTarget(&t)
-	auth := TargetAuth{
-		AuthSource:   t.AuthSource,
-		CredentialID: t.CredentialID,
-	}
-	if t.AuthSource == AuthSourceCredential {
-		// 凭证模式不持久化 inline 字段，避免脱节的脏数据
-		auth.Username = ""
-		auth.AuthType = ""
-		auth.Password = ""
-		auth.PrivateKey = ""
-		auth.Passphrase = ""
-	} else {
-		auth.Username = t.Username
-		auth.AuthType = t.AuthType
-		auth.Password = t.Password
-		auth.PrivateKey = t.PrivateKey
-		auth.Passphrase = t.Passphrase
-	}
-	cfg := TargetConfig{BastionTargetID: t.BastionTargetID}
-	return model.ACMEDeployTarget{
-		ID:         t.ID,
-		Name:       t.Name,
-		Kind:       acme.DeployKindSSH,
-		Endpoint:   net.JoinHostPort(t.Host, strconv.Itoa(t.Port)),
-		AuthJSON:   acme.MustJSON(auth),
-		ConfigJSON: acme.MustJSON(cfg),
-		Enabled:    t.Enabled,
-		CreatedAt:  t.CreatedAt,
-		UpdatedAt:  t.UpdatedAt,
-	}
-}
-
 func optionsFromGenericConfig(cfg model.ACMEDeployConfig, domain string) (DeployOptions, error) {
 	var opts DeployOptions
 	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(cfg.ConfigJSON)), &opts); err != nil {
@@ -324,48 +290,6 @@ func optionsFromGenericConfig(cfg model.ACMEDeployConfig, domain string) (Deploy
 	opts.Domain = domain
 	opts.normalize()
 	return opts, nil
-}
-
-func genericConfigFromDeployConfig(cfg model.ACMESSHDeployConfig) model.ACMEDeployConfig {
-	normalizeDeployConfig(&cfg)
-	return model.ACMEDeployConfig{
-		ID:       cfg.ID,
-		DomainID: cfg.DomainID,
-		TargetID: cfg.TargetID,
-		Kind:     acme.DeployKindSSH,
-		Name:     cfg.Name,
-		ConfigJSON: acme.MustJSON(DeployOptions{
-			CertPath:      cfg.CertPath,
-			KeyPath:       cfg.KeyPath,
-			ChainPath:     cfg.ChainPath,
-			FullchainPath: cfg.FullchainPath,
-			DeployCommand: cfg.DeployCommand,
-		}),
-		StateJSON:  "{}",
-		AutoDeploy: cfg.AutoDeploy,
-		Enabled:    cfg.Enabled,
-		CreatedAt:  cfg.CreatedAt,
-		UpdatedAt:  cfg.UpdatedAt,
-	}
-}
-
-func deployConfigFromGenericConfig(cfg model.ACMEDeployConfig) model.ACMESSHDeployConfig {
-	opts, _ := optionsFromGenericConfig(cfg, "")
-	return model.ACMESSHDeployConfig{
-		ID:            cfg.ID,
-		DomainID:      cfg.DomainID,
-		TargetID:      cfg.TargetID,
-		Name:          cfg.Name,
-		CertPath:      opts.CertPath,
-		KeyPath:       opts.KeyPath,
-		ChainPath:     opts.ChainPath,
-		FullchainPath: opts.FullchainPath,
-		DeployCommand: opts.DeployCommand,
-		AutoDeploy:    cfg.AutoDeploy,
-		Enabled:       cfg.Enabled,
-		CreatedAt:     cfg.CreatedAt,
-		UpdatedAt:     cfg.UpdatedAt,
-	}
 }
 
 func splitEndpoint(endpoint string) (string, int, error) {
@@ -542,11 +466,3 @@ func validateTarget(t model.ACMESSHTarget) error {
 	return nil
 }
 
-func normalizeDeployConfig(c *model.ACMESSHDeployConfig) {
-	c.Name = strings.TrimSpace(c.Name)
-	c.CertPath = strings.TrimSpace(c.CertPath)
-	c.KeyPath = strings.TrimSpace(c.KeyPath)
-	c.ChainPath = strings.TrimSpace(c.ChainPath)
-	c.FullchainPath = strings.TrimSpace(c.FullchainPath)
-	c.DeployCommand = strings.TrimSpace(c.DeployCommand)
-}

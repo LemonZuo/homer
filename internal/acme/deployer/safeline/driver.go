@@ -217,25 +217,6 @@ func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESafelineT
 	return out, nil
 }
 
-func deployTargetFromTarget(t model.ACMESafelineTarget) model.ACMEDeployTarget {
-	normalizeTarget(&t)
-	return model.ACMEDeployTarget{
-		ID:       t.ID,
-		Name:     t.Name,
-		Kind:     acme.DeployKindSafeline,
-		Endpoint: t.BaseURL,
-		AuthJSON: acme.MustJSON(TargetAuth{
-			APIToken: t.APIToken,
-		}),
-		ConfigJSON: acme.MustJSON(TargetConfig{
-			SkipTLSVerify: bool(t.SkipTLSVerify),
-		}),
-		Enabled:   t.Enabled,
-		CreatedAt: t.CreatedAt,
-		UpdatedAt: t.UpdatedAt,
-	}
-}
-
 func deployPartsFromGenericConfig(cfg model.ACMEDeployConfig) (DeployOptions, DeployState, error) {
 	opts := DeployOptions{CertType: 2}
 	state := DeployState{}
@@ -249,46 +230,6 @@ func deployPartsFromGenericConfig(cfg model.ACMEDeployConfig) (DeployOptions, De
 		return opts, state, fmt.Errorf("解析雷池部署状态失败：%w", err)
 	}
 	return opts, state, nil
-}
-
-func genericConfigFromDeployConfig(cfg model.ACMESafelineDeployConfig) model.ACMEDeployConfig {
-	normalizeDeployConfig(&cfg)
-	state := DeployState{}
-	if cfg.CertID > 0 {
-		state.CertID = cfg.CertID
-		state.CertIDs = []int64{cfg.CertID}
-	}
-	return model.ACMEDeployConfig{
-		ID:       cfg.ID,
-		DomainID: cfg.DomainID,
-		TargetID: cfg.TargetID,
-		Kind:     acme.DeployKindSafeline,
-		Name:     cfg.Name,
-		ConfigJSON: acme.MustJSON(DeployOptions{
-			CertType: cfg.CertType,
-		}),
-		StateJSON:  acme.MustJSON(state),
-		AutoDeploy: cfg.AutoDeploy,
-		Enabled:    cfg.Enabled,
-		CreatedAt:  cfg.CreatedAt,
-		UpdatedAt:  cfg.UpdatedAt,
-	}
-}
-
-func deployConfigFromGenericConfig(cfg model.ACMEDeployConfig) model.ACMESafelineDeployConfig {
-	opts, state, _ := deployPartsFromGenericConfig(cfg)
-	return model.ACMESafelineDeployConfig{
-		ID:         cfg.ID,
-		DomainID:   cfg.DomainID,
-		TargetID:   cfg.TargetID,
-		Name:       cfg.Name,
-		CertID:     state.CertID,
-		CertType:   opts.CertType,
-		AutoDeploy: cfg.AutoDeploy,
-		Enabled:    cfg.Enabled,
-		CreatedAt:  cfg.CreatedAt,
-		UpdatedAt:  cfg.UpdatedAt,
-	}
 }
 
 func normalizeTarget(t *model.ACMESafelineTarget) {
@@ -313,9 +254,3 @@ func validateTarget(t model.ACMESafelineTarget) error {
 	return nil
 }
 
-func normalizeDeployConfig(c *model.ACMESafelineDeployConfig) {
-	c.Name = strings.TrimSpace(c.Name)
-	if c.CertType <= 0 {
-		c.CertType = 2
-	}
-}

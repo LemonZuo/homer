@@ -484,78 +484,12 @@ func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMEFnOSTarge
 	return out, nil
 }
 
-func deployTargetFromTarget(t model.ACMEFnOSTarget) model.ACMEDeployTarget {
-	normalizeTarget(&t)
-	auth := TargetAuth{
-		AuthSource:   t.AuthSource,
-		CredentialID: t.CredentialID,
-	}
-	if t.AuthSource == AuthSourceCredential {
-		// 凭证模式不持久化 inline 字段，避免脱节的脏数据
-		auth.Username = ""
-		auth.AuthType = ""
-		auth.Password = ""
-		auth.PrivateKey = ""
-		auth.Passphrase = ""
-	} else {
-		auth.Username = t.Username
-		auth.AuthType = t.AuthType
-		auth.Password = t.Password
-		auth.PrivateKey = t.PrivateKey
-		auth.Passphrase = t.Passphrase
-	}
-	cfg := TargetConfig{BastionTargetID: t.BastionTargetID}
-	return model.ACMEDeployTarget{
-		ID:         t.ID,
-		Name:       t.Name,
-		Kind:       acme.DeployKindFnOS,
-		Endpoint:   net.JoinHostPort(t.Host, strconv.Itoa(t.Port)),
-		AuthJSON:   acme.MustJSON(auth),
-		ConfigJSON: acme.MustJSON(cfg),
-		Enabled:    t.Enabled,
-		CreatedAt:  t.CreatedAt,
-		UpdatedAt:  t.UpdatedAt,
-	}
-}
-
 func deployConfigFromGeneric(cfg model.ACMEDeployConfig) (DeployConfig, error) {
 	out := DeployConfig{}
 	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(cfg.ConfigJSON)), &out); err != nil {
 		return out, fmt.Errorf("解析 fnOS 部署配置失败：%w", err)
 	}
 	return out, nil
-}
-
-func genericConfigFromDeployConfig(cfg model.ACMEFnOSDeployConfig) model.ACMEDeployConfig {
-	normalizeDeployConfig(&cfg)
-	return model.ACMEDeployConfig{
-		ID:         cfg.ID,
-		DomainID:   cfg.DomainID,
-		TargetID:   cfg.TargetID,
-		Kind:       acme.DeployKindFnOS,
-		Name:       cfg.Name,
-		ConfigJSON: acme.MustJSON(DeployConfig{DomainOverride: cfg.DomainOverride}),
-		StateJSON:  "{}",
-		AutoDeploy: cfg.AutoDeploy,
-		Enabled:    cfg.Enabled,
-		CreatedAt:  cfg.CreatedAt,
-		UpdatedAt:  cfg.UpdatedAt,
-	}
-}
-
-func deployConfigViewFromGeneric(cfg model.ACMEDeployConfig) model.ACMEFnOSDeployConfig {
-	parsed, _ := deployConfigFromGeneric(cfg)
-	return model.ACMEFnOSDeployConfig{
-		ID:             cfg.ID,
-		DomainID:       cfg.DomainID,
-		TargetID:       cfg.TargetID,
-		Name:           cfg.Name,
-		DomainOverride: parsed.DomainOverride,
-		AutoDeploy:     cfg.AutoDeploy,
-		Enabled:        cfg.Enabled,
-		CreatedAt:      cfg.CreatedAt,
-		UpdatedAt:      cfg.UpdatedAt,
-	}
 }
 
 func splitEndpoint(endpoint string) (string, int, error) {
@@ -637,7 +571,3 @@ func validateTarget(t model.ACMEFnOSTarget) error {
 	return nil
 }
 
-func normalizeDeployConfig(c *model.ACMEFnOSDeployConfig) {
-	c.Name = strings.TrimSpace(c.Name)
-	c.DomainOverride = strings.ToLower(strings.TrimSpace(c.DomainOverride))
-}

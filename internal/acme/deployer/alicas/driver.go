@@ -134,65 +134,12 @@ func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMEUploadCAS
 	return out, nil
 }
 
-func deployTargetFromTarget(t model.ACMEUploadCASTarget) model.ACMEDeployTarget {
-	normalizeTarget(&t)
-	return model.ACMEDeployTarget{
-		ID:   t.ID,
-		Name: t.Name,
-		Kind: acme.DeployKindUploadCAS,
-		AuthJSON: acme.MustJSON(TargetAuth{
-			AccessKeyID:     t.AccessKeyID,
-			AccessKeySecret: t.AccessKeySecret,
-		}),
-		ConfigJSON: "{}",
-		Enabled:    t.Enabled,
-		CreatedAt:  t.CreatedAt,
-		UpdatedAt:  t.UpdatedAt,
-	}
-}
-
 func stateFromGenericConfig(cfg model.ACMEDeployConfig) (DeployState, error) {
 	state := DeployState{}
 	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(cfg.StateJSON)), &state); err != nil {
 		return state, fmt.Errorf("解析阿里云 CAS 部署状态失败：%w", err)
 	}
 	return state, nil
-}
-
-func genericConfigFromDeployConfig(cfg model.ACMEUploadCASDeployConfig) model.ACMEDeployConfig {
-	normalizeDeployConfig(&cfg)
-	state := DeployState{}
-	if cfg.CertID > 0 {
-		state.CertID = cfg.CertID
-	}
-	return model.ACMEDeployConfig{
-		ID:         cfg.ID,
-		DomainID:   cfg.DomainID,
-		TargetID:   cfg.TargetID,
-		Kind:       acme.DeployKindUploadCAS,
-		Name:       cfg.Name,
-		ConfigJSON: "{}",
-		StateJSON:  acme.MustJSON(state),
-		AutoDeploy: cfg.AutoDeploy,
-		Enabled:    cfg.Enabled,
-		CreatedAt:  cfg.CreatedAt,
-		UpdatedAt:  cfg.UpdatedAt,
-	}
-}
-
-func deployConfigFromGenericConfig(cfg model.ACMEDeployConfig) model.ACMEUploadCASDeployConfig {
-	state, _ := stateFromGenericConfig(cfg)
-	return model.ACMEUploadCASDeployConfig{
-		ID:         cfg.ID,
-		DomainID:   cfg.DomainID,
-		TargetID:   cfg.TargetID,
-		Name:       cfg.Name,
-		CertID:     state.CertID,
-		AutoDeploy: cfg.AutoDeploy,
-		Enabled:    cfg.Enabled,
-		CreatedAt:  cfg.CreatedAt,
-		UpdatedAt:  cfg.UpdatedAt,
-	}
 }
 
 func normalizeTarget(t *model.ACMEUploadCASTarget) {
@@ -214,6 +161,3 @@ func validateTarget(t model.ACMEUploadCASTarget) error {
 	return nil
 }
 
-func normalizeDeployConfig(c *model.ACMEUploadCASDeployConfig) {
-	c.Name = strings.TrimSpace(c.Name)
-}

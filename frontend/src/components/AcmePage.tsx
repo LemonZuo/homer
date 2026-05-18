@@ -575,7 +575,7 @@ export default function AcmePage() {
         onManageCredentials={() => setSSHCredDrawerOpen(true)}
         onTestSSH={async (t) => {
           try {
-            await api.post(`/acme/ssh-targets/${t.id}/test`)
+            await api.post(`/acme/deploy/targets/${t.id}/test`)
             toast.success('连接正常')
           } catch (e: any) {
             toast.error(e?.response?.data?.error || e?.message || '连接失败')
@@ -626,7 +626,7 @@ export default function AcmePage() {
         onDeleteFnOS={(t) => setFnOSDeletePending(t)}
         onTestFnOS={async (t) => {
           try {
-            await api.post(`/acme/fnos-targets/${t.id}/test`)
+            await api.post(`/acme/deploy/targets/${t.id}/test`)
             toast.success('连接正常')
           } catch (e: any) {
             toast.error(e?.response?.data?.error || e?.message || '连接失败')
