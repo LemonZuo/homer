@@ -252,6 +252,13 @@ export default function AcmePage() {
     }
   }
 
+  const downloadCert = (d: Domain) => {
+    const a = document.createElement('a')
+    a.href = `/api/acme/domains/${d.id}/cert/download`
+    a.rel = 'noopener'
+    a.click()
+  }
+
   const openDeployConfigs = (d: Domain) => {
     setDeployEntryDomain(d)
     setDeployDomain(d)
@@ -432,6 +439,7 @@ export default function AcmePage() {
             }}
             onRevoke={setRevokePending}
             onDelete={setDeletePending}
+            onDownload={downloadCert}
           />
         ))}
         {!loading && domains.length === 0 && (

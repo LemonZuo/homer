@@ -1,4 +1,4 @@
-import { Ban, Edit3, Loader2, Play, Send, Trash2 } from 'lucide-react'
+import { Ban, Download, Edit3, Loader2, Play, Send, Trash2 } from 'lucide-react'
 import { avatarColor, getColorSet } from '../../../colors'
 import { Card } from '../../ui/card'
 import { Button } from '../../ui/button'
@@ -18,6 +18,7 @@ export function DomainCard({
   onEdit,
   onRevoke,
   onDelete,
+  onDownload,
 }: {
   d: Domain
   busy: string | null
@@ -27,6 +28,7 @@ export function DomainCard({
   onEdit: (d: Domain) => void
   onRevoke: (d: Domain) => void
   onDelete: (d: Domain) => void
+  onDownload: (d: Domain) => void
 }) {
   const days = daysUntil(d.not_after)
   const revoked = d.cert_status === 'revoked'
@@ -118,6 +120,16 @@ export function DomainCard({
           title="部署配置"
         >
           <Send className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="outline"
+          className="h-9 w-full sm:h-8 sm:w-8"
+          onClick={() => onDownload(d)}
+          disabled={busy !== null || !d.not_after}
+          title={!d.not_after ? '当前域名还没有证书' : '下载证书 ZIP'}
+        >
+          <Download className="h-3.5 w-3.5" />
         </Button>
         <Button
           size="icon"

@@ -169,6 +169,18 @@ func (s *Service) DeleteDomain(id int64) error {
 	})
 }
 
+// DomainByID 按主键取一条域名记录。
+func (s *Service) DomainByID(id int64) (*model.ACMEDomain, error) {
+	var d model.ACMEDomain
+	if err := s.db.First(&d, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &d, nil
+}
+
 // GetCertByDomain 返回最近一次签发的证书（空时 nil, nil）。
 func (s *Service) GetCertByDomain(domainID int64) (*model.ACMECert, error) {
 	var c model.ACMECert

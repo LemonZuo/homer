@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/LemonZuo/homer/internal/acme"
 	acmealicas "github.com/LemonZuo/homer/internal/acme/deployer/alicas"
@@ -151,6 +154,7 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.PUT("/domains/:id", h.updateDomain)
 	g.DELETE("/domains/:id", h.deleteDomain)
 	g.GET("/domains/:id/cert", h.domainCert)
+	g.GET("/domains/:id/cert/download", h.downloadCert)
 	g.POST("/domains/:id/issue", h.issue)
 	g.POST("/domains/:id/revoke", h.revoke)
 	g.POST("/domains/:id/deploy-ssh", h.deploySSH)
@@ -870,6 +874,68 @@ func (h *ACMEHandler) domainCert(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": cert})
+}
+
+// downloadCert 把当前证书 4 个 PEM 文件打成 ZIP 流式返回。
+func (h *ACMEHandler) downloadCert(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	d, err := h.svc.DomainByID(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if d == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "域名不存在"})
+		return
+	}
+	cert, err := h.svc.GetCertByDomain(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if cert == nil || strings.TrimSpace(cert.CertPEM) == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "当前域名还没有证书"})
+		return
+	}
+	files := []struct {
+		name string
+		data string
+	}{
+		{"cert.pem", cert.CertPEM},
+		{"chain.pem", cert.ChainPEM},
+		{"fullchain.pem", cert.FullchainPEM},
+		{"key.pem", cert.KeyPEM},
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range files {
+		w, err := zw.CreateHeader(&zip.FileHeader{
+			Name:     f.name,
+			Method:   zip.Deflate,
+			Modified: cert.IssuedAt,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if _, err := io.WriteString(w, f.data); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if err := zw.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	filename := d.MainDomain + ".zip"
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Header("Content-Length", strconv.Itoa(buf.Len()))
+	c.Data(http.StatusOK, "application/zip", buf.Bytes())
 }
 
 func (h *ACMEHandler) issue(c *gin.Context) {
