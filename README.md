@@ -39,9 +39,8 @@ homer/
 │   ├── acme/               # ACME 签发、续期、部署（SSH/SafeLine/alicas/fnos）、SSE 日志
 │   ├── aliyun/             # 阿里云 SDK 客户端封装
 │   ├── birthday/           # 生日提醒任务
-│   ├── cas/                # 阿里云 CAS 证书查询/删除/部署到 CDN
-│   ├── cdn/                # 阿里云 CDN 加速域名查询
-│   ├── chinesedate/        # 农历/生肖换算
+│   ├── certstore/          # 证书库存查询/删除/部署到 CDN（当前基于阿里云 CAS）
+│   ├── cdnops/             # CDN 加速域名查询与证书部署（当前基于阿里云 CDN）
 │   ├── config/             # .env 配置加载
 │   ├── db/                 # GORM MySQL 初始化
 │   ├── event/              # 事项提醒任务

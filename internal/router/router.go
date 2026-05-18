@@ -27,7 +27,7 @@ var Tables = []TableMeta{
 	{Key: "event", Label: "事项提醒", Path: "event"},
 }
 
-func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnHandler *handler.CDNHandler, casHandler *handler.CASHandler, acmeHandler *acmehandler.Handler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, notifyHandler *handler.NotifyHandler, frontend fs.FS) *gin.Engine {
+func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnopsHandler *handler.CDNOpsHandler, certstoreHandler *handler.CertStoreHandler, acmeHandler *acmehandler.Handler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, notifyHandler *handler.NotifyHandler, frontend fs.FS) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
@@ -54,8 +54,8 @@ func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier,
 	handler.NewCRUD[model.EventReminder](db).Register(api, "/event")
 	api.POST("/event/:id/notify", handler.EventNotify(db, eventNotifier))
 
-	cdnHandler.Register(api)
-	casHandler.Register(api)
+	cdnopsHandler.Register(api)
+	certstoreHandler.Register(api)
 	acmeHandler.Register(api)
 	bypassHandler.Register(api)
 	smsHandler.Register(api)

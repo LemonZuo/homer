@@ -1,6 +1,6 @@
-// Package cas 数字证书管理（CAS）业务逻辑：复刻老 Java CasServiceImpl。
-// 仅做证书列表 / 删除；「部署到 CDN」复用 cdn.Service。
-package cas
+// Package certstore 数字证书库存业务逻辑：复刻老 Java CasServiceImpl。
+// 仅做证书列表 / 删除；「部署到 CDN」复用 cdnops.Service。
+package certstore
 
 import (
 	"errors"

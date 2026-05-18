@@ -4,34 +4,34 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/LemonZuo/homer/internal/cdn"
+	"github.com/LemonZuo/homer/internal/cdnops"
 
 	"github.com/gin-gonic/gin"
 )
 
-// CDNHandler 加速域名管理接口（只读视图）。证书部署走 CAS handler。
-type CDNHandler struct {
-	svc *cdn.Service
+// CDNOpsHandler 加速域名运维接口（只读视图）。证书部署走证书库存 handler。
+type CDNOpsHandler struct {
+	svc *cdnops.Service
 }
 
-func NewCDNHandler(svc *cdn.Service) *CDNHandler {
-	return &CDNHandler{svc: svc}
+func NewCDNOpsHandler(svc *cdnops.Service) *CDNOpsHandler {
+	return &CDNOpsHandler{svc: svc}
 }
 
-func (h *CDNHandler) Register(rg *gin.RouterGroup) {
+func (h *CDNOpsHandler) Register(rg *gin.RouterGroup) {
 	g := rg.Group("/cdn")
 	g.GET("/domains", h.domains)
 }
 
-func (h *CDNHandler) writeErr(c *gin.Context, err error) {
-	if errors.Is(err, cdn.ErrNotConfigured) {
+func (h *CDNOpsHandler) writeErr(c *gin.Context, err error) {
+	if errors.Is(err, cdnops.ErrNotConfigured) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "阿里云 CDN 未配置"})
 		return
 	}
 	c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 }
 
-func (h *CDNHandler) domains(c *gin.Context) {
+func (h *CDNOpsHandler) domains(c *gin.Context) {
 	items, err := h.svc.ListDomains()
 	if err != nil {
 		h.writeErr(c, err)

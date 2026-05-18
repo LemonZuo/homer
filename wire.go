@@ -14,8 +14,8 @@ import (
 	acmesafeline "github.com/LemonZuo/homer/internal/acme/deployer/safeline"
 	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
 	"github.com/LemonZuo/homer/internal/birthday"
-	"github.com/LemonZuo/homer/internal/cas"
-	"github.com/LemonZuo/homer/internal/cdn"
+	"github.com/LemonZuo/homer/internal/cdnops"
+	"github.com/LemonZuo/homer/internal/certstore"
 	"github.com/LemonZuo/homer/internal/config"
 	"github.com/LemonZuo/homer/internal/db"
 	"github.com/LemonZuo/homer/internal/event"
@@ -63,21 +63,21 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	eventNotifier := hub.For(notify.ModuleEvent)
 	bypassNotifier := hub.For(notify.ModuleBypass)
 
-	cdnSvc := cdn.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
-	casSvc := cas.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
+	cdnopsSvc := cdnops.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
+	certstoreSvc := certstore.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
 	acmeSvc := buildACMEService(gormDB, cfg)
 
 	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, hub)
 
-	cdnHandler := handler.NewCDNHandler(cdnSvc)
-	casHandler := handler.NewCASHandler(casSvc, cdnSvc)
+	cdnopsHandler := handler.NewCDNOpsHandler(cdnopsSvc)
+	certstoreHandler := handler.NewCertStoreHandler(certstoreSvc, cdnopsSvc)
 	acmeHandler := acmehandler.New(acmeSvc)
 	bypassHandler := handler.NewBypassHandler(bypassNotifier)
 	smsHandler := handler.NewSMSHandler(gormDB)
 	schedulerHandler := handler.NewSchedulerHandler(sched)
 	notifyHandler := handler.NewNotifyHandler(notifyStore)
 
-	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnHandler, casHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, frontend)
+	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnopsHandler, certstoreHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, frontend)
 	r.GET("/healthz", handler.Health(gormDB, sched))
 
 	return r, sched.Stop, nil

@@ -56,7 +56,7 @@ type Pending =
   | { kind: 'deploy'; cert: Cert }
   | { kind: 'delete'; cert: Cert }
 
-export default function CasPage() {
+export default function CertStorePage() {
   const [certs, setCerts] = useState<Cert[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)

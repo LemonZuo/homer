@@ -2,8 +2,8 @@ import type { ReactElement } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
 import TableView from './components/TableView'
-import CdnPage from './components/CdnPage'
-import CasPage from './components/CasPage'
+import CdnOpsPage from './components/CdnOpsPage'
+import CertStorePage from './components/CertStorePage'
 import AcmePage from './components/AcmePage'
 import SmsPage from './components/SmsPage'
 import SchedulerPage from './components/SchedulerPage'
@@ -21,8 +21,8 @@ function Empty() {
 }
 
 const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
-  cdn: () => <CdnPage />,
-  cas: () => <CasPage />,
+  cdn: () => <CdnOpsPage />,
+  cas: () => <CertStorePage />,
   acme: () => <AcmePage />,
   sms: () => <SmsPage />,
   scheduler: () => <SchedulerPage />,

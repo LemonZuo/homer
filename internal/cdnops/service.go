@@ -1,6 +1,6 @@
-// Package cdn 加速域名管理业务逻辑：复刻老 Java CdnServiceImpl。
+// Package cdnops 加速域名运维业务逻辑：复刻老 Java CdnServiceImpl。
 // 仅做阿里云只读视图 + 证书部署（off→on workaround）。
-package cdn
+package cdnops
 
 import (
 	"errors"
