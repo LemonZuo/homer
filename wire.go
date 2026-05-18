@@ -20,6 +20,7 @@ import (
 	"github.com/LemonZuo/homer/internal/db"
 	"github.com/LemonZuo/homer/internal/event"
 	"github.com/LemonZuo/homer/internal/handler"
+	acmehandler "github.com/LemonZuo/homer/internal/handler/acme"
 	"github.com/LemonZuo/homer/internal/jobmonitor"
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
@@ -70,7 +71,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 
 	cdnHandler := handler.NewCDNHandler(cdnSvc)
 	casHandler := handler.NewCASHandler(casSvc, cdnSvc)
-	acmeHandler := handler.NewACMEHandler(acmeSvc)
+	acmeHandler := acmehandler.New(acmeSvc)
 	bypassHandler := handler.NewBypassHandler(bypassNotifier)
 	smsHandler := handler.NewSMSHandler(gormDB)
 	schedulerHandler := handler.NewSchedulerHandler(sched)
