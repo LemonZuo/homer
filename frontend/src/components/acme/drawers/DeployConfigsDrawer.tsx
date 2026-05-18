@@ -153,6 +153,10 @@ export function DeployConfigsDrawer({
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               添加 SSH
             </Button>
+            <Button size="sm" onClick={onAddFnOS} disabled={fnosTargets.length === 0}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加 fnOS
+            </Button>
             <Button size="sm" onClick={onAddSafeline} disabled={safelineTargets.length === 0}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               添加雷池
@@ -160,10 +164,6 @@ export function DeployConfigsDrawer({
             <Button size="sm" onClick={onAddCAS} disabled={casTargets.length === 0}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               添加 CAS
-            </Button>
-            <Button size="sm" onClick={onAddFnOS} disabled={fnosTargets.length === 0}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              添加 fnOS
             </Button>
           </div>
 
@@ -275,92 +275,6 @@ export function DeployConfigsDrawer({
 
               <section className="space-y-2 border-t border-border pt-5">
                 <div>
-                  <div className="text-[13px] font-medium">雷池部署</div>
-                  <div className="text-[11.5px] text-muted-foreground">
-                    上传到 WAF 证书管理
-                  </div>
-                </div>
-                {safelineTargets.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    先添加雷池实例，再配置证书上传
-                  </p>
-                ) : safelineConfigs.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    还没有雷池部署配置
-                  </p>
-                ) : (
-                  safelineConfigs.map((cfg) => {
-                    const t = safelineTargetByID(safelineTargets, cfg.target_id)
-                    const deploying = busy === `deploy-safeline-config-${cfg.id}`
-                    const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
-                    return (
-                      <Card key={cfg.id} className="px-4 py-3">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
-                          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate font-mono text-[13px] font-medium">
-                                {safelineConfigTitle(cfg)}
-                              </span>
-                              <span
-                                className={cn(
-                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                                  cfg.enabled
-                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                    : 'bg-muted text-muted-foreground',
-                                )}
-                              >
-                                {cfg.enabled ? '启用' : '停用'}
-                              </span>
-                              {cfg.auto_deploy && (
-                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-                                  自动部署
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                              {safelineTargetSummary(t)}
-                            </div>
-                            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                              cert_id={cfg.cert_id || '新增'} · type={cfg.cert_type || 2}
-                            </div>
-                          </div>
-                          <div className="flex gap-2 sm:contents">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 sm:flex-none"
-                              onClick={() => onDeploySafeline(cfg)}
-                              disabled={!canDeploy}
-                              title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
-                            >
-                              {deploying ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <ShieldCheck className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSafeline(cfg)}>
-                              <Edit3 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 hover:text-destructive sm:flex-none"
-                              onClick={() => onDeleteSafeline(cfg)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-                      </Card>
-                    )
-                  })
-                )}
-              </section>
-
-              <section className="space-y-2 border-t border-border pt-5">
-                <div>
                   <div className="text-[13px] font-medium">fnOS 部署</div>
                   <div className="text-[11.5px] text-muted-foreground">
                     覆盖飞牛 OS ssls 目录证书并更新 trim_connect.cert
@@ -436,6 +350,92 @@ export function DeployConfigsDrawer({
                               variant="outline"
                               className="flex-1 hover:text-destructive sm:flex-none"
                               onClick={() => onDeleteFnOS(cfg)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    )
+                  })
+                )}
+              </section>
+
+              <section className="space-y-2 border-t border-border pt-5">
+                <div>
+                  <div className="text-[13px] font-medium">雷池部署</div>
+                  <div className="text-[11.5px] text-muted-foreground">
+                    上传到 WAF 证书管理
+                  </div>
+                </div>
+                {safelineTargets.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+                    先添加雷池实例，再配置证书上传
+                  </p>
+                ) : safelineConfigs.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+                    还没有雷池部署配置
+                  </p>
+                ) : (
+                  safelineConfigs.map((cfg) => {
+                    const t = safelineTargetByID(safelineTargets, cfg.target_id)
+                    const deploying = busy === `deploy-safeline-config-${cfg.id}`
+                    const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
+                    return (
+                      <Card key={cfg.id} className="px-4 py-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
+                          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate font-mono text-[13px] font-medium">
+                                {safelineConfigTitle(cfg)}
+                              </span>
+                              <span
+                                className={cn(
+                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                                  cfg.enabled
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                    : 'bg-muted text-muted-foreground',
+                                )}
+                              >
+                                {cfg.enabled ? '启用' : '停用'}
+                              </span>
+                              {cfg.auto_deploy && (
+                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                                  自动部署
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                              {safelineTargetSummary(t)}
+                            </div>
+                            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                              cert_id={cfg.cert_id || '新增'} · type={cfg.cert_type || 2}
+                            </div>
+                          </div>
+                          <div className="flex gap-2 sm:contents">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 sm:flex-none"
+                              onClick={() => onDeploySafeline(cfg)}
+                              disabled={!canDeploy}
+                              title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
+                            >
+                              {deploying ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ShieldCheck className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSafeline(cfg)}>
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 hover:text-destructive sm:flex-none"
+                              onClick={() => onDeleteSafeline(cfg)}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
