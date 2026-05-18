@@ -392,12 +392,24 @@ if [ ! -d "$DOMAIN_DIR" ]; then
   echo "fnOS 上找不到域名目录：$DOMAIN_DIR" >&2
   exit 1
 fi
-TS_DIR=$(ls -1 "$DOMAIN_DIR" | sort -r | head -n1)
+TS_DIR=""
+for dir in "$DOMAIN_DIR"/*/; do
+  [ -d "$dir" ] || continue
+  name=${dir%%/}
+  name=${name##*/}
+  if [[ "$name" =~ ^[0-9]{10,}$ ]]; then
+    if [ -z "$TS_DIR" ] || [ "$name" -gt "$TS_DIR" ]; then
+      TS_DIR="$name"
+    fi
+  fi
+done
 if [ -z "$TS_DIR" ]; then
-  echo "$DOMAIN_DIR 下没有时间戳子目录，无法覆盖" >&2
+  echo "$DOMAIN_DIR 下没有 10 位以上数字时间戳子目录，无法覆盖" >&2
   exit 1
 fi
 TARGET_DIR="$DOMAIN_DIR/$TS_DIR"
+echo "域名目录：$DOMAIN_DIR"
+echo "时间戳目录：$TS_DIR"
 echo "目标目录：$TARGET_DIR"
 
 install -m 0644 "$TMP_CERT" "$TARGET_DIR/$DOMAIN.crt"

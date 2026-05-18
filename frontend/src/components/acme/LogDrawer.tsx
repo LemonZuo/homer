@@ -65,7 +65,7 @@ export function LogDrawer({
         if (!o) onClose()
       }}
     >
-      <DrawerContent>
+      <DrawerContent className="overflow-hidden">
         <DrawerHeader className="flex flex-row items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <DrawerTitle>{title}</DrawerTitle>
@@ -87,10 +87,8 @@ export function LogDrawer({
             复制日志
           </Button>
         </DrawerHeader>
-        <div className="flex-1 overflow-auto px-4 pb-4" data-vaul-no-drag>
-          <pre className="cursor-text select-text whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-3 font-mono text-[11.5px] leading-relaxed">
-            {logText || '（暂无日志）'}
-          </pre>
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto px-4 pb-4" data-vaul-no-drag>
+          <pre className="m-0 w-full max-w-full cursor-text select-text whitespace-pre-wrap break-all rounded-lg border border-border bg-muted/40 p-3 font-mono text-[11.5px] leading-relaxed [overflow-wrap:anywhere]">{logText || '（暂无日志）'}</pre>
           <div ref={bottomRef} />
         </div>
       </DrawerContent>
