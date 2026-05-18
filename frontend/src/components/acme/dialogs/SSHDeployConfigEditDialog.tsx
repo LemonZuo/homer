@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { api } from '../../../api'
 import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
-import { Textarea } from '../../ui/textarea'
+import { CodeEditor } from '../../ui/code-editor'
 import { Label } from '../../ui/label'
 import { Select } from '../../ui/select'
 import { Switch } from '../../ui/switch'
@@ -186,15 +186,11 @@ export function SSHDeployConfigEditDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="deploy-config-command">部署命令（可选）</Label>
-            <Textarea
+            <CodeEditor
               id="deploy-config-command"
               value={deployCommand}
-              onChange={(e) => setDeployCommand(e.target.value)}
+              onChange={setDeployCommand}
               placeholder="nginx -t && systemctl reload nginx"
-              autoComplete="off"
-              data-lpignore="true"
-              data-1p-ignore="true"
-              className="font-mono text-[12px]"
             />
           </div>
           <div className="flex items-center justify-between">
