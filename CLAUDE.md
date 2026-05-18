@@ -11,8 +11,6 @@
 - SmsForwarder 短信转发、12306Bypass webhook 中转
 - 其他偶尔会扩进来的自用小功能
 
-姊妹项目 `account-vault` 负责**被动型**的凭证 CRUD；这里专门放需要后台调度、外部交互的功能，二者分仓维护以避免概念混淆。
-
 ## 技术栈
 
 - **后端**: Go 1.25+，Gin + GORM + MySQL 驱动；通过 `.env`（godotenv）加载配置
@@ -29,13 +27,14 @@ homer/
 ├── go.mod / go.sum
 ├── .env / .env.example
 ├── internal/
-│   ├── acme/        # 签发、续期；已拆子包：deployer/{ssh,safeline}、providers/、core
+│   ├── acme/        # 签发、续期、SSE；子包 deployer/{ssh,safeline}、providers/
 │   ├── aliyun/      # 阿里云 SDK 客户端封装
+│   ├── birthday/、event/   # 生日 / 事项提醒任务
 │   ├── buildinfo/   # 版本/commit 注入
 │   ├── certstore/、cdnops/  # 阿里云 CAS 证书库存、CDN 加速域名查询与 CAS→CDN 部署
 │   ├── chinesedate/ # 农历/生肖
 │   ├── config/、db/
-│   ├── handler/     # 业务专用 handler 单独文件（通用 CRUD 已弃用删除）
+│   ├── handler/     # 业务专用 handler 单独文件（含 acme/ 子包；通用 CRUD 已删除）
 │   ├── jobmonitor/  # 任务失败计数 + 告警门槛
 │   ├── logx/        # slog 结构化日志封装
 │   ├── model/       # 业务模型（按模块拆分文件即可）
@@ -46,10 +45,11 @@ homer/
 └── frontend/
     ├── dist/        # vite 产物，被 go:embed 引用
     └── src/
-        ├── App.tsx      # 路由 + 懒加载页面映射
-        ├── api.ts
+        ├── main.tsx / App.tsx   # 入口；路由 + 懒加载页面映射
+        ├── api.ts / colors.ts
         ├── pages.ts     # 页面/导航登记表（每页自包含，无声明式 CRUD）
-        ├── components/
+        ├── components/  # 页面组件 + 子目录 acme/ sms/ ui/ icons/
+        ├── lib/、assets/
         └── index.css
 ```
 
