@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../ui/dialog'
-import type { SSHCredential, SSHTarget } from '../types'
+import type { FnOSTarget, SSHCredential, SSHTarget } from '../types'
 import { sshTargetToDeployTarget } from '../utils'
 
 type AuthMode = 'password' | 'key' | 'credential'
@@ -28,6 +28,7 @@ export function SSHTargetEditDialog({
   target,
   credentials,
   sshTargets,
+  fnosTargets,
   onManageCredentials,
   onSaved,
 }: {
@@ -36,6 +37,7 @@ export function SSHTargetEditDialog({
   target: SSHTarget | null
   credentials: SSHCredential[]
   sshTargets: SSHTarget[]
+  fnosTargets: FnOSTarget[]
   onManageCredentials: () => void
   onSaved: () => void
 }) {
@@ -71,14 +73,19 @@ export function SSHTargetEditDialog({
     setBastionID(target?.bastion_target_id ?? 0)
   }, [open, target])
 
+  const bastionCandidates = [
+    ...sshTargets.map((t) => ({ ...t, kind_label: 'SSH' })),
+    ...fnosTargets.map((t) => ({ ...t, kind_label: 'fnOS' })),
+  ]
+
   // 单跳：候选必须是 启用 + 不是自己 + 自身不再依赖跳板（避免链）
-  const bastionOptions = sshTargets
+  const bastionOptions = bastionCandidates
     .filter((t) => t.enabled && t.id !== (target?.id ?? 0) && !(t.bastion_target_id && t.bastion_target_id > 0))
-    .map((t) => ({ value: t.id, label: `${t.name} · ${t.host}:${t.port || 22}` }))
+    .map((t) => ({ value: t.id, label: `${t.kind_label} · ${t.name} · ${t.host}:${t.port || 22}` }))
 
   // 当前机器已被别人当跳板？若是，则本机不能再设置自己的跳板，否则链就破了
   const upstreamRef = target?.id
-    ? sshTargets.find((t) => t.bastion_target_id === target.id)
+    ? bastionCandidates.find((t) => t.bastion_target_id === target.id)
     : undefined
   const bastionLocked = !!upstreamRef
 

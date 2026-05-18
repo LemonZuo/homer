@@ -28,6 +28,7 @@ export function FnOSTargetEditDialog({
   target,
   credentials,
   sshTargets,
+  fnosTargets,
   onManageCredentials,
   onSaved,
 }: {
@@ -36,6 +37,7 @@ export function FnOSTargetEditDialog({
   target: FnOSTarget | null
   credentials: SSHCredential[]
   sshTargets: SSHTarget[]
+  fnosTargets: FnOSTarget[]
   onManageCredentials: () => void
   onSaved: () => void
 }) {
@@ -71,10 +73,21 @@ export function FnOSTargetEditDialog({
     setBastionID(target?.bastion_target_id ?? 0)
   }, [open, target])
 
-  // 跳板机沿用 SSH 池：启用 + 自身不再依赖跳板，避免链
-  const bastionOptions = sshTargets
-    .filter((t) => t.enabled && !(t.bastion_target_id && t.bastion_target_id > 0))
-    .map((t) => ({ value: t.id, label: `${t.name} · ${t.host}:${t.port || 22}` }))
+  const bastionCandidates = [
+    ...sshTargets.map((t) => ({ ...t, kind_label: 'SSH' })),
+    ...fnosTargets.map((t) => ({ ...t, kind_label: 'fnOS' })),
+  ]
+
+  // 单跳：候选必须是 启用 + 不是自己 + 自身不再依赖跳板（避免链）
+  const bastionOptions = bastionCandidates
+    .filter((t) => t.enabled && t.id !== (target?.id ?? 0) && !(t.bastion_target_id && t.bastion_target_id > 0))
+    .map((t) => ({ value: t.id, label: `${t.kind_label} · ${t.name} · ${t.host}:${t.port || 22}` }))
+
+  // 当前实例已被别人当跳板？若是，则本机不能再设置自己的跳板，否则链就破了
+  const upstreamRef = target?.id
+    ? bastionCandidates.find((t) => t.bastion_target_id === target.id)
+    : undefined
+  const bastionLocked = !!upstreamRef
 
   const save = async () => {
     const portNum = Number(port)
@@ -92,7 +105,7 @@ export function FnOSTargetEditDialog({
       private_key: credential ? '' : privateKey.trim(),
       passphrase: credential ? '' : passphrase.trim(),
       enabled,
-      bastion_target_id: bastionID > 0 ? bastionID : 0,
+      bastion_target_id: !bastionLocked && bastionID > 0 ? bastionID : 0,
       created_at: target?.created_at ?? '',
       updated_at: target?.updated_at ?? '',
     }
@@ -294,9 +307,10 @@ export function FnOSTargetEditDialog({
             <Label htmlFor="fnos-bastion">跳板机（可选）</Label>
             <Select
               id="fnos-bastion"
-              value={bastionID}
+              value={bastionLocked ? 0 : bastionID}
               onChange={setBastionID}
               placeholder="直连，不经过跳板机"
+              disabled={bastionLocked}
               searchable
               searchPlaceholder="按名称 / 主机搜索"
               options={[
@@ -304,9 +318,15 @@ export function FnOSTargetEditDialog({
                 ...bastionOptions,
               ]}
             />
-            <p className="text-[11.5px] text-muted-foreground">
-              跳板机沿用 SSH 机器池，单跳模式
-            </p>
+            {bastionLocked ? (
+              <p className="text-[11.5px] text-muted-foreground">
+                本实例已被 {upstreamRef?.name} 用作跳板，不能再为自己设置跳板
+              </p>
+            ) : (
+              <p className="text-[11.5px] text-muted-foreground">
+                可选择 SSH 机器或未设置跳板的 fnOS 实例，单跳模式
+              </p>
+            )}
           </div>
           <div className="flex items-center justify-between">
             <Label htmlFor="fnos-enabled">启用</Label>

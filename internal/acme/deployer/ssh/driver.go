@@ -86,14 +86,14 @@ func (d *Driver) ValidateTarget(target model.ACMEDeployTarget) error {
 	return nil
 }
 
-// findUpstreamRef 反查是否有任何 SSH target 把 id 当作 bastion 在用。
+// findUpstreamRef 反查是否有任何 SSH/fnOS target 把 id 当作 bastion 在用。
 // 返回第一个引用者的 name，用于错误提示。
 func (d *Driver) findUpstreamRef(id int64) (string, bool, error) {
 	if d.db == nil {
 		return "", false, errors.New("跳板机模式未注入 DB")
 	}
 	var rows []model.ACMEDeployTarget
-	if err := d.db.Where("kind = ? AND id <> ?", acme.DeployKindSSH, id).Find(&rows).Error; err != nil {
+	if err := d.db.Where("kind IN ? AND id <> ?", []string{acme.DeployKindSSH, acme.DeployKindFnOS}, id).Find(&rows).Error; err != nil {
 		return "", false, fmt.Errorf("扫描跳板机引用失败：%w", err)
 	}
 	for _, r := range rows {
@@ -108,7 +108,7 @@ func (d *Driver) findUpstreamRef(id int64) (string, bool, error) {
 	return "", false, nil
 }
 
-// loadBastion 加载一台被引用作为跳板机的 SSH 目标，校验类型/启用状态，
+// loadBastion 加载一台被引用作为跳板机的 SSH/fnOS 目标，校验类型/启用状态，
 // 但不解析凭证（建连前再 resolveCredential）。
 func (d *Driver) loadBastion(id int64) (*model.ACMESSHTarget, error) {
 	if d.db == nil {
@@ -121,8 +121,8 @@ func (d *Driver) loadBastion(id int64) (*model.ACMESSHTarget, error) {
 		}
 		return nil, fmt.Errorf("加载跳板机失败：%w", err)
 	}
-	if row.Kind != acme.DeployKindSSH {
-		return nil, fmt.Errorf("跳板机必须是 SSH 类型：id=%d, kind=%s", id, row.Kind)
+	if row.Kind != acme.DeployKindSSH && row.Kind != acme.DeployKindFnOS {
+		return nil, fmt.Errorf("跳板机必须是 SSH 或 fnOS 类型：id=%d, kind=%s", id, row.Kind)
 	}
 	if !bool(row.Enabled) {
 		return nil, fmt.Errorf("跳板机已停用：%s", row.Name)

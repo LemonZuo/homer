@@ -1122,6 +1122,7 @@ export default function AcmePage() {
         target={sshEditTarget}
         credentials={sshCredentials}
         sshTargets={sshTargets}
+        fnosTargets={fnosTargets}
         onManageCredentials={() => setSSHCredDrawerOpen(true)}
         onSaved={reloadDeployTargets}
       />
@@ -1276,6 +1277,7 @@ export default function AcmePage() {
         target={fnosEditTarget}
         credentials={sshCredentials}
         sshTargets={sshTargets}
+        fnosTargets={fnosTargets}
         onManageCredentials={() => setSSHCredDrawerOpen(true)}
         onSaved={reloadDeployTargets}
       />

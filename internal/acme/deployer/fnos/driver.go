@@ -40,7 +40,7 @@ const (
 )
 
 // Driver 实现 acme.DeployDriver，把证书写入 fnOS 的时间戳目录并刷新 trim_connect。
-// 连接复用 SSH 的认证体系：inline 凭证 / ssh_credential 凭证 / SSH target 做跳板，
+// 连接复用 SSH 的认证体系：inline 凭证 / ssh_credential 凭证 / SSH 或 fnOS target 做跳板，
 // 都按 acmessh 的 schema 解析与处理。
 type Driver struct {
 	credentials *acme.SSHCredentialStore
@@ -61,7 +61,7 @@ type TargetAuth struct {
 }
 
 // TargetConfig 是 acme_deploy_target.config_json 在 fnOS 场景下的结构。
-// BastionTargetID 指向另一台 SSH 类型的 ACMEDeployTarget；fnOS 只能借用已有的 SSH 跳板。
+// BastionTargetID 指向另一台 SSH/fnOS 类型的 ACMEDeployTarget，单跳。
 type TargetConfig struct {
 	BastionTargetID int64 `json:"bastion_target_id,omitempty"`
 }
@@ -90,6 +90,18 @@ func (d *Driver) ValidateTarget(target model.ACMEDeployTarget) error {
 		return err
 	}
 	if t.BastionTargetID > 0 {
+		if t.BastionTargetID == t.ID {
+			return errors.New("跳板机不能是自己")
+		}
+		// 上游：已被别人当跳板的实例，自身不能再有跳板，否则单跳被绕成链。
+		if t.ID > 0 {
+			if name, ok, err := d.findUpstreamRef(t.ID); err != nil {
+				return err
+			} else if ok {
+				return fmt.Errorf("当前实例已被 %s 设为跳板机，不能再为自己设置跳板机", name)
+			}
+		}
+		// 下游：所选跳板自身不能再有跳板。
 		b, err := d.loadBastion(t.BastionTargetID)
 		if err != nil {
 			return err
@@ -99,6 +111,28 @@ func (d *Driver) ValidateTarget(target model.ACMEDeployTarget) error {
 		}
 	}
 	return nil
+}
+
+// findUpstreamRef 反查是否有任何 SSH/fnOS target 把 id 当作 bastion 在用。
+// 返回第一个引用者的 name，用于错误提示。
+func (d *Driver) findUpstreamRef(id int64) (string, bool, error) {
+	if d.db == nil {
+		return "", false, errors.New("跳板机模式未注入 DB")
+	}
+	var rows []model.ACMEDeployTarget
+	if err := d.db.Where("kind IN ? AND id <> ?", []string{acme.DeployKindSSH, acme.DeployKindFnOS}, id).Find(&rows).Error; err != nil {
+		return "", false, fmt.Errorf("扫描跳板机引用失败：%w", err)
+	}
+	for _, r := range rows {
+		cfg := TargetConfig{}
+		if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(r.ConfigJSON)), &cfg); err != nil {
+			continue
+		}
+		if cfg.BastionTargetID == id {
+			return r.Name, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, _ model.ACMEDeployConfig) error {
@@ -201,7 +235,7 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 }
 
 // connFor 把已解析的 fnOS 目标（含凭证、跳板机）翻译成 sshx.Conn。
-// 跳板机一律来自 SSH target 表，单跳；跳板机自身的 bastion 不再展开。
+// 跳板机来自 SSH/fnOS target 表，单跳；跳板机自身的 bastion 不再展开。
 func (d *Driver) connFor(t *model.ACMEFnOSTarget) (*sshx.Conn, error) {
 	if err := d.resolveCredential(t); err != nil {
 		return nil, err
@@ -256,8 +290,8 @@ func (d *Driver) resolveCredential(t *model.ACMEFnOSTarget) error {
 	return nil
 }
 
-// loadBastion 按 id 从 deploy_target 表里取一台 SSH 目标当跳板。
-// 跳板必须是 SSH 类型、已启用，且自身不再叠 bastion（单跳）。
+// loadBastion 按 id 从 deploy_target 表里取一台 SSH/fnOS 目标当跳板。
+// 跳板必须是 SSH/fnOS 类型、已启用，且自身不再叠 bastion（单跳）。
 func (d *Driver) loadBastion(id int64) (*model.ACMESSHTarget, error) {
 	if d.db == nil {
 		return nil, errors.New("跳板机模式未注入 DB")
@@ -269,8 +303,8 @@ func (d *Driver) loadBastion(id int64) (*model.ACMESSHTarget, error) {
 		}
 		return nil, fmt.Errorf("加载跳板机失败：%w", err)
 	}
-	if row.Kind != acme.DeployKindSSH {
-		return nil, fmt.Errorf("跳板机必须是 SSH 类型：id=%d, kind=%s", id, row.Kind)
+	if row.Kind != acme.DeployKindSSH && row.Kind != acme.DeployKindFnOS {
+		return nil, fmt.Errorf("跳板机必须是 SSH 或 fnOS 类型：id=%d, kind=%s", id, row.Kind)
 	}
 	if !bool(row.Enabled) {
 		return nil, fmt.Errorf("跳板机已停用：%s", row.Name)

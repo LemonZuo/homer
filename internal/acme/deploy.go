@@ -159,11 +159,11 @@ func (s *DeployTargetStore) Delete(id int64) error {
 	})
 }
 
-// findBastionRef 查找是否有别的 SSH 机器把 id 当作跳板机引用，避免删除后另一台连不通。
-// 直接扫一遍 SSH 目标的 config_json，量小（个位数到几十）够用。
+// findBastionRef 查找是否有别的 SSH/fnOS 目标把 id 当作跳板机引用，避免删除后另一台连不通。
+// 直接扫一遍可作为跳板的目标 config_json，量小（个位数到几十）够用。
 func (s *DeployTargetStore) findBastionRef(id int64) (string, bool, error) {
 	var rows []model.ACMEDeployTarget
-	if err := s.db.Where("kind = ? AND id <> ?", DeployKindSSH, id).Find(&rows).Error; err != nil {
+	if err := s.db.Where("kind IN ? AND id <> ?", []string{DeployKindSSH, DeployKindFnOS}, id).Find(&rows).Error; err != nil {
 		return "", false, err
 	}
 	for _, r := range rows {

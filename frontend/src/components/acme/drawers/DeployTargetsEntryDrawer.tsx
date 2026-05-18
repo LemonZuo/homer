@@ -280,10 +280,16 @@ export function DeployTargetsEntryDrawer({
               <div className="text-[13px] font-medium">飞牛 OS</div>
               <div className="text-[11.5px] text-muted-foreground">{fnosTargets.length} 个实例</div>
             </div>
-            <Button size="sm" onClick={onAddFnOS}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              添加实例
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={onManageCredentials}>
+                <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                登录凭证
+              </Button>
+              <Button size="sm" onClick={onAddFnOS}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                添加实例
+              </Button>
+            </div>
           </div>
           {fnosTargets.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
