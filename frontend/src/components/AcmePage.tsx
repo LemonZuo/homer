@@ -36,6 +36,8 @@ import type {
   CASTarget,
   Credential,
   Domain,
+  FnOSDeployConfig,
+  FnOSTarget,
   SSHCredential,
   SSHDeployConfig,
   SSHTarget,
@@ -70,6 +72,8 @@ import { SSHDeployConfigEditDialog } from './acme/dialogs/SSHDeployConfigEditDia
 import { SafelineDeployConfigEditDialog } from './acme/dialogs/SafelineDeployConfigEditDialog'
 import { CASTargetEditDialog } from './acme/dialogs/CASTargetEditDialog'
 import { CASDeployConfigEditDialog } from './acme/dialogs/CASDeployConfigEditDialog'
+import { FnOSTargetEditDialog } from './acme/dialogs/FnOSTargetEditDialog'
+import { FnOSDeployConfigEditDialog } from './acme/dialogs/FnOSDeployConfigEditDialog'
 import { CredentialsDrawer } from './acme/drawers/CredentialsDrawer'
 import { AccountsDrawer } from './acme/drawers/AccountsDrawer'
 import { DeployTargetsEntryDrawer } from './acme/drawers/DeployTargetsEntryDrawer'
@@ -82,6 +86,7 @@ export default function AcmePage() {
   const [sshTargets, setSSHTargets] = useState<SSHTarget[]>([])
   const [safelineTargets, setSafelineTargets] = useState<SafelineTarget[]>([])
   const [casTargets, setCASTargets] = useState<CASTarget[]>([])
+  const [fnosTargets, setFnOSTargets] = useState<FnOSTarget[]>([])
   const [sshCredentials, setSSHCredentials] = useState<SSHCredential[]>([])
   const [providers, setProviders] = useState<string[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
@@ -118,6 +123,12 @@ export default function AcmePage() {
   const [casDeployEditOpen, setCASDeployEditOpen] = useState(false)
   const [casDeployEditTarget, setCASDeployEditTarget] = useState<CASDeployConfig | null>(null)
   const [casDeployDeletePending, setCASDeployDeletePending] = useState<CASDeployConfig | null>(null)
+  const [fnosDeployDomain, setFnOSDeployDomain] = useState<Domain | null>(null)
+  const [fnosDeployConfigs, setFnOSDeployConfigs] = useState<FnOSDeployConfig[]>([])
+  const [fnosDeployLoading, setFnOSDeployLoading] = useState(false)
+  const [fnosDeployEditOpen, setFnOSDeployEditOpen] = useState(false)
+  const [fnosDeployEditTarget, setFnOSDeployEditTarget] = useState<FnOSDeployConfig | null>(null)
+  const [fnosDeployDeletePending, setFnOSDeployDeletePending] = useState<FnOSDeployConfig | null>(null)
   const [logTaskID, setLogTaskID] = useState<number | null>(null)
 
   const [credDrawerOpen, setCredDrawerOpen] = useState(false)
@@ -139,6 +150,9 @@ export default function AcmePage() {
   const [casEditOpen, setCASEditOpen] = useState(false)
   const [casEditTarget, setCASEditTarget] = useState<CASTarget | null>(null)
   const [casDeletePending, setCASDeletePending] = useState<CASTarget | null>(null)
+  const [fnosEditOpen, setFnOSEditOpen] = useState(false)
+  const [fnosEditTarget, setFnOSEditTarget] = useState<FnOSTarget | null>(null)
+  const [fnosDeletePending, setFnOSDeletePending] = useState<FnOSTarget | null>(null)
   const [sshCredDrawerOpen, setSSHCredDrawerOpen] = useState(false)
   const [sshCredEditOpen, setSSHCredEditOpen] = useState(false)
   const [sshCredEditTarget, setSSHCredEditTarget] = useState<SSHCredential | null>(null)
@@ -179,6 +193,7 @@ export default function AcmePage() {
       setSSHTargets(groupedTargets.ssh)
       setSafelineTargets(groupedTargets.safeline)
       setCASTargets(groupedTargets.cas)
+      setFnOSTargets(groupedTargets.fnos)
       setSSHCredentials(sc.data?.data ?? [])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载失败')
@@ -216,6 +231,7 @@ export default function AcmePage() {
       setSSHTargets(groupedTargets.ssh)
       setSafelineTargets(groupedTargets.safeline)
       setCASTargets(groupedTargets.cas)
+      setFnOSTargets(groupedTargets.fnos)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载部署目标失败')
     }
@@ -247,18 +263,21 @@ export default function AcmePage() {
     setDeployConfigLoading(true)
     setSafeDeployLoading(true)
     setCASDeployLoading(true)
+    setFnOSDeployLoading(true)
     try {
       const { data } = await api.get(`/acme/domains/${domainID}/deploy-configs`)
       const groupedConfigs = splitDeployConfigs(data?.data ?? [])
       setDeployConfigs(groupedConfigs.ssh)
       setSafeDeployConfigs(groupedConfigs.safeline)
       setCASDeployConfigs(groupedConfigs.cas)
+      setFnOSDeployConfigs(groupedConfigs.fnos)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载部署配置失败')
     } finally {
       setDeployConfigLoading(false)
       setSafeDeployLoading(false)
       setCASDeployLoading(false)
+      setFnOSDeployLoading(false)
     }
   }, [])
 
@@ -327,6 +346,19 @@ export default function AcmePage() {
     }
   }
 
+  const onDeleteFnOSTarget = async () => {
+    const t = fnosDeletePending
+    if (!t) return
+    setFnOSDeletePending(null)
+    try {
+      await api.delete(`/acme/deploy/targets/${t.id}`)
+      toast.success('已删除')
+      await reloadDeployTargets()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+
   const onDeleteSSHDeployConfig = async () => {
     const cfg = deployDeletePending
     if (!cfg) return
@@ -357,6 +389,19 @@ export default function AcmePage() {
     const cfg = casDeployDeletePending
     if (!cfg) return
     setCASDeployDeletePending(null)
+    try {
+      await api.delete(`/acme/deploy/configs/${cfg.id}`)
+      toast.success('已删除')
+      if (deployEntryDomain) await reloadDeployConfigs(deployEntryDomain.id)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+
+  const onDeleteFnOSDeployConfig = async () => {
+    const cfg = fnosDeployDeletePending
+    if (!cfg) return
+    setFnOSDeployDeletePending(null)
     try {
       await api.delete(`/acme/deploy/configs/${cfg.id}`)
       toast.success('已删除')
@@ -443,6 +488,7 @@ export default function AcmePage() {
     setDeployDomain(d)
     setSafeDeployDomain(d)
     setCASDeployDomain(d)
+    setFnOSDeployDomain(d)
     void reloadDeployConfigs(d.id)
   }
 
@@ -491,6 +537,23 @@ export default function AcmePage() {
       setLogTaskID(taskID)
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '提交 CAS 上传失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startDeployFnOSConfig = async (cfg: FnOSDeployConfig) => {
+    if (!fnosDeployDomain) return
+    setBusy(`deploy-fnos-config-${cfg.id}`)
+    try {
+      const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
+      const taskID = data?.data?.task_id as number
+      toast.success(`已提交 fnOS 部署，任务 #${taskID}`)
+      await reloadTasks()
+      await reloadDeployConfigs(fnosDeployDomain.id)
+      setLogTaskID(taskID)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '提交 fnOS 部署失败')
     } finally {
       setBusy(null)
     }
@@ -981,6 +1044,7 @@ export default function AcmePage() {
         sshTargets={sshTargets}
         safelineTargets={safelineTargets}
         casTargets={casTargets}
+        fnosTargets={fnosTargets}
         onAddSSH={() => {
           setSSHEditTarget(null)
           setSSHEditOpen(true)
@@ -1028,6 +1092,23 @@ export default function AcmePage() {
         onTestCAS={async (t) => {
           try {
             await api.post(`/acme/deploy/targets/${t.id}/test`)
+            toast.success('连接正常')
+          } catch (e: any) {
+            toast.error(e?.response?.data?.error || e?.message || '连接失败')
+          }
+        }}
+        onAddFnOS={() => {
+          setFnOSEditTarget(null)
+          setFnOSEditOpen(true)
+        }}
+        onEditFnOS={(t) => {
+          setFnOSEditTarget(t)
+          setFnOSEditOpen(true)
+        }}
+        onDeleteFnOS={(t) => setFnOSDeletePending(t)}
+        onTestFnOS={async (t) => {
+          try {
+            await api.post(`/acme/fnos-targets/${t.id}/test`)
             toast.success('连接正常')
           } catch (e: any) {
             toast.error(e?.response?.data?.error || e?.message || '连接失败')
@@ -1082,16 +1163,19 @@ export default function AcmePage() {
             setDeployDomain(null)
             setSafeDeployDomain(null)
             setCASDeployDomain(null)
+            setFnOSDeployDomain(null)
           }
         }}
         domain={deployEntryDomain}
         sshConfigs={deployConfigs}
         safelineConfigs={safeDeployConfigs}
         casConfigs={casDeployConfigs}
+        fnosConfigs={fnosDeployConfigs}
         sshTargets={sshTargets}
         safelineTargets={safelineTargets}
         casTargets={casTargets}
-        loading={deployConfigLoading || safeDeployLoading || casDeployLoading}
+        fnosTargets={fnosTargets}
+        loading={deployConfigLoading || safeDeployLoading || casDeployLoading || fnosDeployLoading}
         busy={busy}
         onAddSSH={() => {
           setDeployEditTarget(null)
@@ -1133,6 +1217,16 @@ export default function AcmePage() {
         }}
         onDeleteCAS={(cfg) => setCASDeployDeletePending(cfg)}
         onDeployCAS={(cfg) => void startDeployCASConfig(cfg)}
+        onAddFnOS={() => {
+          setFnOSDeployEditTarget(null)
+          setFnOSDeployEditOpen(true)
+        }}
+        onEditFnOS={(cfg) => {
+          setFnOSDeployEditTarget(cfg)
+          setFnOSDeployEditOpen(true)
+        }}
+        onDeleteFnOS={(cfg) => setFnOSDeployDeletePending(cfg)}
+        onDeployFnOS={(cfg) => void startDeployFnOSConfig(cfg)}
         onDeployAll={() => void startDeployAllConfigs()}
       />
 
@@ -1171,6 +1265,27 @@ export default function AcmePage() {
         domain={casDeployDomain}
         config={casDeployEditTarget}
         targets={casTargets}
+        onSaved={() => {
+          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
+        }}
+      />
+
+      <FnOSTargetEditDialog
+        open={fnosEditOpen}
+        onOpenChange={setFnOSEditOpen}
+        target={fnosEditTarget}
+        credentials={sshCredentials}
+        sshTargets={sshTargets}
+        onManageCredentials={() => setSSHCredDrawerOpen(true)}
+        onSaved={reloadDeployTargets}
+      />
+
+      <FnOSDeployConfigEditDialog
+        open={fnosDeployEditOpen}
+        onOpenChange={setFnOSDeployEditOpen}
+        domain={fnosDeployDomain}
+        config={fnosDeployEditTarget}
+        targets={fnosTargets}
         onSaved={() => {
           if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
         }}
@@ -1316,6 +1431,54 @@ export default function AcmePage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={onDeleteCASDeployConfig}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!fnosDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setFnOSDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除 fnOS 实例</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除{' '}
+              <span className="font-mono font-medium text-foreground">
+                {fnosDeletePending?.name}
+              </span>{' '}
+              及其部署配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteFnOSTarget}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!fnosDeployDeletePending}
+        onOpenChange={(o) => {
+          if (!o) setFnOSDeployDeletePending(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除 fnOS 部署配置</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除{' '}
+              <span className="font-mono font-medium text-foreground">
+                {fnosDeployDeletePending?.name || `#${fnosDeployDeletePending?.id}`}
+              </span>{' '}
+              的 fnOS 部署配置。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteFnOSDeployConfig}>删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

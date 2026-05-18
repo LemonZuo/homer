@@ -12,7 +12,7 @@ Homer 是一个自用的小管家工具集，用来跑主动型、轻量级的�
 - 事项提醒：体检、续费、办事截止日这类一次性日期，提前几天开始提醒，同一天不重复吵你。
 - 调度面板：看每个任务几点跑、上次跑得怎样；需要时也可以点一下“现在就跑”。
 - ACME 证书管理：维护 ACME 账号、DNS provider 凭证、域名、签发任务、证书产物和续期任务。
-- 证书部署：证书签好以后，可以继续送到 SSH 机器、雷池 SafeLine 或阿里云 CAS，不用手动复制粘贴；失败的部署任务有定时重试和手动重试。
+- 证书部署：证书签好以后，可以继续送到 SSH 机器、雷池 SafeLine、阿里云 CAS 或飞牛 fnOS，不用手动复制粘贴；失败的部署任务有定时重试和手动重试。
 - 阿里云 CAS / CDN：查看 CAS 证书库存、删除证书、把证书一键部署到 CDN，加速域名只读查看。
 - 短信转发器：对接 SmsForwarder Android，查询配置、发送短信、查短信记录都走一个页面。
 - 12306Bypass webhook 转发：接收分流抢票助手 webhook，再转发到企业微信和 Resend 邮件。
@@ -36,7 +36,7 @@ homer/
 ├── main.go                 # 入口，组装配置、数据库、服务、路由和调度器
 ├── wire.go                 # ACME / scheduler 依赖组装
 ├── internal/
-│   ├── acme/               # ACME 签发、续期、部署（SSH/SafeLine/alicas）、SSE 日志
+│   ├── acme/               # ACME 签发、续期、部署（SSH/SafeLine/alicas/fnos）、SSE 日志
 │   ├── aliyun/             # 阿里云 SDK 客户端封装
 │   ├── birthday/           # 生日提醒任务
 │   ├── cas/                # 阿里云 CAS 证书查询/删除/部署到 CDN
@@ -311,8 +311,8 @@ dist/server-linux-arm64
 | `/api/acme/accounts` | ACME 账号 CRUD |
 | `/api/acme/credentials` 、`/api/acme/ssh-credentials` | DNS provider 与 SSH 凭证 |
 | `/api/acme/domains` | 域名 CRUD、签发、吊销、证书查询 |
-| `/api/acme/{ssh,safeline,cas}-targets` | 各类部署目标 CRUD + 连通性测试 |
-| `/api/acme/domains/:id/{ssh,safeline,cas}-deploy-configs` | 域名 → 部署目标的绑定 |
+| `/api/acme/{ssh,safeline,cas,fnos}-targets` | 各类部署目标 CRUD + 连通性测试 |
+| `/api/acme/domains/:id/{ssh,safeline,cas,fnos}-deploy-configs` | 域名 → 部署目标的绑定 |
 | `/api/acme/deploy/configs/:id/deploy` | 触发单个部署 |
 | `/api/acme/tasks` 、 `POST /api/acme/tasks/:id/retry` 、 `GET /api/acme/tasks/:id/stream` | 任务历史、手动重试、SSE 实时日志 |
 | `/api/sms/*` | SmsForwarder 配置、发送、查询 |
@@ -324,7 +324,7 @@ dist/server-linux-arm64
 2. 再创建 DNS provider 凭证，也就是告诉 Homer 怎么完成 DNS-01 校验。已实现深度校验的 provider 包括 `cloudflare`、`dnspod`、`alidns`、`tencentcloud`、`huaweicloud`。
 3. 创建域名配置，选择 ACME 账号和 DNS provider；密钥类型默认走全局 `ACME_KEY_TYPE`。
 4. 手动签发一次确认链路可用，之后交给 `ACME_RENEW_CRON` 自动检查临期证书。
-5. 需要部署时，配置部署目标和部署配置。当前支持 SSH、雷池 SafeLine、阿里云 CAS（`alicas`）三种 driver。
+5. 需要部署时，配置部署目标和部署配置。当前支持 SSH、雷池 SafeLine、阿里云 CAS（`alicas`）、飞牛 fnOS（`fnos`，SSH 覆盖 ssls 时间戳目录 + psql 更新 trim_connect.cert + 重启 trim_nginx）四种 driver。
 6. 部署失败会先按 `ACME_DEPLOY_RETRY` 在同次任务内重试；仍失败的会被 `ACME_DEPLOY_RETRY_CRON` 定时捞起来补，也可以在 UI 的任务历史里手动重试。
 
 ACME 签发产物既会写入数据库，也会使用 `ACME_DATA_DIR` 作为本地工作目录。生产部署时应确保该目录持久化。

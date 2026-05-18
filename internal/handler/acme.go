@@ -9,9 +9,10 @@ import (
 	"strconv"
 
 	"github.com/LemonZuo/homer/internal/acme"
+	acmealicas "github.com/LemonZuo/homer/internal/acme/deployer/alicas"
+	acmefnos "github.com/LemonZuo/homer/internal/acme/deployer/fnos"
 	acmesafeline "github.com/LemonZuo/homer/internal/acme/deployer/safeline"
 	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
-	acmealicas "github.com/LemonZuo/homer/internal/acme/deployer/alicas"
 	acmeproviders "github.com/LemonZuo/homer/internal/acme/providers"
 	"github.com/LemonZuo/homer/internal/model"
 
@@ -27,6 +28,8 @@ type ACMEHandler struct {
 	safelineDeploys *acmesafeline.DeployConfigStore
 	casTargets      *acmealicas.TargetStore
 	casDeploys      *acmealicas.DeployConfigStore
+	fnosTargets     *acmefnos.TargetStore
+	fnosDeploys     *acmefnos.DeployConfigStore
 }
 
 func NewACMEHandler(svc *acme.Service) *ACMEHandler {
@@ -38,6 +41,8 @@ func NewACMEHandler(svc *acme.Service) *ACMEHandler {
 		safelineDeploys: acmesafeline.NewDeployConfigStore(svc.DeployConfigs()),
 		casTargets:      acmealicas.NewTargetStore(svc.DeployTargets()),
 		casDeploys:      acmealicas.NewDeployConfigStore(svc.DeployConfigs()),
+		fnosTargets:     acmefnos.NewTargetStore(svc.DeployTargets()),
+		fnosDeploys:     acmefnos.NewDeployConfigStore(svc.DeployConfigs()),
 	}
 }
 
@@ -109,6 +114,11 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.PUT("/cas-targets/:id", h.updateCASTarget)
 	g.DELETE("/cas-targets/:id", h.deleteCASTarget)
 	g.POST("/cas-targets/:id/test", h.testCASTarget)
+	g.GET("/fnos-targets", h.listFnOSTargets)
+	g.POST("/fnos-targets", h.upsertFnOSTarget)
+	g.PUT("/fnos-targets/:id", h.updateFnOSTarget)
+	g.DELETE("/fnos-targets/:id", h.deleteFnOSTarget)
+	g.POST("/fnos-targets/:id/test", h.testFnOSTarget)
 	g.GET("/deploy/targets", h.listDeployTargets)
 	g.POST("/deploy/targets", h.upsertDeployTarget)
 	g.PUT("/deploy/targets/:id", h.updateDeployTarget)
@@ -126,6 +136,9 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.PUT("/cas-deploy-configs/:id", h.updateCASDeployConfig)
 	g.DELETE("/cas-deploy-configs/:id", h.deleteCASDeployConfig)
 	g.POST("/cas-deploy-configs/:id/deploy", h.deployCASConfig)
+	g.PUT("/fnos-deploy-configs/:id", h.updateFnOSDeployConfig)
+	g.DELETE("/fnos-deploy-configs/:id", h.deleteFnOSDeployConfig)
+	g.POST("/fnos-deploy-configs/:id/deploy", h.deployFnOSConfig)
 	g.GET("/credentials", h.listCredentials)
 	g.POST("/credentials", h.upsertCredential)
 	g.DELETE("/credentials/:id", h.deleteCredential)
@@ -153,6 +166,9 @@ func (h *ACMEHandler) Register(rg *gin.RouterGroup) {
 	g.GET("/domains/:id/cas-deploy-configs", h.listCASDeployConfigs)
 	g.POST("/domains/:id/cas-deploy-configs", h.upsertCASDeployConfig)
 	g.POST("/domains/:id/cas-deploy-configs/deploy", h.deployCASConfigsByDomain)
+	g.GET("/domains/:id/fnos-deploy-configs", h.listFnOSDeployConfigs)
+	g.POST("/domains/:id/fnos-deploy-configs", h.upsertFnOSDeployConfig)
+	g.POST("/domains/:id/fnos-deploy-configs/deploy", h.deployFnOSConfigsByDomain)
 	g.GET("/tasks", h.listTasks)
 	g.GET("/tasks/:id", h.getTask)
 	g.POST("/tasks/:id/retry", h.retryTask)
@@ -1050,6 +1066,175 @@ func (h *ACMEHandler) deployCASConfigsByDomain(c *gin.Context) {
 		return
 	}
 	taskIDs, err := h.svc.DeployConfigsByDomainAsync(id, acme.DeployKindUploadCAS)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_ids": taskIDs}})
+}
+
+func (h *ACMEHandler) listFnOSTargets(c *gin.Context) {
+	items, err := h.fnosTargets.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertFnOSTarget(c *gin.Context) {
+	var t model.ACMEFnOSTarget
+	if err := c.ShouldBindJSON(&t); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	t.ID = 0
+	row, err := h.fnosTargets.Upsert(&t)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateFnOSTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var t model.ACMEFnOSTarget
+	if err := c.ShouldBindJSON(&t); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	t.ID = id
+	row, err := h.fnosTargets.Upsert(&t)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteFnOSTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.fnosTargets.Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) testFnOSTarget(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.fnosTargets.Test(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "连接正常"})
+}
+
+func (h *ACMEHandler) listFnOSDeployConfigs(c *gin.Context) {
+	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || domainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	items, err := h.fnosDeploys.ListByDomain(domainID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *ACMEHandler) upsertFnOSDeployConfig(c *gin.Context) {
+	domainID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || domainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var cfg model.ACMEFnOSDeployConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	cfg.ID = 0
+	row, err := h.fnosDeploys.Upsert(domainID, &cfg)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) updateFnOSDeployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	var cfg model.ACMEFnOSDeployConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	if cfg.DomainID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain_id 无效"})
+		return
+	}
+	cfg.ID = id
+	row, err := h.fnosDeploys.Upsert(cfg.DomainID, &cfg)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
+func (h *ACMEHandler) deleteFnOSDeployConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	if err := h.fnosDeploys.Delete(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+func (h *ACMEHandler) deployFnOSConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskID, err := h.svc.DeployConfigTaskAsync(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"task_id": taskID}})
+}
+
+func (h *ACMEHandler) deployFnOSConfigsByDomain(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+	taskIDs, err := h.svc.DeployConfigsByDomainAsync(id, acme.DeployKindFnOS)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

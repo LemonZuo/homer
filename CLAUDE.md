@@ -6,7 +6,7 @@
 
 个人「小管家」型工具集，跑一些**主动型**的轻量任务，例如：
 
-- 证书管理（ACME 自动续期、部署到 SSH / SafeLine / 阿里云 CAS、失败重试；阿里云 CAS 证书归档、CDN 加速域名只读查看）
+- 证书管理（ACME 自动续期、部署到 SSH / SafeLine / 阿里云 CAS / 飞牛 fnOS、失败重试；阿里云 CAS 证书归档、CDN 加速域名只读查看）
 - 生日 / 纪念日提醒
 - SmsForwarder 短信转发、12306Bypass webhook 中转
 - 其他偶尔会扩进来的自用小功能
@@ -29,7 +29,7 @@ homer/
 ├── go.mod / go.sum
 ├── .env / .env.example
 ├── internal/
-│   ├── acme/        # 签发、续期、部署 driver（ssh/safeline/alicas）、SSE
+│   ├── acme/        # 签发、续期、部署 driver（ssh/safeline/alicas/fnos）、SSE
 │   ├── aliyun/      # 阿里云 SDK 客户端封装
 │   ├── buildinfo/   # 版本/commit 注入
 │   ├── cas/、cdn/   # 阿里云 CAS/CDN 查询与 CAS→CDN 部署

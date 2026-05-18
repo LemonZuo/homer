@@ -3,6 +3,8 @@ import type {
   CASTarget,
   DeployConfig,
   DeployTarget,
+  FnOSDeployConfig,
+  FnOSTarget,
   ProviderSchema,
   SafelineDeployConfig,
   SafelineTarget,
@@ -107,11 +109,35 @@ export function deployTargetToCAS(t: DeployTarget): CASTarget {
   }
 }
 
+export function deployTargetToFnOS(t: DeployTarget): FnOSTarget {
+  const auth = safeParseJSON(t.auth_json)
+  const cfg = safeParseJSON(t.config_json)
+  const endpoint = parseSSHEndpoint(t.endpoint)
+  return {
+    id: t.id,
+    name: t.name,
+    host: endpoint.host,
+    port: endpoint.port,
+    auth_source: String(auth.auth_source ?? 'inline') === 'credential' ? 'credential' : 'inline',
+    credential_id: Number(auth.credential_id ?? 0) || 0,
+    username: String(auth.username ?? ''),
+    auth_type: String(auth.auth_type ?? 'password'),
+    password: String(auth.password ?? ''),
+    private_key: String(auth.private_key ?? ''),
+    passphrase: String(auth.passphrase ?? ''),
+    enabled: t.enabled,
+    bastion_target_id: Number(cfg.bastion_target_id ?? 0) || 0,
+    created_at: t.created_at ?? '',
+    updated_at: t.updated_at ?? '',
+  }
+}
+
 export function splitDeployTargets(rows: DeployTarget[]) {
   return {
     ssh: rows.filter((t) => t.kind === 'ssh').map(deployTargetToSSH),
     safeline: rows.filter((t) => t.kind === 'safeline').map(deployTargetToSafeline),
     cas: rows.filter((t) => t.kind === 'upload_cas').map(deployTargetToCAS),
+    fnos: rows.filter((t) => t.kind === 'fnos').map(deployTargetToFnOS),
   }
 }
 
@@ -168,6 +194,32 @@ export function casTargetToDeployTarget(t: CASTarget): DeployTarget {
   }
 }
 
+export function fnosTargetToDeployTarget(t: FnOSTarget): DeployTarget {
+  const credential = t.auth_source === 'credential'
+  const auth = credential
+    ? { auth_source: 'credential', credential_id: t.credential_id }
+    : {
+        auth_source: 'inline',
+        username: t.username,
+        auth_type: t.auth_type,
+        password: t.password,
+        private_key: t.private_key,
+        passphrase: t.passphrase,
+      }
+  const cfg = t.bastion_target_id && t.bastion_target_id > 0
+    ? { bastion_target_id: t.bastion_target_id }
+    : {}
+  return {
+    id: t.id,
+    name: t.name,
+    kind: 'fnos',
+    endpoint: `${t.host}:${t.port || 22}`,
+    auth_json: JSON.stringify(auth),
+    config_json: JSON.stringify(cfg),
+    enabled: t.enabled,
+  }
+}
+
 export function deployConfigToSSH(c: DeployConfig): SSHDeployConfig {
   const cfg = safeParseJSON(c.config_json)
   return {
@@ -219,11 +271,27 @@ export function deployConfigToCAS(c: DeployConfig): CASDeployConfig {
   }
 }
 
+export function deployConfigToFnOS(c: DeployConfig): FnOSDeployConfig {
+  const cfg = safeParseJSON(c.config_json)
+  return {
+    id: c.id,
+    domain_id: c.domain_id,
+    target_id: c.target_id,
+    name: c.name,
+    domain_override: String(cfg.domain_override ?? ''),
+    auto_deploy: c.auto_deploy,
+    enabled: c.enabled,
+    created_at: c.created_at ?? '',
+    updated_at: c.updated_at ?? '',
+  }
+}
+
 export function splitDeployConfigs(rows: DeployConfig[]) {
   return {
     ssh: rows.filter((c) => c.kind === 'ssh').map(deployConfigToSSH),
     safeline: rows.filter((c) => c.kind === 'safeline').map(deployConfigToSafeline),
     cas: rows.filter((c) => c.kind === 'upload_cas').map(deployConfigToCAS),
+    fnos: rows.filter((c) => c.kind === 'fnos').map(deployConfigToFnOS),
   }
 }
 
@@ -275,6 +343,20 @@ export function casConfigToDeployConfig(c: CASDeployConfig): DeployConfig {
   }
 }
 
+export function fnosConfigToDeployConfig(c: FnOSDeployConfig): DeployConfig {
+  return {
+    id: c.id,
+    domain_id: c.domain_id,
+    target_id: c.target_id,
+    kind: 'fnos',
+    name: c.name,
+    config_json: JSON.stringify({ domain_override: c.domain_override }),
+    state_json: '{}',
+    auto_deploy: c.auto_deploy,
+    enabled: c.enabled,
+  }
+}
+
 export const STATUS_STYLE: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
   running: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
@@ -299,6 +381,7 @@ export const KIND_LABEL: Record<string, string> = {
   deploy_ssh: '部署 SSH',
   deploy_safeline: '部署雷池',
   deploy_upload_cas: '部署 CAS',
+  deploy_fnos: '部署 fnOS',
 }
 
 export const TASK_PAGE_SIZES = [5, 10, 20, 50, 100]
@@ -377,6 +460,20 @@ export function casTargetSummary(t?: CASTarget) {
 }
 
 export function casConfigTitle(cfg: CASDeployConfig) {
+  return cfg.name?.trim() || `配置 #${cfg.id}`
+}
+
+export function fnosTargetByID(targets: FnOSTarget[], id: number) {
+  return targets.find((t) => t.id === id)
+}
+
+export function fnosTargetSummary(t?: FnOSTarget) {
+  if (!t) return 'fnOS 实例不存在'
+  const who = t.auth_source === 'credential' ? '凭证' : t.username || '未配置用户'
+  return `${t.name} · ${who}@${t.host}:${t.port || 22}`
+}
+
+export function fnosConfigTitle(cfg: FnOSDeployConfig) {
   return cfg.name?.trim() || `配置 #${cfg.id}`
 }
 

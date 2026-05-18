@@ -677,6 +677,8 @@ func deployTaskKind(kind string) string {
 		return "deploy_safeline"
 	case DeployKindUploadCAS:
 		return "deploy_upload_cas"
+	case DeployKindFnOS:
+		return "deploy_fnos"
 	default:
 		return "deploy"
 	}

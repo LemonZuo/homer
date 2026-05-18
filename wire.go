@@ -9,9 +9,10 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/LemonZuo/homer/internal/acme"
+	acmealicas "github.com/LemonZuo/homer/internal/acme/deployer/alicas"
+	acmefnos "github.com/LemonZuo/homer/internal/acme/deployer/fnos"
 	acmesafeline "github.com/LemonZuo/homer/internal/acme/deployer/safeline"
 	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
-	acmealicas "github.com/LemonZuo/homer/internal/acme/deployer/alicas"
 	"github.com/LemonZuo/homer/internal/birthday"
 	"github.com/LemonZuo/homer/internal/cas"
 	"github.com/LemonZuo/homer/internal/cdn"
@@ -88,6 +89,7 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config) *acme.Service {
 		acmessh.NewDriver(sshCreds, gormDB),
 		acmesafeline.NewDriver(),
 		acmealicas.NewDriver(),
+		acmefnos.NewDriver(sshCreds, gormDB),
 	)
 	targets := acme.NewDeployTargetStore(gormDB, registry)
 	configs := acme.NewDeployConfigStore(gormDB, targets, registry)

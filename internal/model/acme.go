@@ -181,6 +181,43 @@ type ACMEUploadCASDeployConfig struct {
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
+// ACMEFnOSTarget 是飞牛 OS（fnOS）部署目标的旧 HTTP/UI 兼容视图；
+// 实际持久化使用 ACMEDeployTarget。SSH 连接仅支持内联认证（不走 ssh_credential、不支持跳板）。
+// ACMEFnOSTarget 视图复用与 SSH 相同的连接模型：支持 inline / credential 两种认证源，
+// 以及通过另一台 SSH 目标做单跳跳板；底层仍写到 ACMEDeployTarget 的 auth_json / config_json。
+type ACMEFnOSTarget struct {
+	ID              int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name            string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
+	Host            string    `gorm:"column:host;size:255" json:"host"`
+	Port            int       `gorm:"column:port;default:22" json:"port"`
+	AuthSource      string    `gorm:"-" json:"auth_source"`       // inline | credential
+	CredentialID    int64     `gorm:"-" json:"credential_id"`     // auth_source=credential 时使用
+	BastionTargetID int64     `gorm:"-" json:"bastion_target_id"` // 经哪台 SSH target 跳
+	Username        string    `gorm:"column:username;size:128" json:"username"`
+	AuthType        string    `gorm:"column:auth_type;size:16" json:"auth_type"` // password | key
+	Password        string    `gorm:"column:password;type:text" json:"password"`
+	PrivateKey      string    `gorm:"column:private_key;type:text" json:"private_key"`
+	Passphrase      string    `gorm:"column:passphrase;type:text" json:"passphrase"`
+	Enabled         BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+// ACMEFnOSDeployConfig 是飞牛 OS 部署配置的旧 HTTP/UI 兼容视图。
+// DomainOverride 留空时使用绑定 ACMEDomain 的 MainDomain；
+// 适用于 fnOS 上 cert.domain 与签发主域不一致的场景。
+type ACMEFnOSDeployConfig struct {
+	ID             int64     `gorm:"primaryKey;column:id" json:"id"`
+	DomainID       int64     `gorm:"column:domain_id;index" json:"domain_id"`
+	TargetID       int64     `gorm:"column:target_id;index" json:"target_id"`
+	Name           string    `gorm:"column:name;size:64" json:"name"`
+	DomainOverride string    `gorm:"-" json:"domain_override"`
+	AutoDeploy     BoolFlag  `gorm:"column:auto_deploy;type:varchar(1);default:'0'" json:"auto_deploy"`
+	Enabled        BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
 // ACMEDomain 自动签发的域名配置。
 // account_id 引用 ACMEAccount.ID；provider 引用 ACMECredential.Provider。
 // san_providers 是可选的「按域名指定 DNS provider」覆盖表，JSON：{"b.com":"alidns"}；

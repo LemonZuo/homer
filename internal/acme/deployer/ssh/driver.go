@@ -4,19 +4,16 @@
 package acmessh
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net"
-	"path"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/LemonZuo/homer/internal/acme"
+	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/model"
-	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
 
@@ -146,7 +143,11 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	if err != nil {
 		return err
 	}
-	client, cleanup, err := d.dialSSH(nil, t)
+	conn, err := d.connFor(t)
+	if err != nil {
+		return err
+	}
+	client, cleanup, err := sshx.Dial(nil, conn)
 	if err != nil {
 		return err
 	}
@@ -245,16 +246,22 @@ func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget
 // resolveCredential 在凭证模式下把 ssh_credential 的认证信息覆盖到 target 上。
 // inline 模式直接返回。
 func (d *Driver) resolveCredential(t *model.ACMESSHTarget) error {
+	return ResolveCredential(d.credentials, t)
+}
+
+// ResolveCredential 是 resolveCredential 的包外暴露形式，供其它 SSH 复用方
+// （例如 fnos driver 把 SSH target 当跳板机）调用。inline 模式直接返回。
+func ResolveCredential(credentials *acme.SSHCredentialStore, t *model.ACMESSHTarget) error {
 	if t.AuthSource != AuthSourceCredential {
 		return nil
 	}
-	if d.credentials == nil {
+	if credentials == nil {
 		return errors.New("凭证模式未注入 SSHCredentialStore")
 	}
 	if t.CredentialID <= 0 {
 		return errors.New("凭证模式需要选择登录凭证")
 	}
-	cred, err := d.credentials.Get(t.CredentialID)
+	cred, err := credentials.Get(t.CredentialID)
 	if err != nil {
 		return fmt.Errorf("加载 SSH 登录凭证失败：%w", err)
 	}
@@ -267,6 +274,12 @@ func (d *Driver) resolveCredential(t *model.ACMESSHTarget) error {
 		t.AuthType = "password"
 	}
 	return nil
+}
+
+// TargetFromDeployTarget 是 targetFromDeployTarget 的包外暴露形式，
+// 供其它 driver（例如 fnos）把现成的 SSH target 解析成 ACMESSHTarget 视图。
+func TargetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget, error) {
+	return targetFromDeployTarget(target)
 }
 
 func deployTargetFromTarget(t model.ACMESSHTarget) model.ACMEDeployTarget {
@@ -383,83 +396,33 @@ func targetSummary(t model.ACMESSHTarget) string {
 	return fmt.Sprintf("%s@%s:%d", t.Username, t.Host, t.Port)
 }
 
-// dialSSH 拨号到目标 SSH 机器。若 target.BastionTargetID > 0，先连跳板机，
-// 再通过跳板机的 net.Conn 与最终目标握手（单跳，跳板机本身的 bastion 字段被忽略）。
-// 返回的 cleanup 会按 LIFO 顺序关闭所有 client。
-func (d *Driver) dialSSH(logf func(string, ...any), target *model.ACMESSHTarget) (*ssh.Client, func(), error) {
+// connFor 把已解析的 SSH 目标（含凭证、跳板机）翻译成与 model 解耦的 sshx.Conn。
+// 跳板机单跳，跳板机本身的 bastion 被忽略。
+func (d *Driver) connFor(target *model.ACMESSHTarget) (*sshx.Conn, error) {
 	if err := d.resolveCredential(target); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	auth, err := sshAuth(*target)
+	auth, err := sshx.AuthMethod(target.AuthType, target.Password, target.PrivateKey, target.Passphrase)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	cfg := &ssh.ClientConfig{
-		User:            target.Username,
-		Auth:            []ssh.AuthMethod{auth},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         15 * time.Second,
-	}
-	addr := net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
-
-	// 直连
+	conn := &sshx.Conn{Host: target.Host, Port: target.Port, User: target.Username, Auth: auth}
 	if target.BastionTargetID <= 0 {
-		if logf != nil {
-			logf("连接 SSH：%s@%s", target.Username, addr)
-		}
-		client, err := ssh.Dial("tcp", addr, cfg)
-		if err != nil {
-			return nil, nil, fmt.Errorf("连接 SSH 失败：%w", err)
-		}
-		return client, func() { _ = client.Close() }, nil
+		return conn, nil
 	}
-
-	// 经跳板机
 	bastion, err := d.loadBastion(target.BastionTargetID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := d.resolveCredential(bastion); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	bAuth, err := sshAuth(*bastion)
+	bAuth, err := sshx.AuthMethod(bastion.AuthType, bastion.Password, bastion.PrivateKey, bastion.Passphrase)
 	if err != nil {
-		return nil, nil, fmt.Errorf("跳板机认证准备失败：%w", err)
+		return nil, fmt.Errorf("跳板机认证准备失败：%w", err)
 	}
-	bCfg := &ssh.ClientConfig{
-		User:            bastion.Username,
-		Auth:            []ssh.AuthMethod{bAuth},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         15 * time.Second,
-	}
-	bAddr := net.JoinHostPort(bastion.Host, strconv.Itoa(bastion.Port))
-	if logf != nil {
-		logf("连接跳板机：%s@%s", bastion.Username, bAddr)
-	}
-	bClient, err := ssh.Dial("tcp", bAddr, bCfg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("连接跳板机失败：%w", err)
-	}
-	if logf != nil {
-		logf("经跳板机 %s 连接 SSH：%s@%s", bastion.Name, target.Username, addr)
-	}
-	tunnel, err := bClient.Dial("tcp", addr)
-	if err != nil {
-		_ = bClient.Close()
-		return nil, nil, fmt.Errorf("从跳板机连接目标失败：%w", err)
-	}
-	conn, chans, reqs, err := ssh.NewClientConn(tunnel, addr, cfg)
-	if err != nil {
-		_ = tunnel.Close()
-		_ = bClient.Close()
-		return nil, nil, fmt.Errorf("通过跳板机握手 SSH 失败：%w", err)
-	}
-	client := ssh.NewClient(conn, chans, reqs)
-	cleanup := func() {
-		_ = client.Close()
-		_ = bClient.Close()
-	}
-	return client, cleanup, nil
+	conn.Bastion = &sshx.Conn{Host: bastion.Host, Port: bastion.Port, User: bastion.Username, Auth: bAuth}
+	return conn, nil
 }
 
 func (d *Driver) deployCert(logf func(string, ...any), target *model.ACMESSHTarget, cert model.ACMECert, opts DeployOptions) error {
@@ -467,7 +430,11 @@ func (d *Driver) deployCert(logf func(string, ...any), target *model.ACMESSHTarg
 	if err := opts.validate(); err != nil {
 		return err
 	}
-	client, cleanup, err := d.dialSSH(logf, target)
+	conn, err := d.connFor(target)
+	if err != nil {
+		return err
+	}
+	client, cleanup, err := sshx.Dial(logf, conn)
 	if err != nil {
 		return err
 	}
@@ -491,7 +458,7 @@ func (d *Driver) deployCert(logf func(string, ...any), target *model.ACMESSHTarg
 		if strings.TrimSpace(f.data) == "" {
 			return fmt.Errorf("%s 内容为空，无法写入 %s", f.label, f.path)
 		}
-		if err := writeRemoteFile(client, f.path, []byte(f.data), f.mode); err != nil {
+		if err := sshx.WriteFile(client, f.path, []byte(f.data), f.mode); err != nil {
 			return fmt.Errorf("写入远端 %s 失败：%w", f.path, err)
 		}
 		if logf != nil {
@@ -504,7 +471,7 @@ func (d *Driver) deployCert(logf func(string, ...any), target *model.ACMESSHTarg
 		if logf != nil {
 			logf("执行部署命令：%s", cmd)
 		}
-		out, err := runRemoteCommand(client, cmd, nil)
+		out, err := sshx.Run(client, cmd, nil)
 		if logf != nil && strings.TrimSpace(out) != "" {
 			logf("命令输出：\n%s", strings.TrimSpace(out))
 		}
@@ -517,59 +484,6 @@ func (d *Driver) deployCert(logf func(string, ...any), target *model.ACMESSHTarg
 
 func renderTemplate(s, domain string) string {
 	return strings.ReplaceAll(s, "{domain}", domain)
-}
-
-func sshAuth(target model.ACMESSHTarget) (ssh.AuthMethod, error) {
-	switch target.AuthType {
-	case "password":
-		return ssh.Password(target.Password), nil
-	case "key":
-		var signer ssh.Signer
-		var err error
-		key := []byte(target.PrivateKey)
-		if strings.TrimSpace(target.Passphrase) != "" {
-			signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(target.Passphrase))
-		} else {
-			signer, err = ssh.ParsePrivateKey(key)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("解析 SSH 私钥失败：%w", err)
-		}
-		return ssh.PublicKeys(signer), nil
-	default:
-		return nil, fmt.Errorf("未知 SSH 认证方式：%s", target.AuthType)
-	}
-}
-
-func writeRemoteFile(client *ssh.Client, remotePath string, data []byte, mode string) error {
-	dir := path.Dir(remotePath)
-	if _, err := runRemoteCommand(client, "mkdir -p "+shellQuote(dir), nil); err != nil {
-		return err
-	}
-	cmd := "cat > " + shellQuote(remotePath) + " && chmod " + shellQuote(mode) + " " + shellQuote(remotePath)
-	_, err := runRemoteCommand(client, cmd, data)
-	return err
-}
-
-func runRemoteCommand(client *ssh.Client, cmd string, stdin []byte) (string, error) {
-	session, err := client.NewSession()
-	if err != nil {
-		return "", err
-	}
-	defer session.Close()
-
-	var out bytes.Buffer
-	session.Stdout = &out
-	session.Stderr = &out
-	if stdin != nil {
-		session.Stdin = bytes.NewReader(stdin)
-	}
-	err = session.Run(cmd)
-	return out.String(), err
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func normalizeTarget(t *model.ACMESSHTarget) {

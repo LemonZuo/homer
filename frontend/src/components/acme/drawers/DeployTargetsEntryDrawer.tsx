@@ -1,4 +1,4 @@
-import { Edit3, KeyRound, Plus, RefreshCw, Server, ShieldCheck, Trash2 } from 'lucide-react'
+import { Edit3, HardDrive, KeyRound, Plus, RefreshCw, Server, ShieldCheck, Trash2 } from 'lucide-react'
 import { Card } from '../../ui/card'
 import { Button } from '../../ui/button'
 import { AliyunIcon } from '../../icons/AliyunIcon'
@@ -10,7 +10,7 @@ import {
   DrawerTitle,
 } from '../../ui/drawer'
 import { cn } from '../../../lib/utils'
-import type { CASTarget, SSHTarget, SafelineTarget } from '../types'
+import type { CASTarget, FnOSTarget, SSHTarget, SafelineTarget } from '../types'
 import { authLabel } from '../utils'
 
 export function DeployTargetsEntryDrawer({
@@ -19,6 +19,7 @@ export function DeployTargetsEntryDrawer({
   sshTargets,
   safelineTargets,
   casTargets,
+  fnosTargets,
   onAddSSH,
   onEditSSH,
   onDeleteSSH,
@@ -32,12 +33,17 @@ export function DeployTargetsEntryDrawer({
   onEditCAS,
   onDeleteCAS,
   onTestCAS,
+  onAddFnOS,
+  onEditFnOS,
+  onDeleteFnOS,
+  onTestFnOS,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   sshTargets: SSHTarget[]
   safelineTargets: SafelineTarget[]
   casTargets: CASTarget[]
+  fnosTargets: FnOSTarget[]
   onAddSSH: () => void
   onEditSSH: (t: SSHTarget) => void
   onDeleteSSH: (t: SSHTarget) => void
@@ -51,6 +57,10 @@ export function DeployTargetsEntryDrawer({
   onEditCAS: (t: CASTarget) => void
   onDeleteCAS: (t: CASTarget) => void
   onTestCAS: (t: CASTarget) => void
+  onAddFnOS: () => void
+  onEditFnOS: (t: FnOSTarget) => void
+  onDeleteFnOS: (t: FnOSTarget) => void
+  onTestFnOS: (t: FnOSTarget) => void
 }) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -255,6 +265,68 @@ export function DeployTargetsEntryDrawer({
                         variant="outline"
                         className="flex-1 hover:text-destructive sm:flex-none"
                         onClick={() => onDeleteCAS(t)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-5">
+            <div>
+              <div className="text-[13px] font-medium">飞牛 OS</div>
+              <div className="text-[11.5px] text-muted-foreground">{fnosTargets.length} 个实例</div>
+            </div>
+            <Button size="sm" onClick={onAddFnOS}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加实例
+            </Button>
+          </div>
+          {fnosTargets.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
+              还没有 fnOS 实例
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {fnosTargets.map((t) => (
+                <Card key={t.id} className="px-4 py-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <HardDrive className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-mono text-[13px] font-medium">{t.name}</span>
+                        <span
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
+                            t.enabled
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          {t.enabled ? '启用' : '停用'}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                        {t.auth_source === 'credential'
+                          ? `凭证@${t.host}:${t.port || 22} · 登录凭证`
+                          : `${t.username || '未配置用户'}@${t.host}:${t.port || 22} · ${authLabel(t.auth_type)}`}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 sm:contents">
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTestFnOS(t)} disabled={!t.enabled}>
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditFnOS(t)}>
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 hover:text-destructive sm:flex-none"
+                        onClick={() => onDeleteFnOS(t)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>

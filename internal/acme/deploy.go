@@ -14,6 +14,7 @@ const (
 	DeployKindSSH       = "ssh"
 	DeployKindSafeline  = "safeline"
 	DeployKindUploadCAS = "upload_cas"
+	DeployKindFnOS      = "fnos"
 )
 
 var (

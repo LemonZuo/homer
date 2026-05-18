@@ -157,6 +157,36 @@ export interface CASDeployConfig {
   updated_at: string
 }
 
+export interface FnOSTarget {
+  id: number
+  name: string
+  host: string
+  port: number
+  auth_source: 'inline' | 'credential' | string
+  credential_id: number
+  username: string
+  auth_type: 'password' | 'key' | string
+  password: string
+  private_key: string
+  passphrase: string
+  enabled: boolean
+  bastion_target_id?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface FnOSDeployConfig {
+  id: number
+  domain_id: number
+  target_id: number
+  name: string
+  domain_override: string
+  auto_deploy: boolean
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface Task {
   id: number
   domain_id: number
