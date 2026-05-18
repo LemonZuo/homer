@@ -4,10 +4,6 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/LemonZuo/homer/internal/chinesedate"
-	"gorm.io/gorm"
 )
 
 // BoolFlag 桥接老库的 varchar("0"/"1") 与前端 / Go 侧的 bool。
@@ -61,7 +57,7 @@ func (b *BoolFlag) UnmarshalJSON(data []byte) error {
 }
 
 // BirthdayRemind 生日提醒记录。
-// 公历日期由用户输入，chinese_birthday / zodiac 在 BeforeSave 钩子自动计算。
+// 公历日期由用户输入，chinese_birthday / zodiac 由 birthday 模块在保存时计算。
 type BirthdayRemind struct {
 	ID              int      `gorm:"primaryKey;column:id" json:"id"`
 	Name            string   `gorm:"column:name;size:30" json:"name"`
@@ -72,17 +68,3 @@ type BirthdayRemind struct {
 }
 
 func (BirthdayRemind) TableName() string { return "birthday_reminder" }
-
-// BeforeSave 在 Create / Update 时自动根据公历生日回填 chinese_birthday 与 zodiac。
-func (b *BirthdayRemind) BeforeSave(_ *gorm.DB) error {
-	if b.Birthday == "" {
-		return nil
-	}
-	t, err := time.ParseInLocation("2006-01-02", b.Birthday, time.Local)
-	if err != nil {
-		return err
-	}
-	b.ChineseBirthday = chinesedate.LunarString(t)
-	b.Zodiac = chinesedate.Zodiac(t)
-	return nil
-}

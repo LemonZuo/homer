@@ -10,7 +10,7 @@ import (
 	sdk "github.com/alibabacloud-go/cdn-20180510/v5/client"
 	"github.com/alibabacloud-go/tea/tea"
 
-	aliyuncdn "github.com/LemonZuo/homer/internal/aliyun/cdn"
+	"github.com/LemonZuo/homer/internal/aliyun"
 )
 
 // ErrNotConfigured 表示未配置阿里云 CDN AK/SK。
@@ -31,7 +31,7 @@ func (s *Service) Configured() bool {
 }
 
 func (s *Service) client() (*sdk.Client, error) {
-	c, err := aliyuncdn.NewClient(s.accessKeyID, s.accessKeySecret)
+	c, err := aliyun.NewCDNClient(s.accessKeyID, s.accessKeySecret)
 	if err != nil {
 		return nil, err
 	}
@@ -43,15 +43,15 @@ func (s *Service) client() (*sdk.Client, error) {
 
 // DomainView 前端只读表格用：对齐老 Vue 页面列。
 type DomainView struct {
-	DomainName   string `json:"domainName"`
-	Cname        string `json:"cname"`
-	DomainStatus string `json:"domainStatus"`
-	SslProtocol  string `json:"sslProtocol"`
-	CertName     string `json:"certName"`
-	GmtCreated   string `json:"gmtCreated"`
-	SourceType   string `json:"sourceType"`
+	DomainName    string `json:"domainName"`
+	Cname         string `json:"cname"`
+	DomainStatus  string `json:"domainStatus"`
+	SslProtocol   string `json:"sslProtocol"`
+	CertName      string `json:"certName"`
+	GmtCreated    string `json:"gmtCreated"`
+	SourceType    string `json:"sourceType"`
 	SourceContent string `json:"sourceContent"`
-	SourcePort   int32  `json:"sourcePort"`
+	SourcePort    int32  `json:"sourcePort"`
 }
 
 // ListDomains 获取加速域名列表，并合并 https 证书信息补 certName。

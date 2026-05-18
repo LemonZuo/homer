@@ -8,7 +8,7 @@ import (
 	sdk "github.com/alibabacloud-go/cas-20200407/v4/client"
 	"github.com/alibabacloud-go/tea/tea"
 
-	aliyuncas "github.com/LemonZuo/homer/internal/aliyun/cas"
+	"github.com/LemonZuo/homer/internal/aliyun"
 )
 
 // ErrNotConfigured 表示未配置阿里云 CAS AK/SK。
@@ -32,7 +32,7 @@ func (s *Service) Configured() bool {
 }
 
 func (s *Service) client() (*sdk.Client, error) {
-	c, err := aliyuncas.NewClient(s.accessKeyID, s.accessKeySecret)
+	c, err := aliyun.NewCASClient(s.accessKeyID, s.accessKeySecret)
 	if err != nil {
 		return nil, err
 	}

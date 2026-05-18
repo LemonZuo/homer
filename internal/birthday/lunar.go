@@ -1,12 +1,11 @@
-// Package chinesedate 提供公历到农历、生肖的转换。
-// 用于生日提醒：保存时把公历日期换成农历字符串以便后续按农历匹配。
-package chinesedate
+package birthday
 
 import (
 	"strings"
 	"time"
 
 	"github.com/6tail/lunar-go/calendar"
+	"github.com/LemonZuo/homer/internal/model"
 )
 
 // LunarString 把 t 转成形如「腊月初八」的农历字符串（仅月+日，不含年份）。
@@ -23,4 +22,18 @@ func LunarString(t time.Time) string {
 func Zodiac(t time.Time) string {
 	solar := calendar.NewSolarFromYmd(t.Year(), int(t.Month()), t.Day())
 	return solar.GetLunar().GetYearShengXiao()
+}
+
+// FillDerivedFields 根据公历生日回填农历生日和生肖。
+func FillDerivedFields(b *model.BirthdayRemind) error {
+	if b.Birthday == "" {
+		return nil
+	}
+	t, err := time.ParseInLocation("2006-01-02", b.Birthday, time.Local)
+	if err != nil {
+		return err
+	}
+	b.ChineseBirthday = LunarString(t)
+	b.Zodiac = Zodiac(t)
+	return nil
 }

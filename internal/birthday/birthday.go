@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/LemonZuo/homer/internal/chinesedate"
 	"github.com/LemonZuo/homer/internal/model"
 )
 
@@ -13,7 +12,7 @@ import (
 func daysUntilLunar(target string, from time.Time) int {
 	for i := 0; i <= 366; i++ {
 		d := from.AddDate(0, 0, i)
-		if chinesedate.LunarString(d) == target {
+		if LunarString(d) == target {
 			return i
 		}
 	}

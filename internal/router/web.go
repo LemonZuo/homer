@@ -1,4 +1,4 @@
-package web
+package router
 
 import (
 	"io"
@@ -10,7 +10,7 @@ import (
 )
 
 const placeholder = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>Account Vault</title>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Homer</title>
 <style>body{font-family:system-ui,sans-serif;max-width:520px;margin:4rem auto;padding:0 1.5rem;color:#222;line-height:1.55}code{background:#f4f4f5;padding:2px 6px;border-radius:4px;font-family:ui-monospace,Menlo,monospace}</style>
 </head><body>
 <h2>前端尚未构建</h2>

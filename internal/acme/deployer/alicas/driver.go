@@ -15,7 +15,7 @@ import (
 	"github.com/alibabacloud-go/tea/tea"
 
 	"github.com/LemonZuo/homer/internal/acme"
-	aliyuncas "github.com/LemonZuo/homer/internal/aliyun/cas"
+	"github.com/LemonZuo/homer/internal/aliyun"
 	"github.com/LemonZuo/homer/internal/model"
 )
 
@@ -56,7 +56,7 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	if err != nil {
 		return err
 	}
-	client, err := aliyuncas.NewClient(t.AccessKeyID, t.AccessKeySecret)
+	client, err := aliyun.NewCASClient(t.AccessKeyID, t.AccessKeySecret)
 	if err != nil {
 		return fmt.Errorf("初始化 CAS 客户端失败：%w", err)
 	}
@@ -83,7 +83,7 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 	if strings.TrimSpace(req.Cert.FullchainPEM) == "" || strings.TrimSpace(req.Cert.KeyPEM) == "" {
 		return nil, errors.New("当前证书内容不完整，无法上传到阿里云 CAS")
 	}
-	client, err := aliyuncas.NewClient(target.AccessKeyID, target.AccessKeySecret)
+	client, err := aliyun.NewCASClient(target.AccessKeyID, target.AccessKeySecret)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 CAS 客户端失败：%w", err)
 	}
@@ -160,4 +160,3 @@ func validateTarget(t model.ACMEUploadCASTarget) error {
 	}
 	return nil
 }
-

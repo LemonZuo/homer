@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/LemonZuo/homer/internal/chinesedate"
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
@@ -26,7 +25,7 @@ func RunOnce(db *gorm.DB, notifier notify.Notifier) {
 	today := time.Now()
 	for _, d := range offsets {
 		target := today.AddDate(0, 0, d)
-		lunar := chinesedate.LunarString(target)
+		lunar := LunarString(target)
 		var items []model.BirthdayRemind
 		if err := db.Where("enabled = ? AND chinese_birthday = ?", "1", lunar).Find(&items).Error; err != nil {
 			logx.Error("birthday query failed", "offset", d, "err", err)

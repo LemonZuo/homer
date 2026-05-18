@@ -9,7 +9,6 @@ import (
 	acmehandler "github.com/LemonZuo/homer/internal/handler/acme"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/notify"
-	"github.com/LemonZuo/homer/internal/web"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -50,8 +49,7 @@ func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier,
 		})
 	})
 
-	handler.NewCRUD[model.BirthdayRemind](db).Register(api, "/birthday")
-	api.POST("/birthday/:id/notify", handler.BirthdayNotify(db, notifier))
+	handler.NewBirthdayHandler(db, notifier).Register(api)
 
 	handler.NewCRUD[model.EventReminder](db).Register(api, "/event")
 	api.POST("/event/:id/notify", handler.EventNotify(db, eventNotifier))
@@ -65,7 +63,7 @@ func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier,
 	notifyHandler.Register(api)
 
 	// 前端单页：未命中 /api/* 的请求都交给 embed 出来的 dist
-	spa := web.SPAHandler(frontend)
+	spa := SPAHandler(frontend)
 	r.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			c.JSON(404, gin.H{"error": "not found"})
