@@ -23,7 +23,7 @@ func NewCertStoreHandler(svc *certstore.Service, cdnopsSvc *cdnops.Service) *Cer
 }
 
 func (h *CertStoreHandler) Register(rg *gin.RouterGroup) {
-	g := rg.Group("/cas")
+	g := rg.Group("/certstore")
 	g.GET("/certificates", h.certificates)
 	g.DELETE("/certificates/:id", h.delete)
 	g.POST("/deploy", h.deploy)

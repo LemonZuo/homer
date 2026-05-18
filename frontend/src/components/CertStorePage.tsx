@@ -65,7 +65,7 @@ export default function CertStorePage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const { data } = await api.get('/cas/certificates')
+      const { data } = await api.get('/certstore/certificates')
       setCerts(data?.data ?? [])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载失败')
@@ -81,7 +81,7 @@ export default function CertStorePage() {
   const deploy = async (c: Cert) => {
     setBusy(`deploy-${c.id}`)
     try {
-      const { data } = await api.post('/cas/deploy', { certName: c.name })
+      const { data } = await api.post('/certstore/deploy', { certName: c.name })
       toast.success(data?.message || '已提交')
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '部署失败')
@@ -93,7 +93,7 @@ export default function CertStorePage() {
   const remove = async (c: Cert) => {
     setBusy(`del-${c.id}`)
     try {
-      await api.delete(`/cas/certificates/${c.id}`)
+      await api.delete(`/certstore/certificates/${c.id}`)
       toast.success('已删除')
       await load()
     } catch (e: any) {

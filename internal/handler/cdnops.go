@@ -19,7 +19,7 @@ func NewCDNOpsHandler(svc *cdnops.Service) *CDNOpsHandler {
 }
 
 func (h *CDNOpsHandler) Register(rg *gin.RouterGroup) {
-	g := rg.Group("/cdn")
+	g := rg.Group("/cdnops")
 	g.GET("/domains", h.domains)
 }
 

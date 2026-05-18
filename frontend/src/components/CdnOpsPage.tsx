@@ -59,7 +59,7 @@ export default function CdnOpsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const { data } = await api.get('/cdn/domains')
+      const { data } = await api.get('/cdnops/domains')
       setDomains(data?.data ?? [])
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.message || '加载失败')
