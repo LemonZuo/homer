@@ -191,7 +191,7 @@ function ChannelDialog({
   )
 }
 
-export default function NotifyPage() {
+export default function Notify() {
   const cs = getColorSet('indigo')
 
   const [modules, setModules] = useState<ModuleMeta[]>([])

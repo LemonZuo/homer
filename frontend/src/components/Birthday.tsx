@@ -34,7 +34,7 @@ interface Birthday {
 
 const blank = { name: '', birthday: '', enabled: true }
 
-export default function BirthdayPage() {
+export default function Birthday() {
   const [records, setRecords] = useState<Birthday[]>([])
   const [loading, setLoading] = useState(true)
   const [kw, setKw] = useState('')

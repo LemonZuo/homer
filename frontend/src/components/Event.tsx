@@ -35,7 +35,7 @@ interface EventItem {
 
 const blank = { title: '', event_date: '', lead_days: 5, remark: '', enabled: true }
 
-export default function EventPage() {
+export default function Event() {
   const [records, setRecords] = useState<EventItem[]>([])
   const [loading, setLoading] = useState(true)
   const [kw, setKw] = useState('')

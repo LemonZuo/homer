@@ -15,7 +15,7 @@ import { ForwarderManageDrawer } from './sms/ForwarderManageDrawer'
 import { LS_KEY, type Forwarder, type QueryType, type SimSlot } from './sms/types'
 import { extractList, simLabel, textOf, timeOf, whoOf } from './sms/utils'
 
-export default function SmsPage() {
+export default function Sms() {
   const cs = getColorSet('teal')
 
   const [forwarders, setForwarders] = useState<Forwarder[]>([])

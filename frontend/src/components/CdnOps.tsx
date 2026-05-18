@@ -52,7 +52,7 @@ function FieldRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export default function CdnOpsPage() {
+export default function CdnOps() {
   const [domains, setDomains] = useState<Domain[]>([])
   const [loading, setLoading] = useState(true)
 

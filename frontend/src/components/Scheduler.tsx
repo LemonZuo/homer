@@ -322,7 +322,7 @@ function JobCard({
   )
 }
 
-export default function SchedulerPage() {
+export default function Scheduler() {
   const cs = getColorSet('blue')
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(false)

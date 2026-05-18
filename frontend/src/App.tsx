@@ -3,14 +3,14 @@ import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
 import { pages, getPage } from './pages'
 
-const BirthdayPage = lazy(() => import('./components/BirthdayPage'))
-const EventPage = lazy(() => import('./components/EventPage'))
-const CdnOpsPage = lazy(() => import('./components/CdnOpsPage'))
-const CertStorePage = lazy(() => import('./components/CertStorePage'))
-const AcmePage = lazy(() => import('./components/AcmePage'))
-const SmsPage = lazy(() => import('./components/SmsPage'))
-const SchedulerPage = lazy(() => import('./components/SchedulerPage'))
-const NotifyPage = lazy(() => import('./components/NotifyPage'))
+const Birthday = lazy(() => import('./components/Birthday'))
+const Event = lazy(() => import('./components/Event'))
+const CdnOps = lazy(() => import('./components/CdnOps'))
+const CertStore = lazy(() => import('./components/CertStore'))
+const Acme = lazy(() => import('./components/Acme'))
+const Sms = lazy(() => import('./components/Sms'))
+const Scheduler = lazy(() => import('./components/Scheduler'))
+const Notify = lazy(() => import('./components/Notify'))
 
 function Empty() {
   return (
@@ -30,14 +30,14 @@ function PageFallback() {
 }
 
 const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
-  birthday: () => <BirthdayPage />,
-  event: () => <EventPage />,
-  cdn: () => <CdnOpsPage />,
-  cas: () => <CertStorePage />,
-  acme: () => <AcmePage />,
-  sms: () => <SmsPage />,
-  scheduler: () => <SchedulerPage />,
-  notify: () => <NotifyPage />,
+  birthday: () => <Birthday />,
+  event: () => <Event />,
+  cdn: () => <CdnOps />,
+  cas: () => <CertStore />,
+  acme: () => <Acme />,
+  sms: () => <Sms />,
+  scheduler: () => <Scheduler />,
+  notify: () => <Notify />,
 }
 
 function CustomPage() {

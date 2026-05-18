@@ -51,7 +51,7 @@ import { DeployTargetsEntryDrawer } from './acme/drawers/DeployTargetsEntryDrawe
 import { SSHCredentialsDrawer } from './acme/drawers/SSHCredentialsDrawer'
 import { DeployConfigsDrawer } from './acme/drawers/DeployConfigsDrawer'
 
-export default function AcmePage() {
+export default function Acme() {
   const {
     domains,
     accounts,
