@@ -32,8 +32,8 @@ function PageFallback() {
 const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
   birthday: () => <Birthday />,
   event: () => <Event />,
-  cdn: () => <CdnOps />,
-  cas: () => <CertStore />,
+  cdnops: () => <CdnOps />,
+  certstore: () => <CertStore />,
   acme: () => <Acme />,
   sms: () => <Sms />,
   scheduler: () => <Scheduler />,

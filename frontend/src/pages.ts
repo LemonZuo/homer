@@ -8,8 +8,8 @@ export interface PageDef {
 export const pages: PageDef[] = [
   { key: 'birthday', label: '生日提醒', color: 'orange' },
   { key: 'event', label: '事项提醒', color: 'blue' },
-  { key: 'cdn', label: '加速域名', color: 'sky' },
-  { key: 'cas', label: '证书管理', color: 'violet' },
+  { key: 'cdnops', label: '加速域名', color: 'sky' },
+  { key: 'certstore', label: '证书管理', color: 'violet' },
   { key: 'acme', label: 'ACME 签发', color: 'emerald' },
   { key: 'sms', label: '短信转发器', color: 'teal' },
   { key: 'scheduler', label: '任务调度', color: 'blue' },
