@@ -1,5 +1,4 @@
 import { Copy, Edit3, HardDrive, Loader2, Plus, Send, ShieldCheck, Trash2 } from 'lucide-react'
-import { Card } from '../../ui/card'
 import { Button } from '../../ui/button'
 import { AliyunIcon } from '../../icons/AliyunIcon'
 import {
@@ -9,7 +8,6 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '../../ui/drawer'
-import { cn } from '../../../lib/utils'
 import type {
   CASDeployConfig,
   CASTarget,
@@ -36,6 +34,14 @@ import {
   targetByID,
   targetSummary,
 } from '../utils'
+import {
+  AutoDeployBadge,
+  CardIconButton,
+  CardTitleRow,
+  DeployCard,
+  EmptyState,
+  EnabledBadge,
+} from './DeployDrawerParts'
 
 export function DeployConfigsDrawer({
   open,
@@ -183,67 +189,25 @@ export function DeployConfigsDrawer({
                   </div>
                 </div>
                 {sshTargets.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    先添加 SSH 机器，再配置部署路径
-                  </p>
+                  <EmptyState>先添加 SSH 机器，再配置部署路径</EmptyState>
                 ) : sshConfigs.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    还没有 SSH 部署配置
-                  </p>
+                  <EmptyState>还没有 SSH 部署配置</EmptyState>
                 ) : (
                   sshConfigs.map((cfg) => {
                     const t = targetByID(sshTargets, cfg.target_id)
                     const deploying = busy === `deploy-ssh-config-${cfg.id}`
                     const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
                     return (
-                      <Card key={cfg.id} className="px-4 py-3">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
-                          <Send className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate font-mono text-[13px] font-medium">
-                                {configTitle(cfg)}
-                              </span>
-                              <span
-                                className={cn(
-                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                                  cfg.enabled
-                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                    : 'bg-muted text-muted-foreground',
-                                )}
-                              >
-                                {cfg.enabled ? '启用' : '停用'}
-                              </span>
-                              {cfg.auto_deploy && (
-                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-                                  自动部署
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                              {targetSummary(t)}
-                            </div>
-                            <div
-                              className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
-                              title={configPrimaryPath(cfg)}
-                            >
-                              {configPrimaryPath(cfg)}
-                            </div>
-                          </div>
-                          <div className="flex gap-2 sm:contents">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 sm:flex-none"
-                              onClick={() => onCopySSH(cfg)}
-                              title="基于当前配置复制一份"
-                            >
+                      <DeployCard
+                        key={cfg.id}
+                        align="start"
+                        icon={<Send className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+                        actions={
+                          <>
+                            <CardIconButton onClick={() => onCopySSH(cfg)} title="基于当前配置复制一份">
                               <Copy className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 sm:flex-none"
+                            </CardIconButton>
+                            <CardIconButton
                               onClick={() => onDeploySSH(cfg)}
                               disabled={!canDeploy}
                               title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
@@ -253,21 +217,30 @@ export function DeployConfigsDrawer({
                               ) : (
                                 <Send className="h-3.5 w-3.5" />
                               )}
-                            </Button>
-                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSSH(cfg)}>
+                            </CardIconButton>
+                            <CardIconButton onClick={() => onEditSSH(cfg)}>
                               <Edit3 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 hover:text-destructive sm:flex-none"
-                              onClick={() => onDeleteSSH(cfg)}
-                            >
+                            </CardIconButton>
+                            <CardIconButton destructive onClick={() => onDeleteSSH(cfg)}>
                               <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
+                            </CardIconButton>
+                          </>
+                        }
+                      >
+                        <CardTitleRow title={configTitle(cfg)} wrap>
+                          <EnabledBadge enabled={cfg.enabled} />
+                          <AutoDeployBadge enabled={cfg.auto_deploy} />
+                        </CardTitleRow>
+                        <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                          {targetSummary(t)}
                         </div>
-                      </Card>
+                        <div
+                          className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
+                          title={configPrimaryPath(cfg)}
+                        >
+                          {configPrimaryPath(cfg)}
+                        </div>
+                      </DeployCard>
                     )
                   })
                 )}
@@ -281,57 +254,22 @@ export function DeployConfigsDrawer({
                   </div>
                 </div>
                 {fnosTargets.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    先添加 fnOS 实例，再配置部署
-                  </p>
+                  <EmptyState>先添加 fnOS 实例，再配置部署</EmptyState>
                 ) : fnosConfigs.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    还没有 fnOS 部署配置
-                  </p>
+                  <EmptyState>还没有 fnOS 部署配置</EmptyState>
                 ) : (
                   fnosConfigs.map((cfg) => {
                     const t = fnosTargetByID(fnosTargets, cfg.target_id)
                     const deploying = busy === `deploy-fnos-config-${cfg.id}`
                     const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
                     return (
-                      <Card key={cfg.id} className="px-4 py-3">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
-                          <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate font-mono text-[13px] font-medium">
-                                {fnosConfigTitle(cfg)}
-                              </span>
-                              <span
-                                className={cn(
-                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                                  cfg.enabled
-                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                    : 'bg-muted text-muted-foreground',
-                                )}
-                              >
-                                {cfg.enabled ? '启用' : '停用'}
-                              </span>
-                              {cfg.auto_deploy && (
-                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-                                  自动部署
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                              {fnosTargetSummary(t)}
-                            </div>
-                            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                              {cfg.domain_override
-                                ? `域名：${cfg.domain_override}`
-                                : `域名：${domain?.main_domain ?? '（主域名）'}`}
-                            </div>
-                          </div>
-                          <div className="flex gap-2 sm:contents">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 sm:flex-none"
+                      <DeployCard
+                        key={cfg.id}
+                        align="start"
+                        icon={<HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+                        actions={
+                          <>
+                            <CardIconButton
                               onClick={() => onDeployFnOS(cfg)}
                               disabled={!canDeploy}
                               title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
@@ -341,21 +279,29 @@ export function DeployConfigsDrawer({
                               ) : (
                                 <HardDrive className="h-3.5 w-3.5" />
                               )}
-                            </Button>
-                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditFnOS(cfg)}>
+                            </CardIconButton>
+                            <CardIconButton onClick={() => onEditFnOS(cfg)}>
                               <Edit3 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 hover:text-destructive sm:flex-none"
-                              onClick={() => onDeleteFnOS(cfg)}
-                            >
+                            </CardIconButton>
+                            <CardIconButton destructive onClick={() => onDeleteFnOS(cfg)}>
                               <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
+                            </CardIconButton>
+                          </>
+                        }
+                      >
+                        <CardTitleRow title={fnosConfigTitle(cfg)} wrap>
+                          <EnabledBadge enabled={cfg.enabled} />
+                          <AutoDeployBadge enabled={cfg.auto_deploy} />
+                        </CardTitleRow>
+                        <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                          {fnosTargetSummary(t)}
                         </div>
-                      </Card>
+                        <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                          {cfg.domain_override
+                            ? `域名：${cfg.domain_override}`
+                            : `域名：${domain?.main_domain ?? '（主域名）'}`}
+                        </div>
+                      </DeployCard>
                     )
                   })
                 )}
@@ -369,55 +315,22 @@ export function DeployConfigsDrawer({
                   </div>
                 </div>
                 {safelineTargets.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    先添加雷池实例，再配置证书上传
-                  </p>
+                  <EmptyState>先添加雷池实例，再配置证书上传</EmptyState>
                 ) : safelineConfigs.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    还没有雷池部署配置
-                  </p>
+                  <EmptyState>还没有雷池部署配置</EmptyState>
                 ) : (
                   safelineConfigs.map((cfg) => {
                     const t = safelineTargetByID(safelineTargets, cfg.target_id)
                     const deploying = busy === `deploy-safeline-config-${cfg.id}`
                     const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
                     return (
-                      <Card key={cfg.id} className="px-4 py-3">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
-                          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate font-mono text-[13px] font-medium">
-                                {safelineConfigTitle(cfg)}
-                              </span>
-                              <span
-                                className={cn(
-                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                                  cfg.enabled
-                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                    : 'bg-muted text-muted-foreground',
-                                )}
-                              >
-                                {cfg.enabled ? '启用' : '停用'}
-                              </span>
-                              {cfg.auto_deploy && (
-                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-                                  自动部署
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                              {safelineTargetSummary(t)}
-                            </div>
-                            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                              cert_id={cfg.cert_id || '新增'} · type={cfg.cert_type || 2}
-                            </div>
-                          </div>
-                          <div className="flex gap-2 sm:contents">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 sm:flex-none"
+                      <DeployCard
+                        key={cfg.id}
+                        align="start"
+                        icon={<ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+                        actions={
+                          <>
+                            <CardIconButton
                               onClick={() => onDeploySafeline(cfg)}
                               disabled={!canDeploy}
                               title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
@@ -427,21 +340,27 @@ export function DeployConfigsDrawer({
                               ) : (
                                 <ShieldCheck className="h-3.5 w-3.5" />
                               )}
-                            </Button>
-                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSafeline(cfg)}>
+                            </CardIconButton>
+                            <CardIconButton onClick={() => onEditSafeline(cfg)}>
                               <Edit3 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 hover:text-destructive sm:flex-none"
-                              onClick={() => onDeleteSafeline(cfg)}
-                            >
+                            </CardIconButton>
+                            <CardIconButton destructive onClick={() => onDeleteSafeline(cfg)}>
                               <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
+                            </CardIconButton>
+                          </>
+                        }
+                      >
+                        <CardTitleRow title={safelineConfigTitle(cfg)} wrap>
+                          <EnabledBadge enabled={cfg.enabled} />
+                          <AutoDeployBadge enabled={cfg.auto_deploy} />
+                        </CardTitleRow>
+                        <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                          {safelineTargetSummary(t)}
                         </div>
-                      </Card>
+                        <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                          cert_id={cfg.cert_id || '新增'} · type={cfg.cert_type || 2}
+                        </div>
+                      </DeployCard>
                     )
                   })
                 )}
@@ -455,55 +374,22 @@ export function DeployConfigsDrawer({
                   </div>
                 </div>
                 {casTargets.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    先添加阿里云 CAS 实例，再配置证书上传
-                  </p>
+                  <EmptyState>先添加阿里云 CAS 实例，再配置证书上传</EmptyState>
                 ) : casConfigs.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-                    还没有阿里云 CAS 部署配置
-                  </p>
+                  <EmptyState>还没有阿里云 CAS 部署配置</EmptyState>
                 ) : (
                   casConfigs.map((cfg) => {
                     const t = casTargetByID(casTargets, cfg.target_id)
                     const deploying = busy === `deploy-cas-config-${cfg.id}`
                     const canDeploy = hasCert && !revoked && cfg.enabled && Boolean(t?.enabled) && busy === null
                     return (
-                      <Card key={cfg.id} className="px-4 py-3">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-3">
-                          <AliyunIcon className="mt-0.5 h-4 w-4 shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="truncate font-mono text-[13px] font-medium">
-                                {casConfigTitle(cfg)}
-                              </span>
-                              <span
-                                className={cn(
-                                  'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                                  cfg.enabled
-                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                    : 'bg-muted text-muted-foreground',
-                                )}
-                              >
-                                {cfg.enabled ? '启用' : '停用'}
-                              </span>
-                              {cfg.auto_deploy && (
-                                <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-                                  自动部署
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                              {casTargetSummary(t)}
-                            </div>
-                            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                              上次 cert_id={cfg.cert_id || '—'}
-                            </div>
-                          </div>
-                          <div className="flex gap-2 sm:contents">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 sm:flex-none"
+                      <DeployCard
+                        key={cfg.id}
+                        align="start"
+                        icon={<AliyunIcon className="mt-0.5 h-4 w-4 shrink-0" />}
+                        actions={
+                          <>
+                            <CardIconButton
                               onClick={() => onDeployCAS(cfg)}
                               disabled={!canDeploy}
                               title={!hasCert ? '当前域名还没有证书' : revoked ? '当前证书已吊销' : undefined}
@@ -513,21 +399,27 @@ export function DeployConfigsDrawer({
                               ) : (
                                 <AliyunIcon className="h-3.5 w-3.5" />
                               )}
-                            </Button>
-                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditCAS(cfg)}>
+                            </CardIconButton>
+                            <CardIconButton onClick={() => onEditCAS(cfg)}>
                               <Edit3 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1 hover:text-destructive sm:flex-none"
-                              onClick={() => onDeleteCAS(cfg)}
-                            >
+                            </CardIconButton>
+                            <CardIconButton destructive onClick={() => onDeleteCAS(cfg)}>
                               <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
+                            </CardIconButton>
+                          </>
+                        }
+                      >
+                        <CardTitleRow title={casConfigTitle(cfg)} wrap>
+                          <EnabledBadge enabled={cfg.enabled} />
+                          <AutoDeployBadge enabled={cfg.auto_deploy} />
+                        </CardTitleRow>
+                        <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                          {casTargetSummary(t)}
                         </div>
-                      </Card>
+                        <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                          上次 cert_id={cfg.cert_id || '—'}
+                        </div>
+                      </DeployCard>
                     )
                   })
                 )}

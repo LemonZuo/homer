@@ -1,5 +1,4 @@
 import { Edit3, HardDrive, KeyRound, Plus, RefreshCw, Server, ShieldCheck, Trash2 } from 'lucide-react'
-import { Card } from '../../ui/card'
 import { Button } from '../../ui/button'
 import { AliyunIcon } from '../../icons/AliyunIcon'
 import {
@@ -9,9 +8,9 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '../../ui/drawer'
-import { cn } from '../../../lib/utils'
 import type { CASTarget, FnOSTarget, SSHTarget, SafelineTarget } from '../types'
 import { authLabel } from '../utils'
+import { CardIconButton, CardTitleRow, DeployCard, EmptyState, EnabledBadge } from './DeployDrawerParts'
 
 export function DeployTargetsEntryDrawer({
   open,
@@ -89,63 +88,46 @@ export function DeployTargetsEntryDrawer({
             </div>
           </div>
           {sshTargets.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-              还没有 SSH 机器
-            </p>
+            <EmptyState>还没有 SSH 机器</EmptyState>
           ) : (
             <div className="space-y-2">
               {sshTargets.map((t) => (
-                <Card key={t.id} className="px-4 py-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-mono text-[13px] font-medium">{t.name}</span>
-                        <span
-                          className={cn(
-                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                            t.enabled
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-muted text-muted-foreground',
-                          )}
-                        >
-                          {t.enabled ? '启用' : '停用'}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11.5px] text-muted-foreground">
-                        <span className="truncate">
-                          {t.auth_source === 'credential'
-                            ? `凭证@${t.host}:${t.port || 22} · 登录凭证`
-                            : `${t.username}@${t.host}:${t.port || 22} · ${authLabel(t.auth_type)}`}
-                        </span>
-                        {(t.bastion_target_id ?? 0) > 0 && (() => {
-                          const b = sshTargets.find((x) => x.id === t.bastion_target_id)
-                          return (
-                            <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-                              经 {b ? b.name : `#${t.bastion_target_id}`}
-                            </span>
-                          )
-                        })()}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 sm:contents">
-                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTestSSH(t)} disabled={!t.enabled}>
+                <DeployCard
+                  key={t.id}
+                  icon={<Server className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                  actions={
+                    <>
+                      <CardIconButton onClick={() => onTestSSH(t)} disabled={!t.enabled}>
                         <RefreshCw className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSSH(t)}>
+                      </CardIconButton>
+                      <CardIconButton onClick={() => onEditSSH(t)}>
                         <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1 hover:text-destructive sm:flex-none"
-                        onClick={() => onDeleteSSH(t)}
-                      >
+                      </CardIconButton>
+                      <CardIconButton destructive onClick={() => onDeleteSSH(t)}>
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                      </CardIconButton>
+                    </>
+                  }
+                >
+                  <CardTitleRow title={t.name}>
+                    <EnabledBadge enabled={t.enabled} />
+                  </CardTitleRow>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11.5px] text-muted-foreground">
+                    <span className="truncate">
+                      {t.auth_source === 'credential'
+                        ? `凭证@${t.host}:${t.port || 22} · 登录凭证`
+                        : `${t.username}@${t.host}:${t.port || 22} · ${authLabel(t.auth_type)}`}
+                    </span>
+                    {(t.bastion_target_id ?? 0) > 0 && (() => {
+                      const b = sshTargets.find((x) => x.id === t.bastion_target_id)
+                      return (
+                        <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                          经 {b ? b.name : `#${t.bastion_target_id}`}
+                        </span>
+                      )
+                    })()}
                   </div>
-                </Card>
+                </DeployCard>
               ))}
             </div>
           )}
@@ -167,53 +149,36 @@ export function DeployTargetsEntryDrawer({
             </div>
           </div>
           {fnosTargets.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-              还没有 fnOS 实例
-            </p>
+            <EmptyState>还没有 fnOS 实例</EmptyState>
           ) : (
             <div className="space-y-2">
               {fnosTargets.map((t) => (
-                <Card key={t.id} className="px-4 py-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <HardDrive className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-mono text-[13px] font-medium">{t.name}</span>
-                        <span
-                          className={cn(
-                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                            t.enabled
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-muted text-muted-foreground',
-                          )}
-                        >
-                          {t.enabled ? '启用' : '停用'}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
-                        {t.auth_source === 'credential'
-                          ? `凭证@${t.host}:${t.port || 22} · 登录凭证`
-                          : `${t.username || '未配置用户'}@${t.host}:${t.port || 22} · ${authLabel(t.auth_type)}`}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 sm:contents">
-                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTestFnOS(t)} disabled={!t.enabled}>
+                <DeployCard
+                  key={t.id}
+                  icon={<HardDrive className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                  actions={
+                    <>
+                      <CardIconButton onClick={() => onTestFnOS(t)} disabled={!t.enabled}>
                         <RefreshCw className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditFnOS(t)}>
+                      </CardIconButton>
+                      <CardIconButton onClick={() => onEditFnOS(t)}>
                         <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1 hover:text-destructive sm:flex-none"
-                        onClick={() => onDeleteFnOS(t)}
-                      >
+                      </CardIconButton>
+                      <CardIconButton destructive onClick={() => onDeleteFnOS(t)}>
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                      </CardIconButton>
+                    </>
+                  }
+                >
+                  <CardTitleRow title={t.name}>
+                    <EnabledBadge enabled={t.enabled} />
+                  </CardTitleRow>
+                  <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                    {t.auth_source === 'credential'
+                      ? `凭证@${t.host}:${t.port || 22} · 登录凭证`
+                      : `${t.username || '未配置用户'}@${t.host}:${t.port || 22} · ${authLabel(t.auth_type)}`}
                   </div>
-                </Card>
+                </DeployCard>
               ))}
             </div>
           )}
@@ -229,56 +194,39 @@ export function DeployTargetsEntryDrawer({
             </Button>
           </div>
           {safelineTargets.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-              还没有雷池实例
-            </p>
+            <EmptyState>还没有雷池实例</EmptyState>
           ) : (
             <div className="space-y-2">
               {safelineTargets.map((t) => (
-                <Card key={t.id} className="px-4 py-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-mono text-[13px] font-medium">{t.name}</span>
-                        <span
-                          className={cn(
-                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                            t.enabled
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-muted text-muted-foreground',
-                          )}
-                        >
-                          {t.enabled ? '启用' : '停用'}
-                        </span>
-                        {t.skip_tls_verify && (
-                          <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                            跳过 TLS
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
-                        {t.base_url}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 sm:contents">
-                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTestSafeline(t)} disabled={!t.enabled}>
+                <DeployCard
+                  key={t.id}
+                  icon={<ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                  actions={
+                    <>
+                      <CardIconButton onClick={() => onTestSafeline(t)} disabled={!t.enabled}>
                         <RefreshCw className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditSafeline(t)}>
+                      </CardIconButton>
+                      <CardIconButton onClick={() => onEditSafeline(t)}>
                         <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1 hover:text-destructive sm:flex-none"
-                        onClick={() => onDeleteSafeline(t)}
-                      >
+                      </CardIconButton>
+                      <CardIconButton destructive onClick={() => onDeleteSafeline(t)}>
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                      </CardIconButton>
+                    </>
+                  }
+                >
+                  <CardTitleRow title={t.name}>
+                    <EnabledBadge enabled={t.enabled} />
+                    {t.skip_tls_verify && (
+                      <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                        跳过 TLS
+                      </span>
+                    )}
+                  </CardTitleRow>
+                  <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                    {t.base_url}
                   </div>
-                </Card>
+                </DeployCard>
               ))}
             </div>
           )}
@@ -294,51 +242,34 @@ export function DeployTargetsEntryDrawer({
             </Button>
           </div>
           {casTargets.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border py-8 text-center text-[12.5px] text-muted-foreground">
-              还没有阿里云 CAS 实例
-            </p>
+            <EmptyState>还没有阿里云 CAS 实例</EmptyState>
           ) : (
             <div className="space-y-2">
               {casTargets.map((t) => (
-                <Card key={t.id} className="px-4 py-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <AliyunIcon className="h-4 w-4 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-mono text-[13px] font-medium">{t.name}</span>
-                        <span
-                          className={cn(
-                            'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
-                            t.enabled
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-muted text-muted-foreground',
-                          )}
-                        >
-                          {t.enabled ? '启用' : '停用'}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
-                        {t.access_key_id || '未配置 AK'}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 sm:contents">
-                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onTestCAS(t)} disabled={!t.enabled}>
+                <DeployCard
+                  key={t.id}
+                  icon={<AliyunIcon className="h-4 w-4 shrink-0" />}
+                  actions={
+                    <>
+                      <CardIconButton onClick={() => onTestCAS(t)} disabled={!t.enabled}>
                         <RefreshCw className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onEditCAS(t)}>
+                      </CardIconButton>
+                      <CardIconButton onClick={() => onEditCAS(t)}>
                         <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1 hover:text-destructive sm:flex-none"
-                        onClick={() => onDeleteCAS(t)}
-                      >
+                      </CardIconButton>
+                      <CardIconButton destructive onClick={() => onDeleteCAS(t)}>
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
+                      </CardIconButton>
+                    </>
+                  }
+                >
+                  <CardTitleRow title={t.name}>
+                    <EnabledBadge enabled={t.enabled} />
+                  </CardTitleRow>
+                  <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+                    {t.access_key_id || '未配置 AK'}
                   </div>
-                </Card>
+                </DeployCard>
               ))}
             </div>
           )}
