@@ -15,7 +15,9 @@ import (
 )
 
 func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnopsHandler *handler.CDNOpsHandler, certstoreHandler *handler.CertStoreHandler, acmeHandler *acmehandler.Handler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, notifyHandler *handler.NotifyHandler, frontend fs.FS) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{"/healthz"}}))
+	r.Use(gin.Recovery())
 	r.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
 		AllowMethods:    []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},

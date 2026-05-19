@@ -10,7 +10,7 @@ ENV GIN_MODE=release
 
 EXPOSE 8081
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=5m --timeout=5s --start-period=30s --start-interval=5s --retries=3 \
 	CMD wget -q --spider "http://127.0.0.1:${SERVER_PORT:-8081}/healthz" || exit 1
 
 ENTRYPOINT ["/app/server"]

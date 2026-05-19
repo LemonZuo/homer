@@ -14,10 +14,11 @@ services:
       - ./data:/app/data
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${SERVER_PORT:-8081}/healthz || exit 1"]
-      interval: 30s
+      interval: 5m
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
+      start_interval: 5s
 
   tinyauth:
     image: ghcr.io/steveiliop56/tinyauth:latest
