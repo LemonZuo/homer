@@ -12,3 +12,19 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./data:/app/data
+
+  tinyauth:
+    image: ghcr.io/steveiliop56/tinyauth:latest
+    container_name: tinyauth
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # 部署前改这些占位值,SECRET 需 32 字节随机串
+      SECRET: CHANGEME-32-byte-random-string
+      # 生成 USERS:  docker run --rm httpd:alpine htpasswd -nbB admin '你的密码'
+      # 把输出原样填进来,并把每个 $ 改成 $$(compose 转义)
+      USERS: admin:$$2y$$10$$CHANGEME-bcrypt-hash
+      APP_URL: http://localhost:3000
+    volumes:
+      - ./data/tinyauth:/data

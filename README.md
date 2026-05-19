@@ -204,9 +204,12 @@ go build \
 
 ## Docker
 
-想少敲几行命令，可以直接用 `docker compose` 部署。仓库里的 `docker-compose.yml` 会读取 `.env`，并把它只读挂载到容器内 `/app/.env`，应用启动时也能通过 `godotenv.Load()` 读到同一份配置。
+想少敲几行命令，可以直接用 `docker compose` 部署。仓库里的 `docker-compose.yml` 包含两个服务：
 
-1. 准备配置：
+- `homer`：业务本体，监听 `8081`。配置走 `.env`（只读挂载到容器 `/app/.env`），`godotenv.Load()` 会自动读到。
+- `tinyauth`：前置登录网关，监听 `3000`。Homer 不内置鉴权，公网入口建议挂在反代后面、由 tinyauth 做登录拦截，再回源到 homer。配置直接写在 compose 里，不读 `.env`。
+
+1. 准备 homer 配置：
 
 ```sh
 cp .env.example .env
@@ -229,7 +232,20 @@ DB_CHARSET=utf8mb4
 
 注意：容器里的 `127.0.0.1` 指向容器自己。如果 MySQL 跑在宿主机或其他机器上，`DB_HOST` 应填写宿主机可被容器访问的地址、局域网 IP、Docker 网络里的服务名，或你自己的数据库地址。
 
-2. 初始化数据库：
+2. 配置 tinyauth：直接编辑 `docker-compose.yml` 中 `tinyauth.environment` 三个占位值：
+
+- `SECRET`：32 字节随机串，例如 `openssl rand -hex 16`。
+- `USERS`：`user:bcrypt-hash` 形式。可用下面的 docker 命令生成：
+
+  ```sh
+  docker run --rm httpd:alpine htpasswd -nbB admin '你的密码'
+  ```
+
+  把输出原样填进 `USERS`，**每个 `$` 都改写成 `$$`**——compose 会把 `$xxx` 当变量插值，双写后才是字面 `$`，容器内仍是单 `$`。
+
+- `APP_URL`：tinyauth 自身对外访问入口（反代后通常是 `https://auth.example.com`），用于登录回跳。
+
+3. 初始化数据库：
 
 ```sh
 mysql -h 192.168.1.10 -P 3306 -u root -p homer < sql/00_schema.sql
@@ -237,10 +253,10 @@ mysql -h 192.168.1.10 -P 3306 -u root -p homer < sql/00_schema.sql
 
 把示例里的 host、port、user 和库名替换成你的实际值；`-p` 会让 MySQL 客户端交互式询问密码。再次提醒：`sql/00_schema.sql` 大部分表使用 `DROP TABLE IF EXISTS`，只适合全新库初始化。
 
-3. 启动服务：
+4. 启动服务：
 
 ```sh
-mkdir -p data
+mkdir -p data data/tinyauth
 docker compose pull
 docker compose up -d
 ```
@@ -248,19 +264,21 @@ docker compose up -d
 启动后访问：
 
 ```text
-http://localhost:8081
+http://localhost:8081   # homer（直接访问，绕开鉴权）
+http://localhost:3000   # tinyauth 登录页
 ```
 
-如果改过 `HOST_PORT`，访问端口以 `.env` 里的值为准。
+公网部署时应由反代仅暴露 tinyauth，homer 端口收回内网，由反代鉴权通过后回源到 homer 容器。
 
-4. 查看状态和日志：
+5. 查看状态和日志：
 
 ```sh
 docker compose ps
 docker compose logs -f homer
+docker compose logs -f tinyauth
 ```
 
-5. 更新镜像：
+6. 更新镜像：
 
 ```sh
 docker compose pull
@@ -271,8 +289,9 @@ docker compose up -d
 
 | 宿主机路径 | 容器路径 | 用途 |
 | --- | --- | --- |
-| `./.env` | `/app/.env` | 应用配置，只读挂载 |
-| `./data` | `/app/data` | ACME 工作目录、账号私钥、签发相关落盘数据 |
+| `./.env` | `/app/.env` | homer 应用配置，只读挂载 |
+| `./data` | `/app/data` | homer ACME 工作目录、账号私钥、签发相关落盘数据 |
+| `./data/tinyauth` | `/data` | tinyauth 用户会话等持久化数据 |
 
 默认镜像为：
 
@@ -288,6 +307,73 @@ dist/server-linux-arm64
 ```
 
 这些文件通常由 GitHub Actions release 流程生成。
+
+## Nginx 反向代理
+
+下面是把 homer 和 tinyauth 放在 nginx 后面、用 tinyauth 拦截 homer 入口的最小模板。两个域名各一个 server 块，homer 这块通过 `auth_request` 调 tinyauth 的鉴权接口，401 时重定向到 tinyauth 登录页。SSL 证书路径、上游端口（与 compose 一致：homer `8081` / tinyauth `3000`）按实际改。
+
+```nginx
+# 1. tinyauth 登录页本身
+server {
+    listen 443 ssl;
+    server_name auth.example.com;
+
+    ssl_certificate     /etc/nginx/certs/auth.example.com.pem;
+    ssl_certificate_key /etc/nginx/certs/auth.example.com.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# 2. homer 主入口,经 tinyauth 鉴权后转发
+server {
+    listen 443 ssl;
+    server_name homer.example.com;
+
+    ssl_certificate     /etc/nginx/certs/homer.example.com.pem;
+    ssl_certificate_key /etc/nginx/certs/homer.example.com.key;
+
+    location / {
+        auth_request /auth;
+        error_page 401 = @login;
+
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # ACME 任务详情用了 SSE,需要关掉缓冲并放宽超时
+        proxy_buffering    off;
+        proxy_read_timeout 1h;
+    }
+
+    # 内部 auth 子请求,转发给 tinyauth
+    location = /auth {
+        internal;
+        proxy_pass http://127.0.0.1:3000/api/auth/nginx;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Uri   $request_uri;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+    }
+
+    # 未登录跳到 tinyauth 登录页,登录成功后回到原 URL
+    location @login {
+        return 302 https://auth.example.com/login?redirect_uri=$scheme://$host$request_uri;
+    }
+}
+```
+
+> tinyauth 的鉴权 endpoint(示例里写的 `/api/auth/nginx`)和登录回跳参数名以 tinyauth 当前版本文档为准,有差异时按其文档替换即可。
+> 启用反代后，宿主机不应把 homer 的 `8081` 端口对公网开放，由 nginx 走环回(`127.0.0.1`)单独回源；tinyauth 的 `3000` 同理。
 
 ## API 概览
 
