@@ -25,6 +25,16 @@ type TargetConfig struct {
 	SkipTLSVerify bool `json:"skip_tls_verify"`
 }
 
+// Target 是雷池 driver 从通用 ACMEDeployTarget 解析出的目标视图。
+type Target struct {
+	ID            int64
+	Name          string
+	BaseURL       string
+	APIToken      string
+	SkipTLSVerify bool
+	Enabled       bool
+}
+
 // DeployOptions 是 acme_deploy_config.config_json 在雷池场景下的结构。
 type DeployOptions struct {
 	CertType int `json:"cert_type"`
@@ -194,7 +204,7 @@ func wildcardDomain(domain string) string {
 	return "*" + domain[i:]
 }
 
-func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESafelineTarget, error) {
+func targetFromDeployTarget(target model.ACMEDeployTarget) (*Target, error) {
 	auth := TargetAuth{}
 	cfg := TargetConfig{}
 	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.AuthJSON)), &auth); err != nil {
@@ -203,15 +213,13 @@ func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESafelineT
 	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.ConfigJSON)), &cfg); err != nil {
 		return nil, fmt.Errorf("解析雷池目标配置失败：%w", err)
 	}
-	out := &model.ACMESafelineTarget{
+	out := &Target{
 		ID:            target.ID,
 		Name:          target.Name,
 		BaseURL:       target.Endpoint,
 		APIToken:      auth.APIToken,
-		SkipTLSVerify: model.BoolFlag(cfg.SkipTLSVerify),
-		Enabled:       target.Enabled,
-		CreatedAt:     target.CreatedAt,
-		UpdatedAt:     target.UpdatedAt,
+		SkipTLSVerify: cfg.SkipTLSVerify,
+		Enabled:       bool(target.Enabled),
 	}
 	normalizeTarget(out)
 	return out, nil
@@ -232,13 +240,13 @@ func deployPartsFromGenericConfig(cfg model.ACMEDeployConfig) (DeployOptions, De
 	return opts, state, nil
 }
 
-func normalizeTarget(t *model.ACMESafelineTarget) {
+func normalizeTarget(t *Target) {
 	t.Name = strings.TrimSpace(t.Name)
 	t.BaseURL = strings.TrimRight(strings.TrimSpace(t.BaseURL), "/")
 	t.APIToken = strings.TrimSpace(t.APIToken)
 }
 
-func validateTarget(t model.ACMESafelineTarget) error {
+func validateTarget(t Target) error {
 	if t.Name == "" {
 		return errors.New("雷池实例名称不能为空")
 	}

@@ -130,8 +130,8 @@ func (o DeployOptions) validate() error {
 	return nil
 }
 
-// targetFromDeployTarget 仅做 auth_json 解析，不解析凭证：
-// UI 列表/详情走这里，凭证模式下保留 AuthSource/CredentialID，inline 字段为空。
+// targetFromDeployTarget 仅解析 auth_json/config_json，不解析凭证：
+// 凭证模式下保留 AuthSource/CredentialID，inline 字段为空。
 // 真正建连前（Deploy/TestTarget）再调 resolveCredential 把凭证字段填进去。
 func targetFromDeployTarget(target model.ACMEDeployTarget) (*sshlike.Target, error) {
 	return sshlike.ParseTarget(target, sshlike.Labels{Auth: "SSH", Config: "SSH", Host: "SSH"})
@@ -141,28 +141,6 @@ func targetFromDeployTarget(target model.ACMEDeployTarget) (*sshlike.Target, err
 // inline 模式直接返回。
 func (d *Driver) resolveCredential(t *sshlike.Target) error {
 	return sshlike.ResolveCredential(d.credentials, t)
-}
-
-// ResolveCredential 是 resolveCredential 的包外暴露形式，供其它 SSH 复用方
-// （例如 fnos driver 把 SSH target 当跳板机）调用。inline 模式直接返回。
-func ResolveCredential(credentials *acme.SSHCredentialStore, t *model.ACMESSHTarget) error {
-	target := sshlike.FromSSHTarget(t)
-	err := sshlike.ResolveCredential(credentials, target)
-	if err != nil {
-		return err
-	}
-	sshlike.ApplyToSSHTarget(target, t)
-	return nil
-}
-
-// TargetFromDeployTarget 是 targetFromDeployTarget 的包外暴露形式，
-// 供其它 driver（例如 fnos）把现成的 SSH target 解析成 ACMESSHTarget 视图。
-func TargetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMESSHTarget, error) {
-	t, err := targetFromDeployTarget(target)
-	if err != nil {
-		return nil, err
-	}
-	return sshlike.ToSSHTarget(*t), nil
 }
 
 func optionsFromGenericConfig(cfg model.ACMEDeployConfig, domain string) (DeployOptions, error) {

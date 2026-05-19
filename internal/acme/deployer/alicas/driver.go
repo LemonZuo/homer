@@ -28,6 +28,15 @@ type TargetAuth struct {
 	AccessKeySecret string `json:"access_key_secret"`
 }
 
+// Target 是阿里云 CAS driver 从通用 ACMEDeployTarget 解析出的目标视图。
+type Target struct {
+	ID              int64
+	Name            string
+	AccessKeyID     string
+	AccessKeySecret string
+	Enabled         bool
+}
+
 // DeployState 记录最近一次上传的 CAS cert_id（仅用于前端展示）。
 type DeployState struct {
 	CertID int64 `json:"cert_id"`
@@ -116,19 +125,17 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 	return &acme.DeployResult{StateJSON: acme.MustJSON(state)}, nil
 }
 
-func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMEUploadCASTarget, error) {
+func targetFromDeployTarget(target model.ACMEDeployTarget) (*Target, error) {
 	auth := TargetAuth{}
 	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.AuthJSON)), &auth); err != nil {
 		return nil, fmt.Errorf("解析阿里云 CAS 认证配置失败：%w", err)
 	}
-	out := &model.ACMEUploadCASTarget{
+	out := &Target{
 		ID:              target.ID,
 		Name:            target.Name,
 		AccessKeyID:     auth.AccessKeyID,
 		AccessKeySecret: auth.AccessKeySecret,
-		Enabled:         target.Enabled,
-		CreatedAt:       target.CreatedAt,
-		UpdatedAt:       target.UpdatedAt,
+		Enabled:         bool(target.Enabled),
 	}
 	normalizeTarget(out)
 	return out, nil
@@ -142,13 +149,13 @@ func stateFromGenericConfig(cfg model.ACMEDeployConfig) (DeployState, error) {
 	return state, nil
 }
 
-func normalizeTarget(t *model.ACMEUploadCASTarget) {
+func normalizeTarget(t *Target) {
 	t.Name = strings.TrimSpace(t.Name)
 	t.AccessKeyID = strings.TrimSpace(t.AccessKeyID)
 	t.AccessKeySecret = strings.TrimSpace(t.AccessKeySecret)
 }
 
-func validateTarget(t model.ACMEUploadCASTarget) error {
+func validateTarget(t Target) error {
 	if t.Name == "" {
 		return errors.New("阿里云 CAS 实例名称不能为空")
 	}

@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/LemonZuo/homer/internal/model"
 )
 
 type client struct {
@@ -39,9 +37,9 @@ type certItem struct {
 	ValidBefore string   `json:"valid_before"`
 }
 
-func newClient(target model.ACMESafelineTarget) *client {
+func newClient(target Target) *client {
 	transport := &http.Transport{}
-	if bool(target.SkipTLSVerify) {
+	if target.SkipTLSVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // 雷池常见自签证书部署场景。
 	}
 	return &client{
