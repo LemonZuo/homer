@@ -20,12 +20,10 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"net"
-	"strconv"
 	"strings"
 
 	"github.com/LemonZuo/homer/internal/acme"
-	acmessh "github.com/LemonZuo/homer/internal/acme/deployer/ssh"
+	"github.com/LemonZuo/homer/internal/acme/deployer/sshlike"
 	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/model"
 	"gorm.io/gorm"
@@ -41,7 +39,7 @@ const (
 
 // Driver 实现 acme.DeployDriver，把证书写入 fnOS 的时间戳目录并刷新 trim_connect。
 // 连接复用 SSH 的认证体系：inline 凭证 / ssh_credential 凭证 / SSH 或 fnOS target 做跳板，
-// 都按 acmessh 的 schema 解析与处理。
+// 都按 sshlike 的 schema 解析与处理。
 type Driver struct {
 	credentials *acme.SSHCredentialStore
 	db          *gorm.DB
@@ -50,24 +48,14 @@ type Driver struct {
 // TargetAuth 是 acme_deploy_target.auth_json 在 fnOS 场景下的结构。与 SSH 同构：
 //   - ""/"inline"：使用本结构的 Username + 密码/私钥
 //   - "credential"：忽略 inline 字段，运行时按 CredentialID 加载 ssh_credential
-type TargetAuth struct {
-	AuthSource   string `json:"auth_source,omitempty"`
-	CredentialID int64  `json:"credential_id,omitempty"`
-	Username     string `json:"username,omitempty"`
-	AuthType     string `json:"auth_type,omitempty"`
-	Password     string `json:"password,omitempty"`
-	PrivateKey   string `json:"private_key,omitempty"`
-	Passphrase   string `json:"passphrase,omitempty"`
-}
+type TargetAuth = sshlike.TargetAuth
 
 // TargetConfig 是 acme_deploy_target.config_json 在 fnOS 场景下的结构。
 // BastionTargetID 指向另一台 SSH/fnOS 类型的 ACMEDeployTarget，单跳。
-type TargetConfig struct {
-	BastionTargetID int64 `json:"bastion_target_id,omitempty"`
-}
+type TargetConfig = sshlike.TargetConfig
 
-// AuthSourceCredential 表示按凭证 id 解析认证信息（与 acmessh 保持一致的常量字面值）。
-const AuthSourceCredential = "credential"
+// AuthSourceCredential 表示按凭证 id 解析认证信息（与 SSH driver 保持一致的常量字面值）。
+const AuthSourceCredential = sshlike.AuthSourceCredential
 
 // DeployConfig 是 acme_deploy_config.config_json 在 fnOS 场景下的结构。
 type DeployConfig struct {
@@ -86,53 +74,10 @@ func (d *Driver) ValidateTarget(target model.ACMEDeployTarget) error {
 	if err != nil {
 		return err
 	}
-	if err := validateTarget(*t); err != nil {
+	if err := sshlike.ValidateTarget(*t, "fnOS"); err != nil {
 		return err
 	}
-	if t.BastionTargetID > 0 {
-		if t.BastionTargetID == t.ID {
-			return errors.New("跳板机不能是自己")
-		}
-		// 上游：已被别人当跳板的实例，自身不能再有跳板，否则单跳被绕成链。
-		if t.ID > 0 {
-			if name, ok, err := d.findUpstreamRef(t.ID); err != nil {
-				return err
-			} else if ok {
-				return fmt.Errorf("当前实例已被 %s 设为跳板机，不能再为自己设置跳板机", name)
-			}
-		}
-		// 下游：所选跳板自身不能再有跳板。
-		b, err := d.loadBastion(t.BastionTargetID)
-		if err != nil {
-			return err
-		}
-		if b.BastionTargetID > 0 {
-			return errors.New("所选跳板机已经设置了自己的跳板机，单跳模式不支持跳板机链")
-		}
-	}
-	return nil
-}
-
-// findUpstreamRef 反查是否有任何 SSH/fnOS target 把 id 当作 bastion 在用。
-// 返回第一个引用者的 name，用于错误提示。
-func (d *Driver) findUpstreamRef(id int64) (string, bool, error) {
-	if d.db == nil {
-		return "", false, errors.New("跳板机模式未注入 DB")
-	}
-	var rows []model.ACMEDeployTarget
-	if err := d.db.Where("kind IN ? AND id <> ?", []string{acme.DeployKindSSH, acme.DeployKindFnOS}, id).Find(&rows).Error; err != nil {
-		return "", false, fmt.Errorf("扫描跳板机引用失败：%w", err)
-	}
-	for _, r := range rows {
-		cfg := TargetConfig{}
-		if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(r.ConfigJSON)), &cfg); err != nil {
-			continue
-		}
-		if cfg.BastionTargetID == id {
-			return r.Name, true, nil
-		}
-	}
-	return "", false, nil
+	return sshlike.ValidateBastion(d.db, *t, "当前实例")
 }
 
 func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, _ model.ACMEDeployConfig) error {
@@ -236,87 +181,12 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 
 // connFor 把已解析的 fnOS 目标（含凭证、跳板机）翻译成 sshx.Conn。
 // 跳板机来自 SSH/fnOS target 表，单跳；跳板机自身的 bastion 不再展开。
-func (d *Driver) connFor(t *model.ACMEFnOSTarget) (*sshx.Conn, error) {
-	if err := d.resolveCredential(t); err != nil {
-		return nil, err
-	}
-	auth, err := sshx.AuthMethod(t.AuthType, t.Password, t.PrivateKey, t.Passphrase)
-	if err != nil {
-		return nil, err
-	}
-	conn := &sshx.Conn{Host: t.Host, Port: t.Port, User: t.Username, Auth: auth}
-	if t.BastionTargetID <= 0 {
-		return conn, nil
-	}
-	bastion, err := d.loadBastion(t.BastionTargetID)
-	if err != nil {
-		return nil, err
-	}
-	if err := acmessh.ResolveCredential(d.credentials, bastion); err != nil {
-		return nil, err
-	}
-	bAuth, err := sshx.AuthMethod(bastion.AuthType, bastion.Password, bastion.PrivateKey, bastion.Passphrase)
-	if err != nil {
-		return nil, fmt.Errorf("跳板机认证准备失败：%w", err)
-	}
-	conn.Bastion = &sshx.Conn{Host: bastion.Host, Port: bastion.Port, User: bastion.Username, Auth: bAuth}
-	return conn, nil
-}
-
-// resolveCredential 在凭证模式下从 ssh_credential 表加载认证信息并填回 target。
-// 与 acmessh.ResolveCredential 共享同一份逻辑，避免行为漂移。
-func (d *Driver) resolveCredential(t *model.ACMEFnOSTarget) error {
-	if t.AuthSource != AuthSourceCredential {
-		return nil
-	}
-	if d.credentials == nil {
-		return errors.New("凭证模式未注入 SSHCredentialStore")
-	}
-	if t.CredentialID <= 0 {
-		return errors.New("凭证模式需要选择登录凭证")
-	}
-	cred, err := d.credentials.Get(t.CredentialID)
-	if err != nil {
-		return fmt.Errorf("加载 SSH 登录凭证失败：%w", err)
-	}
-	t.Username = strings.TrimSpace(cred.Username)
-	t.AuthType = strings.ToLower(strings.TrimSpace(cred.AuthType))
-	t.Password = strings.TrimSpace(cred.Password)
-	t.PrivateKey = strings.TrimSpace(cred.PrivateKey)
-	t.Passphrase = strings.TrimSpace(cred.Passphrase)
-	if t.AuthType == "" {
-		t.AuthType = "password"
-	}
-	return nil
-}
-
-// loadBastion 按 id 从 deploy_target 表里取一台 SSH/fnOS 目标当跳板。
-// 跳板必须是 SSH/fnOS 类型、已启用，且自身不再叠 bastion（单跳）。
-func (d *Driver) loadBastion(id int64) (*model.ACMESSHTarget, error) {
-	if d.db == nil {
-		return nil, errors.New("跳板机模式未注入 DB")
-	}
-	var row model.ACMEDeployTarget
-	if err := d.db.First(&row, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("跳板机不存在：id=%d", id)
-		}
-		return nil, fmt.Errorf("加载跳板机失败：%w", err)
-	}
-	if row.Kind != acme.DeployKindSSH && row.Kind != acme.DeployKindFnOS {
-		return nil, fmt.Errorf("跳板机必须是 SSH 或 fnOS 类型：id=%d, kind=%s", id, row.Kind)
-	}
-	if !bool(row.Enabled) {
-		return nil, fmt.Errorf("跳板机已停用：%s", row.Name)
-	}
-	b, err := acmessh.TargetFromDeployTarget(row)
-	if err != nil {
-		return nil, err
-	}
-	if b.BastionTargetID > 0 {
-		return nil, errors.New("所选跳板机已经设置了自己的跳板机，单跳模式不支持跳板机链")
-	}
-	return b, nil
+func (d *Driver) connFor(t *sshlike.Target) (*sshx.Conn, error) {
+	return sshlike.ConnFor(t, sshlike.ConnOptions{
+		Credentials:        d.credentials,
+		DB:                 d.db,
+		RejectBastionChain: true,
+	})
 }
 
 func countCerts(pem string) int {
@@ -450,38 +320,8 @@ func sqlEscape(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
-func targetFromDeployTarget(target model.ACMEDeployTarget) (*model.ACMEFnOSTarget, error) {
-	auth := TargetAuth{}
-	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.AuthJSON)), &auth); err != nil {
-		return nil, fmt.Errorf("解析 fnOS 认证配置失败：%w", err)
-	}
-	cfg := TargetConfig{}
-	if err := acme.JSONUnmarshal([]byte(acme.EmptyJSON(target.ConfigJSON)), &cfg); err != nil {
-		return nil, fmt.Errorf("解析 fnOS 连接配置失败：%w", err)
-	}
-	host, port, err := splitEndpoint(target.Endpoint)
-	if err != nil {
-		return nil, err
-	}
-	out := &model.ACMEFnOSTarget{
-		ID:              target.ID,
-		Name:            target.Name,
-		Host:            host,
-		Port:            port,
-		AuthSource:      auth.AuthSource,
-		CredentialID:    auth.CredentialID,
-		BastionTargetID: cfg.BastionTargetID,
-		Username:        auth.Username,
-		AuthType:        auth.AuthType,
-		Password:        auth.Password,
-		PrivateKey:      auth.PrivateKey,
-		Passphrase:      auth.Passphrase,
-		Enabled:         target.Enabled,
-		CreatedAt:       target.CreatedAt,
-		UpdatedAt:       target.UpdatedAt,
-	}
-	normalizeTarget(out)
-	return out, nil
+func targetFromDeployTarget(target model.ACMEDeployTarget) (*sshlike.Target, error) {
+	return sshlike.ParseTarget(target, sshlike.Labels{Auth: "fnOS", Config: "fnOS", Host: "fnOS"})
 }
 
 func deployConfigFromGeneric(cfg model.ACMEDeployConfig) (DeployConfig, error) {
@@ -490,83 +330,4 @@ func deployConfigFromGeneric(cfg model.ACMEDeployConfig) (DeployConfig, error) {
 		return out, fmt.Errorf("解析 fnOS 部署配置失败：%w", err)
 	}
 	return out, nil
-}
-
-func splitEndpoint(endpoint string) (string, int, error) {
-	endpoint = strings.TrimSpace(endpoint)
-	if endpoint == "" {
-		return "", 0, errors.New("fnOS 主机不能为空")
-	}
-	host, portText, err := net.SplitHostPort(endpoint)
-	if err == nil {
-		port, err := strconv.Atoi(portText)
-		if err != nil {
-			return "", 0, errors.New("fnOS 端口无效")
-		}
-		return host, port, nil
-	}
-	if strings.Count(endpoint, ":") == 1 {
-		parts := strings.Split(endpoint, ":")
-		port, err := strconv.Atoi(parts[1])
-		if err != nil {
-			return "", 0, errors.New("fnOS 端口无效")
-		}
-		return parts[0], port, nil
-	}
-	return endpoint, 22, nil
-}
-
-func normalizeTarget(t *model.ACMEFnOSTarget) {
-	t.Name = strings.TrimSpace(t.Name)
-	t.Host = strings.TrimSpace(t.Host)
-	t.AuthSource = strings.ToLower(strings.TrimSpace(t.AuthSource))
-	t.Username = strings.TrimSpace(t.Username)
-	t.AuthType = strings.ToLower(strings.TrimSpace(t.AuthType))
-	t.Password = strings.TrimSpace(t.Password)
-	t.PrivateKey = strings.TrimSpace(t.PrivateKey)
-	t.Passphrase = strings.TrimSpace(t.Passphrase)
-	if t.Port <= 0 {
-		t.Port = 22
-	}
-	if t.AuthSource == "" {
-		t.AuthSource = "inline"
-	}
-	if t.AuthSource != AuthSourceCredential && t.AuthType == "" {
-		t.AuthType = "password"
-	}
-}
-
-func validateTarget(t model.ACMEFnOSTarget) error {
-	if t.Name == "" {
-		return errors.New("目标名称不能为空")
-	}
-	if t.Host == "" {
-		return errors.New("fnOS 主机不能为空")
-	}
-	if t.Port <= 0 || t.Port > 65535 {
-		return errors.New("fnOS 端口无效")
-	}
-	// 凭证模式：用户名/密码/私钥都在 ssh_credential 上，这里只确认引用了一个有效凭证 id。
-	if t.AuthSource == AuthSourceCredential {
-		if t.CredentialID <= 0 {
-			return errors.New("凭证模式需要选择登录凭证")
-		}
-		return nil
-	}
-	if t.Username == "" {
-		return errors.New("SSH 用户名不能为空")
-	}
-	switch t.AuthType {
-	case "password":
-		if t.Password == "" {
-			return errors.New("密码认证需要填写密码")
-		}
-	case "key":
-		if t.PrivateKey == "" {
-			return errors.New("证书模式需要填写私钥")
-		}
-	default:
-		return errors.New("认证方式仅支持 password / key")
-	}
-	return nil
 }
