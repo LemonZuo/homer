@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   KeyRound,
   Loader2,
@@ -7,29 +6,14 @@ import {
   Server,
   ShieldCheck,
 } from 'lucide-react'
-import { toast } from 'sonner'
-import { api } from '../api'
 import { getColorSet } from '../colors'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
 import { ConfirmDialog } from './acme/ConfirmDialog'
 import { cn } from '../lib/utils'
-import type {
-  AcmeAccount,
-  CASDeployConfig,
-  CASTarget,
-  Credential,
-  Domain,
-  FnOSDeployConfig,
-  FnOSTarget,
-  SSHCredential,
-  SSHDeployConfig,
-  SSHTarget,
-  SafelineDeployConfig,
-  SafelineTarget,
-} from './acme/types'
 import { useAcmeData } from './acme/useAcmeData'
-import { makeDeleteHandler, type DeployConfigKind } from './acme/handlers'
+import { useAcmeActions } from './acme/useAcmeActions'
+import { useAcmeUiState } from './acme/useAcmeUiState'
 import { LogDrawer } from './acme/LogDrawer'
 import { DomainCard } from './acme/sections/DomainCard'
 import { TaskHistory } from './acme/sections/TaskHistory'
@@ -88,261 +72,17 @@ export default function Acme() {
     fnosDeployConfigs,
     fnosDeployLoading,
   } = useAcmeData()
-  const [busy, setBusy] = useState<string | null>(null)
-
-  const [editOpen, setEditOpen] = useState(false)
-  const [editTarget, setEditTarget] = useState<Domain | null>(null)
-  const [deletePending, setDeletePending] = useState<Domain | null>(null)
-  const [revokePending, setRevokePending] = useState<Domain | null>(null)
-  const [deployDomain, setDeployDomain] = useState<Domain | null>(null)
-  const [deployEditOpen, setDeployEditOpen] = useState(false)
-  const [deployEditTarget, setDeployEditTarget] = useState<SSHDeployConfig | null>(null)
-  const [deployDeletePending, setDeployDeletePending] = useState<SSHDeployConfig | null>(null)
-  const [safeDeployDomain, setSafeDeployDomain] = useState<Domain | null>(null)
-  const [safeDeployEditOpen, setSafeDeployEditOpen] = useState(false)
-  const [safeDeployEditTarget, setSafeDeployEditTarget] = useState<SafelineDeployConfig | null>(null)
-  const [safeDeployDeletePending, setSafeDeployDeletePending] = useState<SafelineDeployConfig | null>(null)
-  const [casDeployDomain, setCASDeployDomain] = useState<Domain | null>(null)
-  const [casDeployEditOpen, setCASDeployEditOpen] = useState(false)
-  const [casDeployEditTarget, setCASDeployEditTarget] = useState<CASDeployConfig | null>(null)
-  const [casDeployDeletePending, setCASDeployDeletePending] = useState<CASDeployConfig | null>(null)
-  const [fnosDeployDomain, setFnOSDeployDomain] = useState<Domain | null>(null)
-  const [fnosDeployEditOpen, setFnOSDeployEditOpen] = useState(false)
-  const [fnosDeployEditTarget, setFnOSDeployEditTarget] = useState<FnOSDeployConfig | null>(null)
-  const [fnosDeployDeletePending, setFnOSDeployDeletePending] = useState<FnOSDeployConfig | null>(null)
-  const [logTaskID, setLogTaskID] = useState<number | null>(null)
-
-  const [credDrawerOpen, setCredDrawerOpen] = useState(false)
-  const [credEditOpen, setCredEditOpen] = useState(false)
-  const [credEditTarget, setCredEditTarget] = useState<Credential | null>(null)
-  const [credDeletePending, setCredDeletePending] = useState<Credential | null>(null)
-  const [accountDrawerOpen, setAccountDrawerOpen] = useState(false)
-  const [accountEditOpen, setAccountEditOpen] = useState(false)
-  const [accountEditTarget, setAccountEditTarget] = useState<AcmeAccount | null>(null)
-  const [accountDeletePending, setAccountDeletePending] = useState<AcmeAccount | null>(null)
-  const [targetEntryOpen, setTargetEntryOpen] = useState(false)
-  const [deployEntryDomain, setDeployEntryDomain] = useState<Domain | null>(null)
-  const [sshEditOpen, setSSHEditOpen] = useState(false)
-  const [sshEditTarget, setSSHEditTarget] = useState<SSHTarget | null>(null)
-  const [sshDeletePending, setSSHDeletePending] = useState<SSHTarget | null>(null)
-  const [safeEditOpen, setSafeEditOpen] = useState(false)
-  const [safeEditTarget, setSafeEditTarget] = useState<SafelineTarget | null>(null)
-  const [safeDeletePending, setSafeDeletePending] = useState<SafelineTarget | null>(null)
-  const [casEditOpen, setCASEditOpen] = useState(false)
-  const [casEditTarget, setCASEditTarget] = useState<CASTarget | null>(null)
-  const [casDeletePending, setCASDeletePending] = useState<CASTarget | null>(null)
-  const [fnosEditOpen, setFnOSEditOpen] = useState(false)
-  const [fnosEditTarget, setFnOSEditTarget] = useState<FnOSTarget | null>(null)
-  const [fnosDeletePending, setFnOSDeletePending] = useState<FnOSTarget | null>(null)
-  const [sshCredDrawerOpen, setSSHCredDrawerOpen] = useState(false)
-  const [sshCredEditOpen, setSSHCredEditOpen] = useState(false)
-  const [sshCredEditTarget, setSSHCredEditTarget] = useState<SSHCredential | null>(null)
-  const [sshCredDeletePending, setSSHCredDeletePending] = useState<SSHCredential | null>(null)
-
+  const ui = useAcmeUiState()
+  const actions = useAcmeActions({
+    ui,
+    reloadAll,
+    reloadTasks,
+    reloadCredentials,
+    reloadDeployTargets,
+    reloadSSHCredentials,
+    reloadDeployConfigs,
+  })
   const cs = getColorSet('emerald')
-
-  const onDeleteSSHCredential = makeDeleteHandler({
-    get: () => sshCredDeletePending,
-    clear: () => setSSHCredDeletePending(null),
-    url: (c) => `/acme/ssh-credentials/${c.id}`,
-    reload: reloadSSHCredentials,
-  })
-
-  const onDeleteCredential = makeDeleteHandler({
-    get: () => credDeletePending,
-    clear: () => setCredDeletePending(null),
-    url: (c) => `/acme/credentials/${c.id}`,
-    reload: reloadCredentials,
-  })
-
-  const onDeleteAccount = makeDeleteHandler({
-    get: () => accountDeletePending,
-    clear: () => setAccountDeletePending(null),
-    url: (a) => `/acme/accounts/${a.id}`,
-    reload: reloadAll,
-  })
-
-  const onDeleteSSHTarget = makeDeleteHandler({
-    get: () => sshDeletePending,
-    clear: () => setSSHDeletePending(null),
-    url: (t) => `/acme/deploy/targets/${t.id}`,
-    reload: reloadDeployTargets,
-  })
-
-  const onDeleteSafelineTarget = makeDeleteHandler({
-    get: () => safeDeletePending,
-    clear: () => setSafeDeletePending(null),
-    url: (t) => `/acme/deploy/targets/${t.id}`,
-    reload: reloadDeployTargets,
-  })
-
-  const onDeleteCASTarget = makeDeleteHandler({
-    get: () => casDeletePending,
-    clear: () => setCASDeletePending(null),
-    url: (t) => `/acme/deploy/targets/${t.id}`,
-    reload: reloadDeployTargets,
-  })
-
-  const onDeleteFnOSTarget = makeDeleteHandler({
-    get: () => fnosDeletePending,
-    clear: () => setFnOSDeletePending(null),
-    url: (t) => `/acme/deploy/targets/${t.id}`,
-    reload: reloadDeployTargets,
-  })
-
-  const reloadEntryConfigs = () =>
-    deployEntryDomain ? reloadDeployConfigs(deployEntryDomain.id) : undefined
-
-  const onDeleteSSHDeployConfig = makeDeleteHandler({
-    get: () => deployDeletePending,
-    clear: () => setDeployDeletePending(null),
-    url: (cfg) => `/acme/deploy/configs/${cfg.id}`,
-    reload: reloadEntryConfigs,
-  })
-
-  const onDeleteSafelineDeployConfig = makeDeleteHandler({
-    get: () => safeDeployDeletePending,
-    clear: () => setSafeDeployDeletePending(null),
-    url: (cfg) => `/acme/deploy/configs/${cfg.id}`,
-    reload: reloadEntryConfigs,
-  })
-
-  const onDeleteCASDeployConfig = makeDeleteHandler({
-    get: () => casDeployDeletePending,
-    clear: () => setCASDeployDeletePending(null),
-    url: (cfg) => `/acme/deploy/configs/${cfg.id}`,
-    reload: reloadEntryConfigs,
-  })
-
-  const onDeleteFnOSDeployConfig = makeDeleteHandler({
-    get: () => fnosDeployDeletePending,
-    clear: () => setFnOSDeployDeletePending(null),
-    url: (cfg) => `/acme/deploy/configs/${cfg.id}`,
-    reload: reloadEntryConfigs,
-  })
-
-  const startIssue = async (d: Domain) => {
-    setBusy(`issue-${d.id}`)
-    try {
-      const { data } = await api.post(`/acme/domains/${d.id}/issue`)
-      const taskID = data?.data?.task_id as number
-      toast.success(`已提交，任务 #${taskID}`)
-      await reloadTasks()
-      setLogTaskID(taskID)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '提交失败')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const startRevoke = async (d: Domain) => {
-    setRevokePending(null)
-    setBusy(`revoke-${d.id}`)
-    try {
-      const { data } = await api.post(`/acme/domains/${d.id}/revoke`)
-      const taskID = data?.data?.task_id as number
-      toast.success(`已提交吊销，任务 #${taskID}`)
-      await reloadTasks()
-      setLogTaskID(taskID)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '提交吊销失败')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const downloadCert = (d: Domain) => {
-    const a = document.createElement('a')
-    a.href = `/api/acme/domains/${d.id}/cert/download`
-    a.rel = 'noopener'
-    a.click()
-  }
-
-  const openDeployConfigs = (d: Domain) => {
-    setDeployEntryDomain(d)
-    setDeployDomain(d)
-    setSafeDeployDomain(d)
-    setCASDeployDomain(d)
-    setFnOSDeployDomain(d)
-    void reloadDeployConfigs(d.id)
-  }
-
-  const DEPLOY_META: Record<
-    DeployConfigKind,
-    { word: string; reloadAfter: boolean; domain: () => Domain | null }
-  > = {
-    ssh: { word: ' SSH 部署', reloadAfter: false, domain: () => deployDomain },
-    safeline: { word: '雷池部署', reloadAfter: true, domain: () => safeDeployDomain },
-    cas: { word: ' CAS 上传', reloadAfter: true, domain: () => casDeployDomain },
-    fnos: { word: ' fnOS 部署', reloadAfter: true, domain: () => fnosDeployDomain },
-  }
-
-  const startDeployConfig = async (kind: DeployConfigKind, cfg: { id: number }) => {
-    const meta = DEPLOY_META[kind]
-    const dom = meta.domain()
-    if (!dom) return
-    setBusy(`deploy-${kind}-config-${cfg.id}`)
-    try {
-      const { data } = await api.post(`/acme/deploy/configs/${cfg.id}/deploy`)
-      const taskID = data?.data?.task_id as number
-      toast.success(`已提交${meta.word}，任务 #${taskID}`)
-      await reloadTasks()
-      if (meta.reloadAfter) await reloadDeployConfigs(dom.id)
-      setLogTaskID(taskID)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || `提交${meta.word}失败`)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const startDeployAllConfigs = async () => {
-    const d = deployEntryDomain
-    if (!d) return
-    setBusy(`deploy-domain-${d.id}`)
-    try {
-      const { data } = await api.post(`/acme/domains/${d.id}/deploy-configs/deploy`)
-      const taskIDs = (data?.data?.task_ids ?? []) as number[]
-      toast.success(`已提交 ${taskIDs.length} 个部署任务`)
-      await reloadTasks()
-      await reloadDeployConfigs(d.id)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '提交一键部署失败')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const retryTask = async (taskID: number) => {
-    setBusy(`retry-${taskID}`)
-    try {
-      await api.post(`/acme/tasks/${taskID}/retry`)
-      toast.success(`已重试任务 #${taskID}`)
-      await reloadTasks()
-      setLogTaskID(taskID)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '重试失败')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const onDelete = async () => {
-    const d = deletePending
-    if (!d) return
-    setDeletePending(null)
-    setBusy(`del-${d.id}`)
-    try {
-      await api.delete(`/acme/domains/${d.id}`)
-      toast.success('已删除')
-      await reloadAll()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '删除失败')
-    } finally {
-      setBusy(null)
-    }
-  }
 
   return (
     <div className="mx-auto max-w-5xl px-4 pb-12 pt-4 sm:px-8 sm:pb-32 sm:pt-10">
@@ -375,7 +115,7 @@ export default function Acme() {
             variant="outline"
             size="sm"
             className="h-10 w-full sm:h-8 sm:w-auto"
-            onClick={() => setCredDrawerOpen(true)}
+            onClick={ui.credentials.drawer.show}
           >
             <KeyRound className="mr-1.5 h-3.5 w-3.5" />
             DNS 凭证
@@ -384,7 +124,7 @@ export default function Acme() {
             variant="outline"
             size="sm"
             className="h-10 w-full sm:h-8 sm:w-auto"
-            onClick={() => setAccountDrawerOpen(true)}
+            onClick={ui.accounts.drawer.show}
           >
             <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
             CA 账号
@@ -393,7 +133,7 @@ export default function Acme() {
             variant="outline"
             size="sm"
             className="h-10 w-full sm:h-8 sm:w-auto"
-            onClick={() => setTargetEntryOpen(true)}
+            onClick={ui.targets.entry.show}
           >
             <Server className="mr-1.5 h-3.5 w-3.5" />
             部署目标
@@ -401,10 +141,7 @@ export default function Acme() {
           <Button
             size="sm"
             className="hidden h-10 w-full sm:inline-flex sm:h-8 sm:w-auto"
-            onClick={() => {
-              setEditTarget(null)
-              setEditOpen(true)
-            }}
+            onClick={ui.domain.edit.add}
           >
             <Plus className="mr-1.5 h-3.5 w-3.5" />
             新增域名
@@ -414,10 +151,7 @@ export default function Acme() {
 
       <Button
         size="icon"
-        onClick={() => {
-          setEditTarget(null)
-          setEditOpen(true)
-        }}
+        onClick={ui.domain.edit.add}
         className="fixed bottom-[calc(env(safe-area-inset-bottom)+6rem)] right-5 z-30 h-12 w-12 rounded-full shadow-lg active:scale-95 sm:hidden"
         aria-label="新增域名"
       >
@@ -429,17 +163,14 @@ export default function Acme() {
           <DomainCard
             key={d.id}
             d={d}
-            busy={busy}
+            busy={ui.busy}
             accountSummary={accountSummary}
-            onIssue={startIssue}
-            onDeploy={openDeployConfigs}
-            onEdit={(dd) => {
-              setEditTarget(dd)
-              setEditOpen(true)
-            }}
-            onRevoke={setRevokePending}
-            onDelete={setDeletePending}
-            onDownload={downloadCert}
+            onIssue={actions.startIssue}
+            onDeploy={actions.openDeployConfigs}
+            onEdit={ui.domain.edit.edit}
+            onRevoke={ui.domain.revoke.setPending}
+            onDelete={ui.domain.remove.setPending}
+            onDownload={actions.downloadCert}
           />
         ))}
         {!loading && domains.length === 0 && (
@@ -459,233 +190,157 @@ export default function Acme() {
         taskTotal={taskTotal}
         onGo={(p) => void loadTasks(p)}
         onPageSizeChange={changeTaskPageSize}
-        onShowLog={setLogTaskID}
-        onRetry={(id) => void retryTask(id)}
-        busy={busy}
+        onShowLog={ui.log.setTaskID}
+        onRetry={(id) => void actions.retryTask(id)}
+        busy={ui.busy}
       />
 
       <DomainEditDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        target={editTarget}
-        accounts={accounts.filter((a) => a.enabled || a.id === editTarget?.account_id)}
+        open={ui.domain.edit.open}
+        onOpenChange={ui.domain.edit.setOpen}
+        target={ui.domain.edit.target}
+        accounts={accounts.filter((a) => a.enabled || a.id === ui.domain.edit.target?.account_id)}
         providers={providers}
         onSaved={reloadAll}
       />
 
       <ConfirmDialog
-        open={!!deletePending}
-        onClose={() => setDeletePending(null)}
-        onConfirm={onDelete}
+        open={!!ui.domain.remove.pending}
+        onClose={ui.domain.remove.clear}
+        onConfirm={actions.deleteDomain}
         title="删除域名配置"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {deletePending?.main_domain}
+          {ui.domain.remove.pending?.main_domain}
         </span>{' '}
         的 ACME 配置、关联证书记录与任务流水。本地落盘的证书文件不会被删除。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!revokePending}
-        onClose={() => setRevokePending(null)}
+        open={!!ui.domain.revoke.pending}
+        onClose={ui.domain.revoke.clear}
         onConfirm={() => {
-          if (revokePending) void startRevoke(revokePending)
+          if (ui.domain.revoke.pending) void actions.startRevoke(ui.domain.revoke.pending)
         }}
         title="吊销当前证书"
         confirmText="吊销"
       >
         即将向 CA 吊销{' '}
         <span className="font-mono font-medium text-foreground">
-          {revokePending?.main_domain}
+          {ui.domain.revoke.pending?.main_domain}
         </span>{' '}
         当前证书。吊销不可逆，且不会自动删除 CAS 证书或切换 CDN 配置。
       </ConfirmDialog>
 
       <LogDrawer
-        taskID={logTaskID}
+        taskID={ui.log.taskID}
         onClose={() => {
-          setLogTaskID(null)
+          ui.log.clear()
           void reloadTasks()
           void reloadAll()
-          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
+          if (ui.deploy.entryDomain) void reloadDeployConfigs(ui.deploy.entryDomain.id)
         }}
       />
 
       <CredentialsDrawer
-        open={credDrawerOpen}
-        onOpenChange={setCredDrawerOpen}
+        open={ui.credentials.drawer.open}
+        onOpenChange={ui.credentials.drawer.setOpen}
         credentials={credentials}
-        onAdd={() => {
-          setCredEditTarget(null)
-          setCredEditOpen(true)
-        }}
-        onEdit={(c) => {
-          setCredEditTarget(c)
-          setCredEditOpen(true)
-        }}
-        onDelete={(c) => setCredDeletePending(c)}
+        onAdd={ui.credentials.edit.add}
+        onEdit={ui.credentials.edit.edit}
+        onDelete={ui.credentials.remove.setPending}
       />
 
       <CredentialEditDialog
-        open={credEditOpen}
-        onOpenChange={setCredEditOpen}
-        target={credEditTarget}
+        open={ui.credentials.edit.open}
+        onOpenChange={ui.credentials.edit.setOpen}
+        target={ui.credentials.edit.target}
         onSaved={reloadCredentials}
       />
 
       <AccountsDrawer
-        open={accountDrawerOpen}
-        onOpenChange={setAccountDrawerOpen}
+        open={ui.accounts.drawer.open}
+        onOpenChange={ui.accounts.drawer.setOpen}
         accounts={accounts}
-        onAdd={() => {
-          setAccountEditTarget(null)
-          setAccountEditOpen(true)
-        }}
-        onEdit={(a) => {
-          setAccountEditTarget(a)
-          setAccountEditOpen(true)
-        }}
-        onDelete={(a) => setAccountDeletePending(a)}
+        onAdd={ui.accounts.edit.add}
+        onEdit={ui.accounts.edit.edit}
+        onDelete={ui.accounts.remove.setPending}
       />
 
       <AccountEditDialog
-        open={accountEditOpen}
-        onOpenChange={setAccountEditOpen}
-        target={accountEditTarget}
+        open={ui.accounts.edit.open}
+        onOpenChange={ui.accounts.edit.setOpen}
+        target={ui.accounts.edit.target}
         onSaved={reloadAccounts}
       />
 
       <DeployTargetsEntryDrawer
-        open={targetEntryOpen}
-        onOpenChange={setTargetEntryOpen}
+        open={ui.targets.entry.open}
+        onOpenChange={ui.targets.entry.setOpen}
         sshTargets={sshTargets}
         safelineTargets={safelineTargets}
         casTargets={casTargets}
         fnosTargets={fnosTargets}
-        onAddSSH={() => {
-          setSSHEditTarget(null)
-          setSSHEditOpen(true)
-        }}
-        onEditSSH={(t) => {
-          setSSHEditTarget(t)
-          setSSHEditOpen(true)
-        }}
-        onDeleteSSH={(t) => setSSHDeletePending(t)}
-        onManageCredentials={() => setSSHCredDrawerOpen(true)}
-        onTestSSH={async (t) => {
-          try {
-            await api.post(`/acme/deploy/targets/${t.id}/test`)
-            toast.success('连接正常')
-          } catch (e: any) {
-            toast.error(e?.response?.data?.error || e?.message || '连接失败')
-          }
-        }}
-        onAddSafeline={() => {
-          setSafeEditTarget(null)
-          setSafeEditOpen(true)
-        }}
-        onEditSafeline={(t) => {
-          setSafeEditTarget(t)
-          setSafeEditOpen(true)
-        }}
-        onDeleteSafeline={(t) => setSafeDeletePending(t)}
-        onTestSafeline={async (t) => {
-          try {
-            await api.post(`/acme/deploy/targets/${t.id}/test`)
-            toast.success('连接正常')
-          } catch (e: any) {
-            toast.error(e?.response?.data?.error || e?.message || '连接失败')
-          }
-        }}
-        onAddCAS={() => {
-          setCASEditTarget(null)
-          setCASEditOpen(true)
-        }}
-        onEditCAS={(t) => {
-          setCASEditTarget(t)
-          setCASEditOpen(true)
-        }}
-        onDeleteCAS={(t) => setCASDeletePending(t)}
-        onTestCAS={async (t) => {
-          try {
-            await api.post(`/acme/deploy/targets/${t.id}/test`)
-            toast.success('连接正常')
-          } catch (e: any) {
-            toast.error(e?.response?.data?.error || e?.message || '连接失败')
-          }
-        }}
-        onAddFnOS={() => {
-          setFnOSEditTarget(null)
-          setFnOSEditOpen(true)
-        }}
-        onEditFnOS={(t) => {
-          setFnOSEditTarget(t)
-          setFnOSEditOpen(true)
-        }}
-        onDeleteFnOS={(t) => setFnOSDeletePending(t)}
-        onTestFnOS={async (t) => {
-          try {
-            await api.post(`/acme/deploy/targets/${t.id}/test`)
-            toast.success('连接正常')
-          } catch (e: any) {
-            toast.error(e?.response?.data?.error || e?.message || '连接失败')
-          }
-        }}
+        onAddSSH={ui.targets.ssh.edit.add}
+        onEditSSH={ui.targets.ssh.edit.edit}
+        onDeleteSSH={ui.targets.ssh.remove.setPending}
+        onManageCredentials={ui.sshCredentials.drawer.show}
+        onTestSSH={(t) => void actions.testDeployTarget(t.id)}
+        onAddSafeline={ui.targets.safeline.edit.add}
+        onEditSafeline={ui.targets.safeline.edit.edit}
+        onDeleteSafeline={ui.targets.safeline.remove.setPending}
+        onTestSafeline={(t) => void actions.testDeployTarget(t.id)}
+        onAddCAS={ui.targets.cas.edit.add}
+        onEditCAS={ui.targets.cas.edit.edit}
+        onDeleteCAS={ui.targets.cas.remove.setPending}
+        onTestCAS={(t) => void actions.testDeployTarget(t.id)}
+        onAddFnOS={ui.targets.fnos.edit.add}
+        onEditFnOS={ui.targets.fnos.edit.edit}
+        onDeleteFnOS={ui.targets.fnos.remove.setPending}
+        onTestFnOS={(t) => void actions.testDeployTarget(t.id)}
       />
 
       <SSHTargetEditDialog
-        open={sshEditOpen}
-        onOpenChange={setSSHEditOpen}
-        target={sshEditTarget}
+        open={ui.targets.ssh.edit.open}
+        onOpenChange={ui.targets.ssh.edit.setOpen}
+        target={ui.targets.ssh.edit.target}
         credentials={sshCredentials}
         sshTargets={sshTargets}
         fnosTargets={fnosTargets}
-        onManageCredentials={() => setSSHCredDrawerOpen(true)}
+        onManageCredentials={ui.sshCredentials.drawer.show}
         onSaved={reloadDeployTargets}
       />
 
       <SSHCredentialsDrawer
-        open={sshCredDrawerOpen}
-        onOpenChange={setSSHCredDrawerOpen}
+        open={ui.sshCredentials.drawer.open}
+        onOpenChange={ui.sshCredentials.drawer.setOpen}
         credentials={sshCredentials}
-        onAdd={() => {
-          setSSHCredEditTarget(null)
-          setSSHCredEditOpen(true)
-        }}
-        onEdit={(c) => {
-          setSSHCredEditTarget(c)
-          setSSHCredEditOpen(true)
-        }}
-        onDelete={(c) => setSSHCredDeletePending(c)}
+        onAdd={ui.sshCredentials.edit.add}
+        onEdit={ui.sshCredentials.edit.edit}
+        onDelete={ui.sshCredentials.remove.setPending}
       />
 
       <SSHCredentialEditDialog
-        open={sshCredEditOpen}
-        onOpenChange={setSSHCredEditOpen}
-        target={sshCredEditTarget}
+        open={ui.sshCredentials.edit.open}
+        onOpenChange={ui.sshCredentials.edit.setOpen}
+        target={ui.sshCredentials.edit.target}
         onSaved={reloadSSHCredentials}
       />
 
       <SafelineTargetEditDialog
-        open={safeEditOpen}
-        onOpenChange={setSafeEditOpen}
-        target={safeEditTarget}
+        open={ui.targets.safeline.edit.open}
+        onOpenChange={ui.targets.safeline.edit.setOpen}
+        target={ui.targets.safeline.edit.target}
         onSaved={reloadDeployTargets}
       />
 
       <DeployConfigsDrawer
-        open={!!deployEntryDomain}
+        open={!!ui.deploy.entryDomain}
         onOpenChange={(o) => {
-          if (!o) {
-            setDeployEntryDomain(null)
-            setDeployDomain(null)
-            setSafeDeployDomain(null)
-            setCASDeployDomain(null)
-            setFnOSDeployDomain(null)
-          }
+          if (!o) ui.deploy.closeConfigs()
         }}
-        domain={deployEntryDomain}
+        domain={ui.deploy.entryDomain}
         sshConfigs={deployConfigs}
         safelineConfigs={safeDeployConfigs}
         casConfigs={casDeployConfigs}
@@ -695,261 +350,237 @@ export default function Acme() {
         casTargets={casTargets}
         fnosTargets={fnosTargets}
         loading={deployConfigLoading || safeDeployLoading || casDeployLoading || fnosDeployLoading}
-        busy={busy}
-        onAddSSH={() => {
-          setDeployEditTarget(null)
-          setDeployEditOpen(true)
-        }}
-        onEditSSH={(cfg) => {
-          setDeployEditTarget(cfg)
-          setDeployEditOpen(true)
-        }}
+        busy={ui.busy}
+        onAddSSH={ui.deploy.ssh.edit.add}
+        onEditSSH={ui.deploy.ssh.edit.edit}
         onCopySSH={(cfg) => {
-          setDeployEditTarget({
+          ui.deploy.ssh.edit.setTarget({
             ...cfg,
             id: 0,
             name: `${cfg.name || '配置'} 副本`,
             created_at: '',
             updated_at: '',
           })
-          setDeployEditOpen(true)
+          ui.deploy.ssh.edit.setOpen(true)
         }}
-        onDeleteSSH={(cfg) => setDeployDeletePending(cfg)}
-        onDeploySSH={(cfg) => void startDeployConfig('ssh', cfg)}
-        onAddSafeline={() => {
-          setSafeDeployEditTarget(null)
-          setSafeDeployEditOpen(true)
-        }}
-        onEditSafeline={(cfg) => {
-          setSafeDeployEditTarget(cfg)
-          setSafeDeployEditOpen(true)
-        }}
-        onDeleteSafeline={(cfg) => setSafeDeployDeletePending(cfg)}
-        onDeploySafeline={(cfg) => void startDeployConfig('safeline', cfg)}
-        onAddCAS={() => {
-          setCASDeployEditTarget(null)
-          setCASDeployEditOpen(true)
-        }}
-        onEditCAS={(cfg) => {
-          setCASDeployEditTarget(cfg)
-          setCASDeployEditOpen(true)
-        }}
-        onDeleteCAS={(cfg) => setCASDeployDeletePending(cfg)}
-        onDeployCAS={(cfg) => void startDeployConfig('cas', cfg)}
-        onAddFnOS={() => {
-          setFnOSDeployEditTarget(null)
-          setFnOSDeployEditOpen(true)
-        }}
-        onEditFnOS={(cfg) => {
-          setFnOSDeployEditTarget(cfg)
-          setFnOSDeployEditOpen(true)
-        }}
-        onDeleteFnOS={(cfg) => setFnOSDeployDeletePending(cfg)}
-        onDeployFnOS={(cfg) => void startDeployConfig('fnos', cfg)}
-        onDeployAll={() => void startDeployAllConfigs()}
+        onDeleteSSH={ui.deploy.ssh.remove.setPending}
+        onDeploySSH={(cfg) => void actions.startDeployConfig('ssh', cfg)}
+        onAddSafeline={ui.deploy.safeline.edit.add}
+        onEditSafeline={ui.deploy.safeline.edit.edit}
+        onDeleteSafeline={ui.deploy.safeline.remove.setPending}
+        onDeploySafeline={(cfg) => void actions.startDeployConfig('safeline', cfg)}
+        onAddCAS={ui.deploy.cas.edit.add}
+        onEditCAS={ui.deploy.cas.edit.edit}
+        onDeleteCAS={ui.deploy.cas.remove.setPending}
+        onDeployCAS={(cfg) => void actions.startDeployConfig('cas', cfg)}
+        onAddFnOS={ui.deploy.fnos.edit.add}
+        onEditFnOS={ui.deploy.fnos.edit.edit}
+        onDeleteFnOS={ui.deploy.fnos.remove.setPending}
+        onDeployFnOS={(cfg) => void actions.startDeployConfig('fnos', cfg)}
+        onDeployAll={() => void actions.startDeployAllConfigs()}
       />
 
       <SSHDeployConfigEditDialog
-        open={deployEditOpen}
-        onOpenChange={setDeployEditOpen}
-        domain={deployDomain}
-        config={deployEditTarget}
+        open={ui.deploy.ssh.edit.open}
+        onOpenChange={ui.deploy.ssh.edit.setOpen}
+        domain={ui.deploy.ssh.domain}
+        config={ui.deploy.ssh.edit.target}
         targets={sshTargets}
         onSaved={() => {
-          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
+          if (ui.deploy.entryDomain) void reloadDeployConfigs(ui.deploy.entryDomain.id)
         }}
       />
 
       <SafelineDeployConfigEditDialog
-        open={safeDeployEditOpen}
-        onOpenChange={setSafeDeployEditOpen}
-        domain={safeDeployDomain}
-        config={safeDeployEditTarget}
+        open={ui.deploy.safeline.edit.open}
+        onOpenChange={ui.deploy.safeline.edit.setOpen}
+        domain={ui.deploy.safeline.domain}
+        config={ui.deploy.safeline.edit.target}
         targets={safelineTargets}
         onSaved={() => {
-          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
+          if (ui.deploy.entryDomain) void reloadDeployConfigs(ui.deploy.entryDomain.id)
         }}
       />
 
       <CASTargetEditDialog
-        open={casEditOpen}
-        onOpenChange={setCASEditOpen}
-        target={casEditTarget}
+        open={ui.targets.cas.edit.open}
+        onOpenChange={ui.targets.cas.edit.setOpen}
+        target={ui.targets.cas.edit.target}
         onSaved={reloadDeployTargets}
       />
 
       <CASDeployConfigEditDialog
-        open={casDeployEditOpen}
-        onOpenChange={setCASDeployEditOpen}
-        domain={casDeployDomain}
-        config={casDeployEditTarget}
+        open={ui.deploy.cas.edit.open}
+        onOpenChange={ui.deploy.cas.edit.setOpen}
+        domain={ui.deploy.cas.domain}
+        config={ui.deploy.cas.edit.target}
         targets={casTargets}
         onSaved={() => {
-          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
+          if (ui.deploy.entryDomain) void reloadDeployConfigs(ui.deploy.entryDomain.id)
         }}
       />
 
       <FnOSTargetEditDialog
-        open={fnosEditOpen}
-        onOpenChange={setFnOSEditOpen}
-        target={fnosEditTarget}
+        open={ui.targets.fnos.edit.open}
+        onOpenChange={ui.targets.fnos.edit.setOpen}
+        target={ui.targets.fnos.edit.target}
         credentials={sshCredentials}
         sshTargets={sshTargets}
         fnosTargets={fnosTargets}
-        onManageCredentials={() => setSSHCredDrawerOpen(true)}
+        onManageCredentials={ui.sshCredentials.drawer.show}
         onSaved={reloadDeployTargets}
       />
 
       <FnOSDeployConfigEditDialog
-        open={fnosDeployEditOpen}
-        onOpenChange={setFnOSDeployEditOpen}
-        domain={fnosDeployDomain}
-        config={fnosDeployEditTarget}
+        open={ui.deploy.fnos.edit.open}
+        onOpenChange={ui.deploy.fnos.edit.setOpen}
+        domain={ui.deploy.fnos.domain}
+        config={ui.deploy.fnos.edit.target}
         targets={fnosTargets}
         onSaved={() => {
-          if (deployEntryDomain) void reloadDeployConfigs(deployEntryDomain.id)
+          if (ui.deploy.entryDomain) void reloadDeployConfigs(ui.deploy.entryDomain.id)
         }}
       />
 
       <ConfirmDialog
-        open={!!deployDeletePending}
-        onClose={() => setDeployDeletePending(null)}
-        onConfirm={onDeleteSSHDeployConfig}
+        open={!!ui.deploy.ssh.remove.pending}
+        onClose={ui.deploy.ssh.remove.clear}
+        onConfirm={actions.onDeleteSSHDeployConfig}
         title="删除部署配置"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {deployDeletePending?.name || `#${deployDeletePending?.id}`}
+          {ui.deploy.ssh.remove.pending?.name || `#${ui.deploy.ssh.remove.pending?.id}`}
         </span>{' '}
         的 SSH 部署配置。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!safeDeployDeletePending}
-        onClose={() => setSafeDeployDeletePending(null)}
-        onConfirm={onDeleteSafelineDeployConfig}
+        open={!!ui.deploy.safeline.remove.pending}
+        onClose={ui.deploy.safeline.remove.clear}
+        onConfirm={actions.onDeleteSafelineDeployConfig}
         title="删除雷池部署配置"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {safeDeployDeletePending?.name || `#${safeDeployDeletePending?.id}`}
+          {ui.deploy.safeline.remove.pending?.name || `#${ui.deploy.safeline.remove.pending?.id}`}
         </span>{' '}
         的雷池部署配置。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!sshDeletePending}
-        onClose={() => setSSHDeletePending(null)}
-        onConfirm={onDeleteSSHTarget}
+        open={!!ui.targets.ssh.remove.pending}
+        onClose={ui.targets.ssh.remove.clear}
+        onConfirm={actions.onDeleteSSHTarget}
         title="删除 SSH 机器"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {sshDeletePending?.name}
+          {ui.targets.ssh.remove.pending?.name}
         </span>{' '}
         的部署配置。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!safeDeletePending}
-        onClose={() => setSafeDeletePending(null)}
-        onConfirm={onDeleteSafelineTarget}
+        open={!!ui.targets.safeline.remove.pending}
+        onClose={ui.targets.safeline.remove.clear}
+        onConfirm={actions.onDeleteSafelineTarget}
         title="删除雷池实例"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {safeDeletePending?.name}
+          {ui.targets.safeline.remove.pending?.name}
         </span>{' '}
         及其部署配置。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!casDeletePending}
-        onClose={() => setCASDeletePending(null)}
-        onConfirm={onDeleteCASTarget}
+        open={!!ui.targets.cas.remove.pending}
+        onClose={ui.targets.cas.remove.clear}
+        onConfirm={actions.onDeleteCASTarget}
         title="删除阿里云 CAS 实例"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {casDeletePending?.name}
+          {ui.targets.cas.remove.pending?.name}
         </span>{' '}
         及其部署配置。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!casDeployDeletePending}
-        onClose={() => setCASDeployDeletePending(null)}
-        onConfirm={onDeleteCASDeployConfig}
+        open={!!ui.deploy.cas.remove.pending}
+        onClose={ui.deploy.cas.remove.clear}
+        onConfirm={actions.onDeleteCASDeployConfig}
         title="删除阿里云 CAS 部署配置"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {casDeployDeletePending?.name || `#${casDeployDeletePending?.id}`}
+          {ui.deploy.cas.remove.pending?.name || `#${ui.deploy.cas.remove.pending?.id}`}
         </span>{' '}
         的 CAS 部署配置。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!fnosDeletePending}
-        onClose={() => setFnOSDeletePending(null)}
-        onConfirm={onDeleteFnOSTarget}
+        open={!!ui.targets.fnos.remove.pending}
+        onClose={ui.targets.fnos.remove.clear}
+        onConfirm={actions.onDeleteFnOSTarget}
         title="删除 fnOS 实例"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {fnosDeletePending?.name}
+          {ui.targets.fnos.remove.pending?.name}
         </span>{' '}
         及其部署配置。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!fnosDeployDeletePending}
-        onClose={() => setFnOSDeployDeletePending(null)}
-        onConfirm={onDeleteFnOSDeployConfig}
+        open={!!ui.deploy.fnos.remove.pending}
+        onClose={ui.deploy.fnos.remove.clear}
+        onConfirm={actions.onDeleteFnOSDeployConfig}
         title="删除 fnOS 部署配置"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {fnosDeployDeletePending?.name || `#${fnosDeployDeletePending?.id}`}
+          {ui.deploy.fnos.remove.pending?.name || `#${ui.deploy.fnos.remove.pending?.id}`}
         </span>{' '}
         的 fnOS 部署配置。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!sshCredDeletePending}
-        onClose={() => setSSHCredDeletePending(null)}
-        onConfirm={onDeleteSSHCredential}
+        open={!!ui.sshCredentials.remove.pending}
+        onClose={ui.sshCredentials.remove.clear}
+        onConfirm={actions.onDeleteSSHCredential}
         title="删除登录凭证"
       >
         即将删除登录凭证{' '}
         <span className="font-mono font-medium text-foreground">
-          {sshCredDeletePending?.name}
+          {ui.sshCredentials.remove.pending?.name}
         </span>
         ；引用了该凭证的机器将无法连接，请确认。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!accountDeletePending}
-        onClose={() => setAccountDeletePending(null)}
-        onConfirm={onDeleteAccount}
+        open={!!ui.accounts.remove.pending}
+        onClose={ui.accounts.remove.clear}
+        onConfirm={actions.onDeleteAccount}
         title="删除 CA 账号"
       >
         即将删除{' '}
         <span className="font-mono font-medium text-foreground">
-          {accountDeletePending?.name}
+          {ui.accounts.remove.pending?.name}
         </span>{' '}
         账号；已被域名引用的账号不能删除。
       </ConfirmDialog>
 
       <ConfirmDialog
-        open={!!credDeletePending}
-        onClose={() => setCredDeletePending(null)}
-        onConfirm={onDeleteCredential}
+        open={!!ui.credentials.remove.pending}
+        onClose={ui.credentials.remove.clear}
+        onConfirm={actions.onDeleteCredential}
         title="删除 DNS 凭证"
       >
         即将删除 provider{' '}
         <span className="font-mono font-medium text-foreground">
-          {credDeletePending?.provider}
+          {ui.credentials.remove.pending?.provider}
         </span>{' '}
         的凭证；已关联该 provider 的域名将无法继续签发，请确认。
       </ConfirmDialog>
