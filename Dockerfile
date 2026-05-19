@@ -8,5 +8,9 @@ COPY --chmod=0755 dist/server-linux-${TARGETARCH} /app/server
 
 ENV GIN_MODE=release
 
-EXPOSE 8080
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+	CMD wget -q --spider "http://127.0.0.1:${SERVER_PORT:-8081}/healthz" || exit 1
+
 ENTRYPOINT ["/app/server"]
