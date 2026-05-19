@@ -29,7 +29,7 @@ type emailNotifier struct {
 	to string
 }
 
-func (e *emailNotifier) Name() string  { return "email" }
+func (e *emailNotifier) Name() string { return "email" }
 func (e *emailNotifier) Enabled() bool {
 	return e.c != nil && e.c.Enabled() && e.to != ""
 }

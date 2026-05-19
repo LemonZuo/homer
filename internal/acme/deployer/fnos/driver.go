@@ -570,4 +570,3 @@ func validateTarget(t model.ACMEFnOSTarget) error {
 	}
 	return nil
 }
-

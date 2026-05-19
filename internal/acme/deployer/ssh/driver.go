@@ -465,4 +465,3 @@ func validateTarget(t model.ACMESSHTarget) error {
 	}
 	return nil
 }
-

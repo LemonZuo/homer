@@ -47,8 +47,8 @@ type job struct {
 }
 
 type Scheduler struct {
-	c   *cron.Cron
-	mu  sync.RWMutex
+	c     *cron.Cron
+	mu    sync.RWMutex
 	jobs  map[string]*job
 	order []string
 
@@ -194,14 +194,14 @@ func (s *Scheduler) Trigger(name string) error {
 
 // JobView 面板用的任务视图，历史按时间倒序（最近在前）。
 type JobView struct {
-	Name       string     `json:"name"`
-	Spec       string     `json:"spec"`
-	ManualOnly bool       `json:"manual_only"`
-	Next       *time.Time `json:"next,omitempty"`
-	Running    bool       `json:"running"`
-	Last       *Run       `json:"last,omitempty"`
-	ConsecFails int       `json:"consec_fails"`
-	History    []Run      `json:"history"`
+	Name        string     `json:"name"`
+	Spec        string     `json:"spec"`
+	ManualOnly  bool       `json:"manual_only"`
+	Next        *time.Time `json:"next,omitempty"`
+	Running     bool       `json:"running"`
+	Last        *Run       `json:"last,omitempty"`
+	ConsecFails int        `json:"consec_fails"`
+	History     []Run      `json:"history"`
 }
 
 func (s *Scheduler) Jobs() []JobView {
@@ -212,9 +212,9 @@ func (s *Scheduler) Jobs() []JobView {
 		j := s.jobs[name]
 		j.mu.Lock()
 		v := JobView{
-			Name:       j.name,
-			Spec:       j.spec,
-			ManualOnly: j.spec == "",
+			Name:        j.name,
+			Spec:        j.spec,
+			ManualOnly:  j.spec == "",
 			Running:     j.running,
 			Last:        j.last,
 			ConsecFails: j.consec,

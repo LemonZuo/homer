@@ -253,4 +253,3 @@ func validateTarget(t model.ACMESafelineTarget) error {
 	}
 	return nil
 }
-
