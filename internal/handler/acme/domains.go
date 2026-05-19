@@ -128,7 +128,8 @@ func (h *Handler) downloadCert(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	filename := d.MainDomain + ".zip"
+	// 通配符域名带 *,浏览器会把它替换成 _;这里统一规范成 wildcard
+	filename := strings.ReplaceAll(d.MainDomain, "*", "wildcard") + ".zip"
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Header("Content-Length", strconv.Itoa(buf.Len()))
