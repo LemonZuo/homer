@@ -12,6 +12,7 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
+    "forceConsistentCasingInFileNames": true,
     "noEmit": true,
 
     /* Linting */
