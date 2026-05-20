@@ -1,43 +1,319 @@
-# API 与 ACME 使用
+# API 与 ACME
 
-这里收集 HTTP API 概览，以及 ACME 模块的使用流程要点。
+这里收集 Homer 的 HTTP 接口、SSE 流、通知通道，以及 ACME 模块的使用流程要点。
 
 回到[项目首页](../README.md)。
 
-## API 概览
+## 通用约定
 
-常用 API 前缀均为 `/api`：
+- **前缀**：所有业务接口都挂在 `/api` 下。健康检查走 `/healthz`，不进 Gin access log。
+- **CORS**：默认全开（`Access-Control-Allow-Origin: *`），允许 `GET/POST/PUT/DELETE/OPTIONS`，便于本地 Vite (`:5173`) 直接打开发后端 (`:8081`)。
+- **响应**：成功统一 JSON；错误形如 `{"error":"..."}`。`POST/PUT` body 默认 JSON。
+- **认证**：Homer 本体没有登录鉴权，公网访问应放在反代 + 鉴权层之后（见 [docs/deployment.md](deployment.md)）。
+- **未配置降级**：依赖外部凭证的模块（CDN、CAS、通知通道）AK/SK 或绑定缺失时，相关接口会返回明确错误（如 `阿里云 CDN 未配置`），而非 500。
 
-| 路径 | 说明 |
+## 健康检查与版本
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/healthz` | 探活；DB 不通 503，其余 200。Body：`{"status":"ok\|degraded","db":"ok\|<err>","scheduler":{"jobs":N,"running":M,"failing":K}}` |
+| `GET` | `/api/version` | 返回 `{ version, commit, build_id }`，来自 `internal/buildinfo`（ldflags 注入） |
+
+## 生日 / 事项
+
+两个模块结构一致：标准 CRUD + 「手动推送」副动作。
+
+### 生日 (`/api/birthday`)
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/birthday` | 列表 |
+| `POST` | `/api/birthday` | 新建 |
+| `PUT` | `/api/birthday/:id` | 更新 |
+| `DELETE` | `/api/birthday/:id` | 删除 |
+| `POST` | `/api/birthday/:id/notify` | 立即推送一次（按当前绑定的通道） |
+
+### 事项 (`/api/event`)
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/event` | 列表 |
+| `POST` | `/api/event` | 新建 |
+| `PUT` | `/api/event/:id` | 更新 |
+| `DELETE` | `/api/event/:id` | 删除 |
+| `POST` | `/api/event/:id/notify` | 立即推送一次，并刷新 `last_notified_at`（避免当天 cron 再次重复） |
+
+## 调度面板 (`/api/scheduler`)
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/scheduler/jobs` | 列出所有 job：cron、上次执行时间/结果、连续失败次数 |
+| `POST` | `/api/scheduler/jobs/:name/run` | 手动触发；`:name` 取下方任务名 |
+
+进程内当前注册 4 个 job：
+
+| name | cron 来源 | 默认值 | 行为 |
+| --- | --- | --- | --- |
+| `birthday` | `BIRTHDAY_REMIND_CRON` | `0 0 9 * * *` | 扫描启用生日，命中今天的推送 |
+| `event` | `EVENT_REMIND_CRON` | `0 0 9 * * *` | 扫描启用事项，命中提醒窗口的推送（同日去重） |
+| `acme-renew` | `ACME_RENEW_CRON` | `0 0 3 * * *` | 剩余天数 ≤ `ACME_RENEW_BEFORE_DAYS` 的证书发起续期 |
+| `acme-deploy-retry` | `ACME_DEPLOY_RETRY_CRON` | `0 * * * * *` | 扫描 `status='retrying' AND next_retry_at<=now` 的部署任务择时拉起 |
+
+把对应 env **设为空字符串** 即把该 job 改为「仅手动触发」（`/api/scheduler/jobs/:name/run`）。
+
+## 通知 (`/api/notify`)
+
+通知通道与模块绑定都存在数据库，运行时按模块名查 `notify_binding` 表，**改动即时生效**。
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/notify/meta` | 返回所有 channel type + module 的 schema，给前端动态画表单 |
+| `GET` | `/api/notify/channels` | 通道列表 |
+| `POST` | `/api/notify/channels` | 新建 |
+| `PUT` | `/api/notify/channels/:id` | 更新 |
+| `DELETE` | `/api/notify/channels/:id` | 删除；仍有模块绑定时报错 |
+| `POST` | `/api/notify/channels/:id/test` | 用通道立刻发条测试消息 |
+| `GET` | `/api/notify/bindings` | 返回 `{ module: [channel_id...] }` |
+| `PUT` | `/api/notify/bindings/:module` | 整体覆盖某模块的通道绑定（事务：先删后插） |
+
+### 支持的 channel type
+
+| type | Label | `config_json` 字段 |
+| --- | --- | --- |
+| `wework` | 企业微信 | `corp_id`, `agent_id`, `secret`, `tag_id` |
+| `email` | Resend 邮件 | `api_key`, `from`, `to` |
+| `webhook` | Webhook | `url`（POST `application/json`，body `{title, text}`，10s 超时） |
+
+> 所有通道出站都被包了一层「重试 3 次，2s/4s 退避」；多通道并存时一路失败不影响其它路，全失败再 `errors.Join`。
+
+### 可绑定模块
+
+| module key | 用途 |
 | --- | --- |
-| `GET /api/version` | 当前版本和 commit |
-| `/api/birthday` | 生日提醒 CRUD |
-| `POST /api/birthday/:id/notify` | 手动推送单条生日提醒 |
-| `/api/event` | 事项提醒 CRUD |
-| `POST /api/event/:id/notify` | 手动推送单条事项提醒 |
-| `GET /api/scheduler/jobs` | 调度任务列表 |
-| `POST /api/scheduler/jobs/:name/run` | 手动触发调度任务 |
-| `/api/notify/*` | 通知通道配置 |
-| `GET /api/cdnops/domains` | 阿里云 CDN 加速域名 |
-| `/api/certstore/certificates` | 阿里云 CAS 证书列表和删除（全局凭证） |
-| `POST /api/certstore/deploy` | 将 CAS 证书部署到 CDN |
-| `/api/acme/accounts` | ACME 账号 CRUD |
-| `/api/acme/credentials` 、`/api/acme/ssh-credentials` | DNS provider 与 SSH 凭证 |
-| `/api/acme/domains` | 域名 CRUD、签发、吊销、证书查询 |
-| `/api/acme/deploy/targets` 、 `POST /api/acme/deploy/targets/:id/test` | 部署目标 CRUD（kind 区分 ssh/safeline/cas/fnos）+ 连通性测试 |
-| `/api/acme/domains/:id/deploy-configs` | 域名 → 部署目标的绑定 |
-| `POST /api/acme/domains/:id/deploy-configs/deploy` | 按域名触发部署 |
-| `/api/acme/tasks` 、 `POST /api/acme/tasks/:id/retry` 、 `GET /api/acme/tasks/:id/stream` | 任务历史、手动重试、SSE 实时日志 |
-| `/api/sms/*` | SmsForwarder 配置、发送、查询 |
-| `POST /api/byPass/receive` | 12306Bypass webhook 接收入口 |
+| `birthday` | 生日提醒 |
+| `event` | 事项提醒 |
+| `bypass` | 12306Bypass 转发 |
+| `scheduler_alert` | 调度任务失败告警（阈值 `SCHEDULER_ALERT_FAIL_THRESHOLD`） |
 
-## ACME 使用要点
+## CDN 加速域名 (`/api/cdnops`)
 
-1. 先创建 ACME 账号，也就是告诉 Homer 去哪里签证书。支持 Let's Encrypt、ZeroSSL 或自定义 ACME directory。ZeroSSL 的 EAB 信息存储在数据库中。
-2. 再创建 DNS provider 凭证，也就是告诉 Homer 怎么完成 DNS-01 校验。已实现深度校验的 provider 包括 `cloudflare`、`dnspod`、`alidns`、`tencentcloud`、`huaweicloud`。
-3. 创建域名配置，选择 ACME 账号和 DNS provider；密钥类型默认走全局 `ACME_KEY_TYPE`。
-4. 手动签发一次确认链路可用，之后交给 `ACME_RENEW_CRON` 自动检查临期证书。
-5. 需要部署时，配置部署目标和部署配置。当前支持 SSH、雷池 SafeLine、阿里云 CAS（`alicas`）、飞牛 fnOS（`fnos`，SSH 覆盖 ssls 时间戳目录 + psql 更新 trim_connect.cert + 重启 trim_nginx）四种 driver。
-6. 部署失败会先按 `ACME_DEPLOY_RETRY` 在同次任务内重试；仍失败的会被 `ACME_DEPLOY_RETRY_CRON` 定时捞起来补，也可以在 UI 的任务历史里手动重试。
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/cdnops/domains` | 列出阿里云 CDN 加速域名（只读）；AK/SK 见 `ALIYUN_CDN_*` |
 
-ACME 签发产物既会写入数据库，也会使用 `ACME_DATA_DIR` 作为本地工作目录。生产部署时应确保该目录持久化。
+## 证书库存 (`/api/certstore`)
+
+阿里云 CAS 证书的只读浏览 + 部署到 CDN（使用全局 `ALIYUN_CAS_*` AK/SK；ACME 内部走 `alicas` driver 时是另一套 per-target AK/SK）。
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/certstore/certificates` | CAS 证书列表 |
+| `DELETE` | `/api/certstore/certificates/:id` | 从 CAS 删除证书 |
+| `POST` | `/api/certstore/deploy` | body `{certName}`；按 CAS 证书的「绑定域名」匹配 CDN 加速域名并下发，触发后立即返回 |
+
+## SMS (`/api/sms`)
+
+对接 SmsForwarder Android（多目标设备：`forwarders` 表登记设备凭证；其他接口经 `target_id` 选设备）。
+
+| Method | Path | body |
+| --- | --- | --- |
+| `GET` | `/api/sms/forwarders` | 列设备 |
+| `POST` | `/api/sms/forwarders` | 新增 |
+| `PUT` | `/api/sms/forwarders/:id` | 更新 |
+| `DELETE` | `/api/sms/forwarders/:id` | 删除 |
+| `POST` | `/api/sms/config/query` | `{target_id}` 拉远端配置 |
+| `POST` | `/api/sms/send` | `{target_id, sim_slot, phone_numbers, msg_content}` |
+| `POST` | `/api/sms/query` | `{target_id, type, page_num, page_size, keyword}` |
+
+## 12306Bypass Webhook (`/api/byPass`)
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/byPass/receive` | 分流抢票助手回调入口；按 `bypass` 模块绑定的通道扇出（典型：企业微信 + Resend 邮件） |
+
+## ACME (`/api/acme`)
+
+按子模块分组。所有 `POST` body 形如 `{"name":..., "config_json":..., "auth_json":...}`，具体字段以前端表单为准。
+
+### Providers
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/acme/providers` | 列出支持的 DNS provider 及其 schema |
+
+### CA 账号
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/acme/accounts` |
+| `POST` | `/api/acme/accounts` |
+| `PUT` | `/api/acme/accounts/:id` |
+| `DELETE` | `/api/acme/accounts/:id` |
+
+### DNS 凭证 & SSH 凭证
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET / POST` | `/api/acme/credentials` `/api/acme/credentials/:id`（`DELETE`） | DNS provider 凭证 |
+| `GET / POST / PUT / DELETE` | `/api/acme/ssh-credentials`（`:id`） | SSH 凭证（账号 + 密码/私钥 + passphrase） |
+
+### 部署目标 (Targets)
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/acme/deploy/targets` | 列目标 |
+| `POST` | `/api/acme/deploy/targets` | 新建（按 `kind` 校验 schema） |
+| `PUT` | `/api/acme/deploy/targets/:id` | 更新 |
+| `DELETE` | `/api/acme/deploy/targets/:id` | 删除 |
+| `POST` | `/api/acme/deploy/targets/:id/test` | 连通性测试（SSH 拨号、雷池 `ListCerts`、CAS `ListUserCertificateOrder` 等） |
+
+### 部署配置 (Configs，对应「域名 × 目标」绑定)
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `PUT` | `/api/acme/deploy/configs/:id` | 更新 |
+| `DELETE` | `/api/acme/deploy/configs/:id` | 删除 |
+| `POST` | `/api/acme/deploy/configs/:id/deploy` | 仅部署这一条 |
+
+### 域名
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/acme/domains` | 列域名 |
+| `POST` | `/api/acme/domains` | 新建（选 CA 账号 + DNS provider + 密钥类型） |
+| `PUT` | `/api/acme/domains/:id` | 更新 |
+| `DELETE` | `/api/acme/domains/:id` | 删除 |
+| `GET` | `/api/acme/domains/:id/cert` | 查当前证书（链信息 + SAN + 剩余天数） |
+| `GET` | `/api/acme/domains/:id/cert/download` | 下载证书包（zip） |
+| `POST` | `/api/acme/domains/:id/issue` | 手动签发一次（异步：产出 `acme_issue_task`） |
+| `POST` | `/api/acme/domains/:id/revoke` | 吊销证书 |
+| `GET` | `/api/acme/domains/:id/deploy-configs` | 该域名下所有部署配置 |
+| `POST` | `/api/acme/domains/:id/deploy-configs` | 新建一条「域名 × 目标」绑定 |
+| `POST` | `/api/acme/domains/:id/deploy-configs/deploy` | 批量触发该域名所有配置 |
+
+### 任务（含 SSE）
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/acme/tasks` | 任务历史，query：`page`, `page_size`, `status=pending/running/success/failed/retrying` |
+| `GET` | `/api/acme/tasks/:id` | 任务详情 |
+| `POST` | `/api/acme/tasks/:id/retry` | 手动重试 |
+| `GET` | `/api/acme/tasks/:id/stream` | **SSE** 实时日志（见下） |
+
+### SSE 日志
+
+`/api/acme/tasks/:id/stream` 走 `text/event-stream`，断线不自动重连，需客户端自己处理。事件类型（data 都是纯字符串，不是 JSON）：
+
+| event | data | 说明 |
+| --- | --- | --- |
+| `log` | 一行日志文本 | 任务执行过程中追加 |
+| `done` | 终态字符串：`success` / `failed` / `retrying` | 收到即可关流 |
+
+> 服务端已带 `X-Accel-Buffering: no` 头，nginx 默认会识别并关闭缓冲；保险起见反代仍建议显式 `proxy_buffering off` + 放宽 `proxy_read_timeout`（[deployment.md](deployment.md#nginx-反向代理) 的示例已加好）。
+
+## ACME 部署 driver 详解
+
+ACME 内部目前注册了 4 个 driver，新加 driver 在 `wire.go::buildACMEService` 里 `NewDeployRegistry` 加一行即可。
+
+### `ssh` — SSH 机器
+
+`auth_json`（继承自 `sshlike.TargetAuth`）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `auth_source` | `inline`（默认）或 `credential`（引用 `ssh-credentials`） |
+| `credential_id` | `credential` 模式必填 |
+| `username` | |
+| `auth_type` | `password` 或 `key` |
+| `password` | password 模式 |
+| `private_key` / `passphrase` | key 模式 |
+
+`endpoint`：`host:port`，无端口默认 22。
+
+`target.config_json`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `bastion_target_id` | 单跳跳板机，指向另一条 `ssh`/`fnos` 目标；不允许自指 |
+
+`deploy.config_json`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `cert_path` / `chain_path` / `fullchain_path` | 三者至少 1 个 |
+| `key_path` | 必填 |
+| `deploy_command` | 可选；上传完成后执行（`{domain}` 占位符可用） |
+
+行为：SFTP 写入 → 跑 `deploy_command` → `TestTarget` 仅拨通。
+
+### `safeline` — 雷池 WAF
+
+`auth_json`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `api_token` | 雷池后台生成的 API token |
+
+`endpoint`：雷池 BaseURL，必须 `http(s)://` 开头。
+
+`target.config_json`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `skip_tls_verify` | 自签证书可设 true |
+
+`deploy.config_json`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `cert_type` | 雷池侧证书类型 ID，默认 2 |
+
+`deploy.state_json`：`{cert_id, cert_ids[]}`，记录上次落地的雷池 cert ID，用于下次原地更新。
+
+行为：有 `cert_id` 直接 `UpsertCert(cert_id, …)`；没有则 `ListCerts` → 按 SAN 匹配 → 命中的逐个更新，没命中就新增。
+
+### `upload_cas` — 阿里云 CAS
+
+`auth_json`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `access_key_id` | per-target，独立于全局 `ALIYUN_CAS_*` |
+| `access_key_secret` | |
+
+`endpoint` / `target.config_json` / `deploy.config_json`：均未使用。
+
+`deploy.state_json`：`{cert_id}`，记录最近一次上传的 CAS 证书 ID。
+
+行为：`UploadUserCertificate(Name=时间戳, Cert=fullchain, Key=key)`，**每次新增**（CAS API 不支持原地更新）。`TestTarget` 调 `ListUserCertificateOrder` 验证 AK/SK。
+
+### `fnos` — 飞牛 OS
+
+`auth_json` / `endpoint` / `target.config_json`：与 `ssh` driver 完全一致（共享 `sshlike`）；`config.bastion_target_id` 同样支持单跳，且不展开跳板机自身的 bastion。
+
+`deploy.config_json`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `domain_override` | 可选；留空取 `domain.main_domain` |
+
+行为（脚本固化，路径/库名/服务名内置）：
+
+1. SFTP 写 `/tmp/homer-fnos-<certID>.{crt,key}`
+2. 远端 bash：`install -m 0644/0600` 覆盖到 `/usr/trim/var/trim_connect/ssls/<domain>/<最新时间戳目录>/{<domain>.crt, <domain>.key}`
+3. `sudo -u postgres psql -d trim_connect`：CTE `UPDATE cert SET valid_from/valid_to/last_renew_time/updated_time/issued_by/encrypt_type/status='suc' WHERE domain=? AND source='upload'`，要求且仅命中 1 行
+4. `sudo systemctl restart trim_nginx`
+
+`TestTarget`：拨通 + `command -v psql` + `test -d /usr/trim/var/trim_connect/ssls`。
+
+## ACME 使用流程要点
+
+1. **CA 账号**：告诉 Homer 去哪里签证书。支持 Let's Encrypt、ZeroSSL（EAB 存数据库）或自定义 ACME directory。
+2. **DNS provider 凭证**：完成 DNS-01 校验。已实现深度校验的 provider：`cloudflare` / `dnspod` / `alidns` / `tencentcloud` / `huaweicloud`，其它走 lego 通用 provider。
+3. **域名配置**：绑 CA + provider；密钥类型默认走全局 `ACME_KEY_TYPE`，也可单域名覆盖。
+4. **手动签发一次** 确认链路通：`POST /api/acme/domains/:id/issue` → 看 `tasks/:id/stream` 实时日志。
+5. **续期**：`ACME_RENEW_CRON` 定时扫描，剩余天数 ≤ `ACME_RENEW_BEFORE_DAYS` 触发续期。也可在 UI 手动签发覆盖。
+6. **部署**：先建一条 deploy target（4 选 1 kind），再在域名详情里加 deploy config（域名 × target 多对多）。签发完成会自动按所有启用配置部署一遍。
+7. **失败重试**：单次部署 → 同任务内按 `ACME_DEPLOY_RETRY` 立即重试 → 仍失败标 `retrying` → `acme-deploy-retry` cron 按 `ACME_DEPLOY_RETRY_BACKOFF_SEC * 已执行次数` 退避拉起；UI 任务历史里也能手动重试。
+
+ACME 签发产物两路落地：数据库 `acme_cert` 表 + `ACME_DATA_DIR` 本地工作目录（lego 私钥、acme.json 等）。生产部署务必持久化该目录。
