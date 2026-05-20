@@ -64,37 +64,49 @@ func (s *Service) ListDomains() ([]DomainView, error) {
 	if err != nil {
 		return nil, err
 	}
-	certName := map[string]string{}
-	if httpsResp, err := c.DescribeCdnHttpsDomainList(&sdk.DescribeCdnHttpsDomainListRequest{}); err == nil &&
-		httpsResp.Body != nil && httpsResp.Body.CertInfos != nil {
-		for _, ci := range httpsResp.Body.CertInfos.CertInfo {
-			certName[tea.StringValue(ci.DomainName)] = tea.StringValue(ci.CertName)
-		}
-	}
+	certNames := loadCertNameMap(c)
 
 	out := []DomainView{}
 	if domainsResp.Body == nil || domainsResp.Body.Domains == nil {
 		return out, nil
 	}
 	for _, d := range domainsResp.Body.Domains.PageData {
-		dn := tea.StringValue(d.DomainName)
-		v := DomainView{
-			DomainName:   dn,
-			Cname:        tea.StringValue(d.Cname),
-			DomainStatus: tea.StringValue(d.DomainStatus),
-			SslProtocol:  tea.StringValue(d.SslProtocol),
-			CertName:     certName[dn],
-			GmtCreated:   tea.StringValue(d.GmtCreated),
-		}
-		if d.Sources != nil && len(d.Sources.Source) > 0 {
-			src := d.Sources.Source[0]
-			v.SourceType = tea.StringValue(src.Type)
-			v.SourceContent = tea.StringValue(src.Content)
-			v.SourcePort = tea.Int32Value(src.Port)
-		}
-		out = append(out, v)
+		out = append(out, pageToView(d, certNames))
 	}
 	return out, nil
+}
+
+// loadCertNameMap 拉取 https 证书表，生成 domainName → certName 映射；失败时返回空 map（不影响主流程）。
+func loadCertNameMap(c *sdk.Client) map[string]string {
+	out := map[string]string{}
+	resp, err := c.DescribeCdnHttpsDomainList(&sdk.DescribeCdnHttpsDomainListRequest{})
+	if err != nil || resp.Body == nil || resp.Body.CertInfos == nil {
+		return out
+	}
+	for _, ci := range resp.Body.CertInfos.CertInfo {
+		out[tea.StringValue(ci.DomainName)] = tea.StringValue(ci.CertName)
+	}
+	return out
+}
+
+// pageToView 把 SDK 单条 PageData 转成前端 DomainView，处理 Sources 嵌套判空。
+func pageToView(d *sdk.DescribeUserDomainsResponseBodyDomainsPageData, certNames map[string]string) DomainView {
+	dn := tea.StringValue(d.DomainName)
+	v := DomainView{
+		DomainName:   dn,
+		Cname:        tea.StringValue(d.Cname),
+		DomainStatus: tea.StringValue(d.DomainStatus),
+		SslProtocol:  tea.StringValue(d.SslProtocol),
+		CertName:     certNames[dn],
+		GmtCreated:   tea.StringValue(d.GmtCreated),
+	}
+	if d.Sources != nil && len(d.Sources.Source) > 0 {
+		src := d.Sources.Source[0]
+		v.SourceType = tea.StringValue(src.Type)
+		v.SourceContent = tea.StringValue(src.Content)
+		v.SourcePort = tea.Int32Value(src.Port)
+	}
+	return v
 }
 
 // certExists 证书是否存在于 CDN 证书中心（部署前校验）。
@@ -144,10 +156,26 @@ func (s *Service) DeployCertificate(certName string) (string, error) {
 	if !exists {
 		return fmt.Sprintf("【%s】证书不存在于证书中心", certName), nil
 	}
-
-	domainsResp, err := c.DescribeUserDomains(&sdk.DescribeUserDomainsRequest{})
+	targets, skip, err := s.findDomainsNeedingCert(c, certName)
 	if err != nil {
 		return "", err
+	}
+	if skip != "" {
+		return skip, nil
+	}
+	domains := strings.Join(targets, ",")
+	if err := s.applyCertificate(c, domains, certName); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("部署证书【%s】到 CDN 域名成功：%s", certName, domains), nil
+}
+
+// findDomainsNeedingCert 找出"开启 SSL 且当前证书名不等于 certName"的加速域名。
+// skip 非空表示有人可读的"无需部署"消息，调用方应直接返回该消息（不视为错误）。
+func (s *Service) findDomainsNeedingCert(c *sdk.Client, certName string) (targets []string, skip string, err error) {
+	domainsResp, err := c.DescribeUserDomains(&sdk.DescribeUserDomainsRequest{})
+	if err != nil {
+		return nil, "", err
 	}
 	sslOn := map[string]bool{}
 	if domainsResp.Body != nil && domainsResp.Body.Domains != nil {
@@ -158,18 +186,15 @@ func (s *Service) DeployCertificate(certName string) (string, error) {
 		}
 	}
 	if len(sslOn) == 0 {
-		return "开启 sslProtocol 的加速域名为空，无需更新部署证书", nil
+		return nil, "开启 sslProtocol 的加速域名为空，无需更新部署证书", nil
 	}
-
 	httpsResp, err := c.DescribeCdnHttpsDomainList(&sdk.DescribeCdnHttpsDomainListRequest{})
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if httpsResp.Body == nil || httpsResp.Body.CertInfos == nil || len(httpsResp.Body.CertInfos.CertInfo) == 0 {
-		return "获取到 cdnHttpsDomainList 数据为空，无需更新部署证书", nil
+		return nil, "获取到 cdnHttpsDomainList 数据为空，无需更新部署证书", nil
 	}
-
-	var targets []string
 	for _, ci := range httpsResp.Body.CertInfos.CertInfo {
 		dn := tea.StringValue(ci.DomainName)
 		if sslOn[dn] && tea.StringValue(ci.CertName) != certName {
@@ -177,15 +202,15 @@ func (s *Service) DeployCertificate(certName string) (string, error) {
 		}
 	}
 	if len(targets) == 0 {
-		return fmt.Sprintf("所有开启 sslProtocol 的加速域名都已使用证书名：【%s】", certName), nil
+		return nil, fmt.Sprintf("所有开启 sslProtocol 的加速域名都已使用证书名：【%s】", certName), nil
 	}
+	return targets, "", nil
+}
 
-	domains := strings.Join(targets, ",")
+// applyCertificate 复刻老逻辑：先 off 再 on，绕过 DescribeUserDomains 返回与实际不一致的问题。
+func (s *Service) applyCertificate(c *sdk.Client, domains, certName string) error {
 	if err := s.setDomainCertificate(c, domains, "off", certName); err != nil {
-		return "", err
+		return err
 	}
-	if err := s.setDomainCertificate(c, domains, "on", certName); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("部署证书【%s】到 CDN 域名成功：%s", certName, domains), nil
+	return s.setDomainCertificate(c, domains, "on", certName)
 }
