@@ -102,65 +102,77 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 
 	var updatedIDs []int64
 	if state.CertID > 0 {
-		// 已指定证书 ID：直接更新该证书，不做域名反查
-		if req.Logf != nil {
-			req.Logf("已指定雷池证书 cert_id=%d，直接更新", state.CertID)
-		}
-		id, err := client.UpsertCert(state.CertID, opts.CertType, req.Cert.FullchainPEM, req.Cert.KeyPEM)
-		if err != nil {
-			return nil, fmt.Errorf("更新雷池证书 cert_id=%d 失败：%w", state.CertID, err)
-		}
-		if id <= 0 {
-			id = state.CertID
-		}
-		updatedIDs = []int64{id}
-		if req.Logf != nil {
-			req.Logf("雷池证书更新成功：cert_id=%d", id)
-		}
+		updatedIDs, err = deployByCertID(client, opts, state.CertID, req)
 	} else {
-		// 未指定证书 ID：按域名反查，命中则逐个更新，未命中则新增
-		if req.Logf != nil {
-			req.Logf("匹配域名：%s", strings.Join(domains, ", "))
-		}
-		certs, err := client.ListCerts()
-		if err != nil {
-			return nil, fmt.Errorf("获取雷池证书列表失败：%w", err)
-		}
-		if req.Logf != nil {
-			req.Logf("获取雷池证书列表成功：total=%d", certs.Total)
-		}
-		matches := matchCerts(certs.Nodes, domains)
-		updatedIDs = make([]int64, 0, len(matches))
-		for _, item := range matches {
-			id, err := client.UpsertCert(item.ID, opts.CertType, req.Cert.FullchainPEM, req.Cert.KeyPEM)
-			if err != nil {
-				return nil, fmt.Errorf("更新雷池证书 cert_id=%d 失败：%w", item.ID, err)
-			}
-			if id <= 0 {
-				id = item.ID
-			}
-			updatedIDs = append(updatedIDs, id)
-			if req.Logf != nil {
-				req.Logf("雷池证书更新成功：cert_id=%d，domains=%s", id, strings.Join(item.Domains, ", "))
-			}
-		}
-		if len(updatedIDs) == 0 {
-			id, err := client.UpsertCert(0, opts.CertType, req.Cert.FullchainPEM, req.Cert.KeyPEM)
-			if err != nil {
-				return nil, fmt.Errorf("新增雷池证书失败：%w", err)
-			}
-			if id <= 0 {
-				return nil, errors.New("雷池未返回有效 cert_id")
-			}
-			updatedIDs = append(updatedIDs, id)
-			if req.Logf != nil {
-				req.Logf("没有匹配到雷池已有证书，已新增证书：cert_id=%d", id)
-			}
-		}
+		updatedIDs, err = deployByDomains(client, opts, domains, req)
+	}
+	if err != nil {
+		return nil, err
 	}
 	state.CertID = updatedIDs[0]
 	state.CertIDs = updatedIDs
 	return &acme.DeployResult{StateJSON: acme.MustJSON(state)}, nil
+}
+
+// deployByCertID 走"已知 cert_id"路径：直接更新指定证书，不做域名反查。
+func deployByCertID(client *client, opts DeployOptions, certID int64, req acme.DeployRequest) ([]int64, error) {
+	if req.Logf != nil {
+		req.Logf("已指定雷池证书 cert_id=%d，直接更新", certID)
+	}
+	id, err := client.UpsertCert(certID, opts.CertType, req.Cert.FullchainPEM, req.Cert.KeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("更新雷池证书 cert_id=%d 失败：%w", certID, err)
+	}
+	if id <= 0 {
+		id = certID
+	}
+	if req.Logf != nil {
+		req.Logf("雷池证书更新成功：cert_id=%d", id)
+	}
+	return []int64{id}, nil
+}
+
+// deployByDomains 按域名反查雷池现有证书：命中则逐个更新，未命中则新增。
+func deployByDomains(client *client, opts DeployOptions, domains []string, req acme.DeployRequest) ([]int64, error) {
+	if req.Logf != nil {
+		req.Logf("匹配域名：%s", strings.Join(domains, ", "))
+	}
+	certs, err := client.ListCerts()
+	if err != nil {
+		return nil, fmt.Errorf("获取雷池证书列表失败：%w", err)
+	}
+	if req.Logf != nil {
+		req.Logf("获取雷池证书列表成功：total=%d", certs.Total)
+	}
+	matches := matchCerts(certs.Nodes, domains)
+	updatedIDs := make([]int64, 0, len(matches))
+	for _, item := range matches {
+		id, err := client.UpsertCert(item.ID, opts.CertType, req.Cert.FullchainPEM, req.Cert.KeyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("更新雷池证书 cert_id=%d 失败：%w", item.ID, err)
+		}
+		if id <= 0 {
+			id = item.ID
+		}
+		updatedIDs = append(updatedIDs, id)
+		if req.Logf != nil {
+			req.Logf("雷池证书更新成功：cert_id=%d，domains=%s", id, strings.Join(item.Domains, ", "))
+		}
+	}
+	if len(updatedIDs) > 0 {
+		return updatedIDs, nil
+	}
+	id, err := client.UpsertCert(0, opts.CertType, req.Cert.FullchainPEM, req.Cert.KeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("新增雷池证书失败：%w", err)
+	}
+	if id <= 0 {
+		return nil, errors.New("雷池未返回有效 cert_id")
+	}
+	if req.Logf != nil {
+		req.Logf("没有匹配到雷池已有证书，已新增证书：cert_id=%d", id)
+	}
+	return []int64{id}, nil
 }
 
 func matchCerts(items []certItem, domains []string) []certItem {

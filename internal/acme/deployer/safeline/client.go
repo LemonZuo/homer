@@ -86,17 +86,26 @@ func normalizeCertType(certType int) int {
 }
 
 func (c *client) doJSON(method, path string, body any, out any) error {
+	data, err := c.sendRequest(method, path, body)
+	if err != nil {
+		return err
+	}
+	return decodeOut(data, out)
+}
+
+// sendRequest 发起 HTTP 请求并解开雷池统一的 {data, err, msg} 包装，返回 data 字段。
+func (c *client) sendRequest(method, path string, body any) (json.RawMessage, error) {
 	var reader io.Reader
 	if body != nil {
-		data, err := json.Marshal(body)
+		buf, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		reader = bytes.NewReader(data)
+		reader = bytes.NewReader(buf)
 	}
 	req, err := http.NewRequest(method, c.baseURL+path, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-SLCE-API-TOKEN", c.token)
@@ -105,42 +114,50 @@ func (c *client) doJSON(method, path string, body any, out any) error {
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("雷池 API HTTP %d：%s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("雷池 API HTTP %d：%s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	var wrap response
-	if err := json.Unmarshal(data, &wrap); err != nil {
-		return fmt.Errorf("解析雷池响应失败：%w", err)
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, fmt.Errorf("解析雷池响应失败：%w", err)
 	}
 	if wrap.Err != nil && fmt.Sprint(wrap.Err) != "<nil>" && fmt.Sprint(wrap.Err) != "" {
 		msg := strings.TrimSpace(wrap.Msg)
 		if msg == "" {
 			msg = fmt.Sprint(wrap.Err)
 		}
-		return errors.New(msg)
+		return nil, errors.New(msg)
 	}
+	return wrap.Data, nil
+}
+
+// decodeOut 按 out 的类型把 data 解到调用方变量上：
+//   - nil：丢弃 data
+//   - *int64：走 decodeID 的多形态兜底
+//   - 其他：json.Unmarshal
+func decodeOut(data json.RawMessage, out any) error {
 	if out == nil {
 		return nil
 	}
 	if p, ok := out.(*int64); ok {
-		id, err := decodeID(wrap.Data)
+		id, err := decodeID(data)
 		if err != nil {
 			return err
 		}
 		*p = id
 		return nil
 	}
-	if len(wrap.Data) == 0 || string(wrap.Data) == "null" {
+	if len(data) == 0 || string(data) == "null" {
 		return nil
 	}
-	return json.Unmarshal(wrap.Data, out)
+	return json.Unmarshal(data, out)
 }
 
 func decodeID(data json.RawMessage) (int64, error) {
