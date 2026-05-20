@@ -195,57 +195,32 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 	logx.Info("acme deploy start", "task", taskID, "domain", d.MainDomain,
 		"kind", cfg.Kind, "target", target.Name, "attempt", attempt, "max_attempt", maxAttempt)
 
-	driver, err := s.deployRegistry.Get(cfg.Kind)
-	if err == nil {
-		logf(logw, "开始部署证书到%s：%s -> %s / %s", driver.Label(), d.MainDomain, target.Name, deployConfigName(cfg))
-	}
-	if err == nil {
-		var result *DeployResult
-		result, err = driver.Deploy(context.Background(), DeployRequest{
-			Domain: d,
-			Cert:   cert,
-			Target: target,
-			Config: cfg,
-			Logf: func(format string, args ...any) {
-				logf(logw, format, args...)
-			},
-		})
-		if err == nil && result != nil && strings.TrimSpace(result.StateJSON) != "" {
-			if saveErr := s.deployConfigs.SaveState(cfg.ID, result.StateJSON); saveErr != nil {
-				err = fmt.Errorf("保存部署状态失败：%w", saveErr)
-			}
-		}
-	}
+	err := s.executeDeploy(logw, d, cert, target, cfg)
 
 	if err == nil {
 		logf(logw, "部署完成")
 		logx.Info("acme deploy done", "task", taskID, "domain", d.MainDomain, "target", target.Name, "attempt", attempt)
 		finish := time.Now()
-		_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
+		s.finalizeDeployTask(taskID, logBuf, map[string]any{
 			"status":        "success",
 			"finished_at":   &finish,
-			"log_text":      logBuf.String(),
 			"next_retry_at": nil,
-		}).Error
-		s.hub.Close(taskID)
+		})
 		return
 	}
 
 	// 仅持久化配置触发的任务（config_id>0）且仍有剩余次数才安排重试。
-	canRetry := task.ConfigID > 0 && attempt < maxAttempt
-	if canRetry {
+	if task.ConfigID > 0 && attempt < maxAttempt {
 		next := time.Now().Add(s.deployRetryBackoff * time.Duration(attempt))
 		logf(logw, "部署失败：%v", err)
 		logf(logw, "已安排第 %d/%d 次重试，约 %s 后", attempt+1, maxAttempt, next.Format("15:04:05"))
 		logx.Warn("acme deploy failed, retry scheduled", "task", taskID, "domain", d.MainDomain,
 			"target", target.Name, "attempt", attempt, "max_attempt", maxAttempt, "next_retry", next.Format("15:04:05"), "err", err)
-		_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
+		s.finalizeDeployTask(taskID, logBuf, map[string]any{
 			"status":        "retrying",
 			"error_msg":     truncate(err.Error(), 1000),
-			"log_text":      logBuf.String(),
 			"next_retry_at": &next,
-		}).Error
-		s.hub.Close(taskID)
+		})
 		return
 	}
 
@@ -253,13 +228,46 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 	logx.Error("acme deploy failed", "task", taskID, "domain", d.MainDomain,
 		"target", target.Name, "attempt", attempt, "max_attempt", maxAttempt, "err", err)
 	finish := time.Now()
-	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
+	s.finalizeDeployTask(taskID, logBuf, map[string]any{
 		"status":        "failed",
 		"error_msg":     truncate(err.Error(), 1000),
 		"finished_at":   &finish,
-		"log_text":      logBuf.String(),
 		"next_retry_at": nil,
-	}).Error
+	})
+}
+
+// executeDeploy 查 driver 并执行 Deploy，成功后落盘 state_json，返回单一 err。
+func (s *Service) executeDeploy(logw *teeWriter, d model.ACMEDomain, cert model.ACMECert, target model.ACMEDeployTarget, cfg model.ACMEDeployConfig) error {
+	driver, err := s.deployRegistry.Get(cfg.Kind)
+	if err != nil {
+		return err
+	}
+	logf(logw, "开始部署证书到%s：%s -> %s / %s", driver.Label(), d.MainDomain, target.Name, deployConfigName(cfg))
+	result, err := driver.Deploy(context.Background(), DeployRequest{
+		Domain: d,
+		Cert:   cert,
+		Target: target,
+		Config: cfg,
+		Logf: func(format string, args ...any) {
+			logf(logw, format, args...)
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if result == nil || strings.TrimSpace(result.StateJSON) == "" {
+		return nil
+	}
+	if err := s.deployConfigs.SaveState(cfg.ID, result.StateJSON); err != nil {
+		return fmt.Errorf("保存部署状态失败：%w", err)
+	}
+	return nil
+}
+
+// finalizeDeployTask 统一把终态字段写回 task + 关闭 hub 订阅。log_text 由 logBuf 当前快照决定。
+func (s *Service) finalizeDeployTask(taskID int64, logBuf *bytes.Buffer, fields map[string]any) {
+	fields["log_text"] = logBuf.String()
+	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(fields).Error
 	s.hub.Close(taskID)
 }
 

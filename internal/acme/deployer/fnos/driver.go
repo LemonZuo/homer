@@ -26,6 +26,7 @@ import (
 	"github.com/LemonZuo/homer/internal/acme/deployer/sshlike"
 	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/model"
+	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
 
@@ -107,40 +108,17 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 }
 
 func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
-	target, err := targetFromDeployTarget(req.Target)
+	target, args, err := d.prepareDeployArgs(req)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := deployConfigFromGeneric(req.Config)
-	if err != nil {
-		return nil, err
-	}
-	domain := strings.TrimSpace(cfg.DomainOverride)
-	if domain == "" {
-		domain = strings.TrimSpace(req.Domain.MainDomain)
-	}
-	if domain == "" {
-		return nil, errors.New("无法确定要更新的 fnOS 证书域名")
-	}
-	if strings.TrimSpace(req.Cert.FullchainPEM) == "" || strings.TrimSpace(req.Cert.KeyPEM) == "" {
-		return nil, errors.New("当前证书内容不完整，无法部署到 fnOS")
-	}
-	if countCerts(req.Cert.FullchainPEM) < 2 {
-		return nil, errors.New("fullchain 至少需要 2 段 BEGIN CERTIFICATE（cert + 中间证书）")
-	}
-	issuer, encryptType, err := parseCertMeta(req.Cert.CertPEM)
-	if err != nil {
-		return nil, err
-	}
-	validFromMs := req.Cert.NotBefore.UnixMilli()
-	validToMs := req.Cert.NotAfter.UnixMilli()
 
 	conn, err := d.connFor(target)
 	if err != nil {
 		return nil, err
 	}
 	if req.Logf != nil {
-		req.Logf("fnOS 目标：%s@%s:%d，域名：%s", target.Username, target.Host, target.Port, domain)
+		req.Logf("fnOS 目标：%s@%s:%d，域名：%s", target.Username, target.Host, target.Port, args.Domain)
 	}
 	client, cleanup, err := sshx.Dial(req.Logf, conn)
 	if err != nil {
@@ -148,35 +126,82 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 	}
 	defer cleanup()
 
-	tmpCert := fmt.Sprintf("/tmp/homer-fnos-%d.crt", req.Cert.ID)
-	tmpKey := fmt.Sprintf("/tmp/homer-fnos-%d.key", req.Cert.ID)
-	if err := sshx.WriteFile(client, tmpCert, []byte(req.Cert.FullchainPEM), "0644"); err != nil {
-		return nil, fmt.Errorf("写入临时证书失败：%w", err)
+	if err := uploadTempFiles(client, req.Cert); err != nil {
+		return nil, err
 	}
-	if err := sshx.WriteFile(client, tmpKey, []byte(req.Cert.KeyPEM), "0600"); err != nil {
-		return nil, fmt.Errorf("写入临时私钥失败：%w", err)
-	}
-
-	script := buildDeployScript(deployScriptVars{
-		Domain:      domain,
-		TmpCert:     tmpCert,
-		TmpKey:      tmpKey,
-		ValidFromMs: validFromMs,
-		ValidToMs:   validToMs,
-		Issuer:      issuer,
-		EncryptType: encryptType,
-	})
-	if req.Logf != nil {
-		req.Logf("执行 fnOS 部署脚本（更新 trim_connect.cert + 重启服务）")
-	}
-	out, err := sshx.Run(client, "bash -s", []byte(script))
-	if req.Logf != nil && strings.TrimSpace(out) != "" {
-		req.Logf("脚本输出：\n%s", strings.TrimSpace(out))
-	}
-	if err != nil {
-		return nil, fmt.Errorf("fnOS 部署脚本失败：%w", err)
+	if err := runDeployScript(client, req.Logf, args); err != nil {
+		return nil, err
 	}
 	return &acme.DeployResult{}, nil
+}
+
+// prepareDeployArgs 解析 target/config，做证书完整性校验，组装脚本所需的所有参数。
+func (d *Driver) prepareDeployArgs(req acme.DeployRequest) (*sshlike.Target, deployScriptVars, error) {
+	var args deployScriptVars
+	target, err := targetFromDeployTarget(req.Target)
+	if err != nil {
+		return nil, args, err
+	}
+	cfg, err := deployConfigFromGeneric(req.Config)
+	if err != nil {
+		return nil, args, err
+	}
+	domain := strings.TrimSpace(cfg.DomainOverride)
+	if domain == "" {
+		domain = strings.TrimSpace(req.Domain.MainDomain)
+	}
+	if domain == "" {
+		return nil, args, errors.New("无法确定要更新的 fnOS 证书域名")
+	}
+	if strings.TrimSpace(req.Cert.FullchainPEM) == "" || strings.TrimSpace(req.Cert.KeyPEM) == "" {
+		return nil, args, errors.New("当前证书内容不完整，无法部署到 fnOS")
+	}
+	if countCerts(req.Cert.FullchainPEM) < 2 {
+		return nil, args, errors.New("fullchain 至少需要 2 段 BEGIN CERTIFICATE（cert + 中间证书）")
+	}
+	issuer, encryptType, err := parseCertMeta(req.Cert.CertPEM)
+	if err != nil {
+		return nil, args, err
+	}
+	args = deployScriptVars{
+		Domain:      domain,
+		TmpCert:     fmt.Sprintf("/tmp/homer-fnos-%d.crt", req.Cert.ID),
+		TmpKey:      fmt.Sprintf("/tmp/homer-fnos-%d.key", req.Cert.ID),
+		ValidFromMs: req.Cert.NotBefore.UnixMilli(),
+		ValidToMs:   req.Cert.NotAfter.UnixMilli(),
+		Issuer:      issuer,
+		EncryptType: encryptType,
+	}
+	return target, args, nil
+}
+
+// uploadTempFiles 把 fullchain + key 写到远端 /tmp，供后续脚本读取。
+func uploadTempFiles(client *ssh.Client, cert model.ACMECert) error {
+	tmpCert := fmt.Sprintf("/tmp/homer-fnos-%d.crt", cert.ID)
+	tmpKey := fmt.Sprintf("/tmp/homer-fnos-%d.key", cert.ID)
+	if err := sshx.WriteFile(client, tmpCert, []byte(cert.FullchainPEM), "0644"); err != nil {
+		return fmt.Errorf("写入临时证书失败：%w", err)
+	}
+	if err := sshx.WriteFile(client, tmpKey, []byte(cert.KeyPEM), "0600"); err != nil {
+		return fmt.Errorf("写入临时私钥失败：%w", err)
+	}
+	return nil
+}
+
+// runDeployScript 在远端跑 bash 脚本，更新 trim_connect.cert + 重启服务。
+func runDeployScript(client *ssh.Client, logf func(string, ...any), args deployScriptVars) error {
+	script := buildDeployScript(args)
+	if logf != nil {
+		logf("执行 fnOS 部署脚本（更新 trim_connect.cert + 重启服务）")
+	}
+	out, err := sshx.Run(client, "bash -s", []byte(script))
+	if logf != nil && strings.TrimSpace(out) != "" {
+		logf("脚本输出：\n%s", strings.TrimSpace(out))
+	}
+	if err != nil {
+		return fmt.Errorf("fnOS 部署脚本失败：%w", err)
+	}
+	return nil
 }
 
 // connFor 把已解析的 fnOS 目标（含凭证、跳板机）翻译成 sshx.Conn。
