@@ -165,7 +165,7 @@ export default function Acme() {
             d={d}
             busy={ui.busy}
             accountSummary={accountSummary}
-            onIssue={actions.startIssue}
+            onIssue={actions.requestIssue}
             onDeploy={actions.openDeployConfigs}
             onEdit={ui.domain.edit.edit}
             onRevoke={ui.domain.revoke.setPending}
@@ -231,6 +231,21 @@ export default function Acme() {
           {ui.domain.revoke.pending?.main_domain}
         </span>{' '}
         当前证书。吊销不可逆，且不会自动删除 CAS 证书或切换 CDN 配置。
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={!!ui.domain.reissue.pending}
+        onClose={ui.domain.reissue.clear}
+        onConfirm={() => {
+          if (ui.domain.reissue.pending) void actions.startIssue(ui.domain.reissue.pending)
+        }}
+        title="重签当前证书"
+        confirmText="重签"
+      >
+        <span className="font-mono font-medium text-foreground">
+          {ui.domain.reissue.pending?.main_domain}
+        </span>{' '}
+        当前证书仍在有效期内。重签会向 CA 申请一张新证书并覆盖原有产物，签发额度将按 CA 规则计入。确认继续？
       </ConfirmDialog>
 
       <LogDrawer

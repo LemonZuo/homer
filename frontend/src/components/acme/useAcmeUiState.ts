@@ -91,6 +91,7 @@ export function useAcmeUiState() {
       edit: useEditState<Domain>(),
       remove: usePendingState<Domain>(),
       revoke: usePendingState<Domain>(),
+      reissue: usePendingState<Domain>(),
     },
     credentials: {
       drawer: useDrawerState(),

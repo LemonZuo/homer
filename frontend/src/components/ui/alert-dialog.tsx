@@ -33,7 +33,9 @@ export const AlertDialogContent = React.forwardRef<
     <AlertDialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-border bg-card p-6 shadow-xl',
+        'fixed left-1/2 top-1/2 z-50 grid -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-border bg-card shadow-xl',
+        'w-[calc(100vw-2rem)] max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto',
+        'p-5 sm:p-6',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
         'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
         'data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95',
@@ -56,7 +58,13 @@ export const AlertDialogFooter = ({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('flex flex-row justify-end gap-2 pt-2', className)} {...props} />
+  <div
+    className={cn(
+      'flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end',
+      className,
+    )}
+    {...props}
+  />
 )
 
 export const AlertDialogTitle = React.forwardRef<
@@ -89,7 +97,11 @@ export const AlertDialogAction = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Action
     ref={ref}
-    className={cn(buttonVariants({ variant: 'destructive', size: 'sm' }), className)}
+    className={cn(
+      buttonVariants({ variant: 'destructive', size: 'sm' }),
+      'h-10 w-full sm:h-8 sm:w-auto',
+      className,
+    )}
     {...props}
   />
 ))
@@ -101,7 +113,11 @@ export const AlertDialogCancel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Cancel
     ref={ref}
-    className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), className)}
+    className={cn(
+      buttonVariants({ variant: 'outline', size: 'sm' }),
+      'h-10 w-full sm:h-8 sm:w-auto',
+      className,
+    )}
     {...props}
   />
 ))

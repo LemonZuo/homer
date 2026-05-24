@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { makeDeleteHandler, type DeployConfigKind } from './handlers'
 import type { Domain } from './types'
 import type { AcmeUiState } from './useAcmeUiState'
+import { daysUntil } from './utils/date'
 
 interface UseAcmeActionsArgs {
   ui: AcmeUiState
@@ -118,6 +119,7 @@ export function useAcmeActions({
   })
 
   const startIssue = async (d: Domain) => {
+    ui.domain.reissue.clear()
     ui.setBusy(`issue-${d.id}`)
     try {
       const { data } = await api.post(`/acme/domains/${d.id}/issue`)
@@ -130,6 +132,17 @@ export function useAcmeActions({
     } finally {
       ui.setBusy(null)
     }
+  }
+
+  // requestIssue 是「重签」按钮的网关:有效期内的证书需要二次确认,其它情况(未签发/已过期/已吊销)直接走签发。
+  const requestIssue = (d: Domain) => {
+    const days = daysUntil(d.not_after)
+    const hasValidCert = d.cert_status !== 'revoked' && days !== null && days > 0
+    if (hasValidCert) {
+      ui.domain.reissue.setPending(d)
+      return
+    }
+    void startIssue(d)
   }
 
   const startRevoke = async (d: Domain) => {
@@ -246,6 +259,7 @@ export function useAcmeActions({
   }
 
   return {
+    requestIssue,
     startIssue,
     startRevoke,
     downloadCert,
