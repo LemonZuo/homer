@@ -9,7 +9,7 @@
 //  3. psql 更新 trim_connect.cert 行（valid_from / valid_to / last_renew_time /
 //     updated_time / issued_by / encrypt_type / status='suc'），按 domain + source='upload'
 //     精确匹配，要求 RETURNING 命中且仅命中 1 行；
-//  4. systemctl restart 配置的服务（默认 trim_nginx）。
+//  4. systemctl restart 配置的服务（trim_nginx / webdav / smbftpd），未安装的服务跳过不阻断。
 package acmefnos
 
 import (
@@ -32,11 +32,15 @@ import (
 
 // fnOS 部署所需的路径/命令在飞牛 OS 上是固定的，没必要让用户填，全部内置。
 const (
-	fnosSSLsRoot       = "/usr/trim/var/trim_connect/ssls"
-	fnosDBName         = "trim_connect"
-	fnosPsqlCmd        = "psql"
-	fnosRestartService = "trim_nginx"
+	fnosSSLsRoot = "/usr/trim/var/trim_connect/ssls"
+	fnosDBName   = "trim_connect"
+	fnosPsqlCmd  = "psql"
 )
+
+// fnosRestartServices 是部署证书后需要重启的服务列表。
+// trim_nginx 一定有（面板入口）；webdav / smbftpd 在没启用对应功能的 fnOS 上 systemctl 会失败，
+// 脚本里按 best-effort 处理，单个失败不阻断整个部署。
+var fnosRestartServices = []string{"trim_nginx", "webdav", "smbftpd"}
 
 // Driver 实现 acme.DeployDriver，把证书写入 fnOS 的时间戳目录并刷新 trim_connect。
 // 连接复用 SSH 的认证体系：inline 凭证 / ssh_credential 凭证 / SSH 或 fnOS target 做跳板，
@@ -271,7 +275,7 @@ DOMAIN=%s
 SSLS_ROOT=%s
 DBNAME=%s
 PSQL=%s
-RESTART_SVC=%s
+RESTART_SVCS=%s
 TMP_CERT=%s
 TMP_KEY=%s
 VALID_FROM=%d
@@ -307,8 +311,9 @@ echo "域名目录：$DOMAIN_DIR"
 echo "时间戳目录：$TS_DIR"
 echo "目标目录：$TARGET_DIR"
 
+# key 用 0644:fnOS trim_nginx worker 不是 root,0600 会导致加载失败,SNI 落回 fallback 自签证书
 install -m 0644 "$TMP_CERT" "$TARGET_DIR/$DOMAIN.crt"
-install -m 0600 "$TMP_KEY"  "$TARGET_DIR/$DOMAIN.key"
+install -m 0644 "$TMP_KEY"  "$TARGET_DIR/$DOMAIN.key"
 echo "已覆盖 $DOMAIN.crt / $DOMAIN.key"
 
 NOW_MS=$(($(date +%%s%%N)/1000000))
@@ -320,8 +325,12 @@ if [ "$HITS" != "1" ]; then
 fi
 echo "trim_connect.cert 已更新（1 行）"
 
-echo "重启 $RESTART_SVC"
-sudo systemctl restart "$RESTART_SVC"
+for svc in $RESTART_SVCS; do
+  echo "重启 $svc"
+  if ! sudo systemctl restart "$svc"; then
+    echo "重启 $svc 失败,继续(可能未启用该服务)" >&2
+  fi
+done
 echo "fnOS 部署完成"
 `
 	return fmt.Sprintf(tmpl,
@@ -329,7 +338,7 @@ echo "fnOS 部署完成"
 		sshx.ShellQuote(fnosSSLsRoot),
 		sshx.ShellQuote(fnosDBName),
 		sshx.ShellQuote(fnosPsqlCmd),
-		sshx.ShellQuote(fnosRestartService),
+		sshx.ShellQuote(strings.Join(fnosRestartServices, " ")),
 		sshx.ShellQuote(v.TmpCert),
 		sshx.ShellQuote(v.TmpKey),
 		v.ValidFromMs,
