@@ -46,6 +46,14 @@ type Config struct {
 
 	// 任务连续失败达此次数才告警（防抖），默认 1（每次失败都告警）。
 	SchedulerAlertFailThreshold int
+
+	// UPS 监控。机器从 acme_deploy_target(kind in ssh/fnos 且 ups_monitor='1')取。
+	// SampleCron 6 段表达式;UPSSSHTimeoutSec 是单机采样的整体超时;
+	// RetentionDays 是 ups_sample 的保留天数,过期由 cleanup cron 清。
+	UPSSampleCron    string
+	UPSCleanupCron   string
+	UPSRetentionDays int
+	UPSSSHTimeoutSec int
 }
 
 func Load() *Config {
@@ -80,6 +88,11 @@ func Load() *Config {
 		EventRemindCron:    env("EVENT_REMIND_CRON", "0 0 9 * * *"),
 
 		SchedulerAlertFailThreshold: envInt("SCHEDULER_ALERT_FAIL_THRESHOLD", 1),
+
+		UPSSampleCron:    env("UPS_SAMPLE_CRON", "*/30 * * * * *"),
+		UPSCleanupCron:   env("UPS_CLEANUP_CRON", "0 0 4 * * *"),
+		UPSRetentionDays: envInt("UPS_RETENTION_DAYS", 7),
+		UPSSSHTimeoutSec: envInt("UPS_SSH_TIMEOUT_SEC", 5),
 	}
 }
 

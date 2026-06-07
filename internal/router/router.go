@@ -8,13 +8,14 @@ import (
 	"github.com/LemonZuo/homer/internal/handler"
 	acmehandler "github.com/LemonZuo/homer/internal/handler/acme"
 	"github.com/LemonZuo/homer/internal/notify"
+	"github.com/LemonZuo/homer/internal/upsmon"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnopsHandler *handler.CDNOpsHandler, certstoreHandler *handler.CertStoreHandler, acmeHandler *acmehandler.Handler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, notifyHandler *handler.NotifyHandler, frontend fs.FS) *gin.Engine {
+func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnopsHandler *handler.CDNOpsHandler, certstoreHandler *handler.CertStoreHandler, acmeHandler *acmehandler.Handler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, notifyHandler *handler.NotifyHandler, upsHandler *upsmon.Handler, frontend fs.FS) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{"/healthz"}}))
 	r.Use(gin.Recovery())
@@ -44,6 +45,7 @@ func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier,
 	smsHandler.Register(api)
 	schedulerHandler.Register(api)
 	notifyHandler.Register(api)
+	upsHandler.Register(api)
 
 	// 前端单页：未命中 /api/* 的请求都交给 embed 出来的 dist
 	spa := SPAHandler(frontend)

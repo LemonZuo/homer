@@ -27,6 +27,7 @@ import (
 	"github.com/LemonZuo/homer/internal/notify"
 	"github.com/LemonZuo/homer/internal/router"
 	"github.com/LemonZuo/homer/internal/scheduler"
+	"github.com/LemonZuo/homer/internal/upsmon"
 )
 
 // buildServer 组装全部依赖（DB / notify Hub / service / handler / scheduler / router），
@@ -51,6 +52,8 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 		&model.ACMEDeployTarget{},
 		&model.ACMEDeployConfig{},
 		&model.SSHCredential{},
+		&model.UPSSample{},
+		&model.UPSState{},
 	); err != nil {
 		return nil, nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -66,8 +69,9 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	cdnopsSvc := cdnops.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
 	certstoreSvc := certstore.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
 	acmeSvc := buildACMEService(gormDB, cfg)
+	upsSvc, upsSampler := buildUPSService(gormDB, cfg, hub)
 
-	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, hub)
+	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, upsSvc, hub)
 
 	cdnopsHandler := handler.NewCDNOpsHandler(cdnopsSvc)
 	certstoreHandler := handler.NewCertStoreHandler(certstoreSvc, cdnopsSvc)
@@ -76,8 +80,9 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	smsHandler := handler.NewSMSHandler(gormDB)
 	schedulerHandler := handler.NewSchedulerHandler(sched)
 	notifyHandler := handler.NewNotifyHandler(notifyStore)
+	upsHandler := upsmon.NewHandler(upsSvc, upsSampler)
 
-	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnopsHandler, certstoreHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, frontend)
+	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnopsHandler, certstoreHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, upsHandler, frontend)
 	r.GET("/healthz", handler.Health(gormDB, sched))
 
 	return r, sched.Stop, nil
@@ -111,9 +116,19 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config) *acme.Service {
 	)
 }
 
+// buildUPSService 组装 UPS 监控:复用 ACME 侧的 SSHCredentialStore(同一份凭证库),
+// sampler/store/service 各司其职,handler 持有 service+sampler 暴露快照与订阅管理。
+func buildUPSService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*upsmon.Service, *upsmon.Sampler) {
+	sshCreds := acme.NewSSHCredentialStore(gormDB)
+	sampler := upsmon.NewSampler(gormDB, sshCreds, time.Duration(cfg.UPSSSHTimeoutSec)*time.Second)
+	store := upsmon.NewStore(gormDB)
+	svc := upsmon.NewService(gormDB, sampler, store, hub, time.Duration(cfg.UPSRetentionDays)*24*time.Hour)
+	return svc, sampler
+}
+
 // startScheduler 注册后台任务、挂上 jobmonitor（持久化 + 失败告警）并启动，
 // 返回 Scheduler 供调用方 defer Stop。
-func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, hub *notify.Hub) *scheduler.Scheduler {
+func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, upsSvc *upsmon.Service, hub *notify.Hub) *scheduler.Scheduler {
 	sched := scheduler.New()
 
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() error {
@@ -154,6 +169,14 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 		return nil
 	}); err != nil {
 		logx.Fatal("register acme-deploy-retry task", "err", err)
+	}
+
+	if err := sched.Register("ups-sample", cfg.UPSSampleCron, upsSvc.RunSample); err != nil {
+		logx.Fatal("register ups-sample task", "err", err)
+	}
+
+	if err := sched.Register("ups-cleanup", cfg.UPSCleanupCron, upsSvc.RunCleanup); err != nil {
+		logx.Fatal("register ups-cleanup task", "err", err)
 	}
 
 	// 观察者：落库 + 连续失败达阈值经 Hub 告警。须在 Start 前注入并预热。

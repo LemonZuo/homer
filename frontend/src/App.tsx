@@ -11,6 +11,7 @@ const Acme = lazy(() => import('./components/Acme'))
 const Sms = lazy(() => import('./components/Sms'))
 const Scheduler = lazy(() => import('./components/Scheduler'))
 const Notify = lazy(() => import('./components/Notify'))
+const Ups = lazy(() => import('./components/Ups'))
 
 function Empty() {
   return (
@@ -38,6 +39,7 @@ const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
   sms: () => <Sms />,
   scheduler: () => <Scheduler />,
   notify: () => <Notify />,
+  ups: () => <Ups />,
 }
 
 function CustomPage() {
