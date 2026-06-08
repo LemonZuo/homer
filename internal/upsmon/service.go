@@ -1,8 +1,10 @@
 package upsmon
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/LemonZuo/homer/internal/logx"
@@ -17,29 +19,39 @@ type Service struct {
 	sampler   *Sampler
 	store     *Store
 	notifier  *Notifier
+	sampleOut notify.Notifier // 走 ModuleUPS 通道发"采样整体可达性"状态转换告警
 	sse       *sseHub
 	retention time.Duration
+
+	// 采样整体可达性状态机:OK ↔ 全部不可达。只在转换的那一轮发一条告警,
+	// 持续不可达不重复打扰(jobmonitor 那条路径已经不走了,不会重复)。
+	reachMu sync.Mutex
+	lastOK  bool
 }
 
 func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, retention time.Duration) *Service {
 	if retention <= 0 {
 		retention = 7 * 24 * time.Hour
 	}
+	out := hub.For(notify.ModuleUPS)
 	return &Service{
 		db:        db,
 		sampler:   sampler,
 		store:     store,
-		notifier:  NewNotifier(hub.For(notify.ModuleUPS), store),
+		notifier:  NewNotifier(out, store),
+		sampleOut: out,
 		sse:       newSSEHub(),
 		retention: retention,
+		lastOK:    true, // 启动假设 OK,首轮失败才会发"开始失败"
 	}
 }
 
 // Subscribe 给 SSE handler 用:订阅采样完成后的 snapshot 广播。
 func (s *Service) Subscribe() (<-chan []Snapshot, func()) { return s.sse.Subscribe() }
 
-// RunSample 是 cron 调用的入口。一轮全失败(且确实有候选机器)才回 error,
-// 让 jobmonitor 记一笔失败。单机不可达不算 job 失败。
+// RunSample 是 cron 调用的入口。永远返回 nil:整体不可达走 UPS 内部状态转换告警
+// (见 handleReachAlert),不再让 jobmonitor 每轮都重复打扰。单机不可达由 notifier
+// 走 UPS 通道发"单机不可达"的状态转换告警。
 func (s *Service) RunSample() error {
 	hosts, err := s.sampler.Run()
 	if err != nil {
@@ -141,25 +153,60 @@ func (s *Service) RunSample() error {
 		s.notifier.Process(a.prev, a.curr)
 	}
 
-	// 整轮没有一台机器可达,判定为采样失败,触发 jobmonitor
-	if reachableHosts == 0 && len(hosts) > 0 {
-		var first string
+	// 整体可达性状态机:只在 OK ↔ 全不可达 的转换瞬间各发一条,避免持续打扰。
+	sampleOK := !(reachableHosts == 0 && len(hosts) > 0)
+	var firstErr string
+	if !sampleOK {
 		for _, h := range hosts {
 			if h.Error != "" {
-				first = h.Error
+				firstErr = h.Error
 				break
 			}
 		}
-		return fmt.Errorf("所有候选机器均不可达(%d 台);示例错误:%s", len(hosts), first)
+		logx.Warn("ups sample all unreachable", "hosts", len(hosts), "first_error", firstErr)
+	} else {
+		logx.Info("ups sample done", "hosts", len(hosts), "reachable", reachableHosts, "samples", len(samples))
 	}
+	s.handleReachAlert(sampleOK, len(hosts), firstErr)
+
 	// 广播最新快照给所有 SSE 订阅者。BuildSnapshot 失败只记日志,不阻断采样链路。
 	if snap, err := s.BuildSnapshot(); err == nil {
 		s.sse.Publish(snap)
 	} else {
 		logx.Warn("ups snapshot publish skipped", "err", err.Error())
 	}
-	logx.Info("ups sample done", "hosts", len(hosts), "reachable", reachableHosts, "samples", len(samples))
 	return nil
+}
+
+// handleReachAlert 处理"整体可达性"状态转换告警。
+// 只在 prevOK != curOK 时发一条;持续不可达 / 持续 OK 都不打扰。
+func (s *Service) handleReachAlert(curOK bool, hosts int, firstErr string) {
+	s.reachMu.Lock()
+	prevOK := s.lastOK
+	s.lastOK = curOK
+	s.reachMu.Unlock()
+	if prevOK == curOK {
+		return
+	}
+	if s.sampleOut == nil || !s.sampleOut.Enabled() {
+		logx.Warn("ups sample alert skipped: no channel", "ok", curOK)
+		return
+	}
+	var title, body string
+	if !curOK {
+		title = "UPS 采样开始失败"
+		body = fmt.Sprintf("候选机器:%d 台\n全部不可达\n示例错误:%s", hosts, firstErr)
+	} else {
+		title = "UPS 采样已恢复"
+		body = fmt.Sprintf("候选机器:%d 台\n至少 1 台可达,采样恢复", hosts)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.sampleOut.Send(ctx, notify.Message{Title: title, Text: body}); err != nil {
+		logx.Error("ups sample alert send failed", "ok", curOK, "err", err)
+	} else {
+		logx.Warn("ups sample alert sent", "ok", curOK)
+	}
 }
 
 // RunCleanup 清理过期 sample,返回删除行数(用于日志)。
