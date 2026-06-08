@@ -275,7 +275,18 @@ func (h *Handler) testHost(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": res})
+	// HostResult.UPSes 标了 json:"-",直接返回会丢失名字,这里平铺出来给前端用。
+	names := make([]string, 0, len(res.UPSes))
+	for _, u := range res.UPSes {
+		names = append(names, u.Name)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"ok":        res.OK,
+		"error":     res.Error,
+		"has_ups":   res.HasUPS,
+		"ups_names": names,
+		"diag":      res.Diag,
+	}})
 }
 
 // credentialDTO 列表返回形态:不回吐密码 / 私钥明文,只暴露元数据。

@@ -922,9 +922,13 @@ export default function Ups() {
       const { data } = await api.post(`/ups/hosts/${h.id}/test`)
       const r = data?.data
       if (r?.ok) {
-        const list = (r.UPSes ?? r.upses ?? []) as Array<{ name?: string }>
-        const names = list.map((u) => u?.name).filter(Boolean).join(', ')
-        toast.success(names ? `连通成功:${names}` : '连通成功,但未发现 UPS')
+        const names = ((r.ups_names ?? []) as string[]).filter(Boolean).join(', ')
+        if (names) {
+          toast.success(`连通成功:${names}`)
+        } else {
+          const diag = (r.diag as string) || ''
+          toast.error(diag ? `连通成功但未拿到 UPS:${diag}` : '连通成功,但未发现 UPS')
+        }
       } else {
         toast.error(r?.error || '连通失败')
       }

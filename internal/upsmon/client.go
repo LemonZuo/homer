@@ -4,9 +4,9 @@
 package upsmon
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/model"
@@ -33,35 +33,78 @@ type upscReading struct {
 	RawStatus             string  // 原始 ups.status,前端 tooltip 用
 }
 
+// 非交互非登录 SSH session 的 PATH 经常缺 /usr/local/sbin、/usr/local/bin,
+// 而 NUT 在 fnOS / 群晖 / 部分发行版上正是装在那里。这里在命令前面统一显式
+// 注入一份常见的系统 PATH,让 upsc 一定可见,避免 cron 跑十轮才碰巧成功一次。
+const upscPathPrefix = "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; "
+
 // probeHost 在 client 上枚举本机所有 UPS 并读取状态。
-// 若主机未装 NUT 或没绑 UPS,返回 (nil, nil) —— 让上层静默跳过。
+// 第二返回值 diag 在无 UPS 时给上层(test 接口)展示诊断信息,采样链路不消费。
+// 若主机未装 NUT 或没绑 UPS,返回 (nil, diag, nil) —— 让上层静默跳过。
 // 真正的连接/命令错误才返回 error。
-func probeHost(client *ssh.Client) ([]upscReading, error) {
-	out, err := sshx.Run(client, "command -v upsc >/dev/null 2>&1 && upsc -l 2>/dev/null || true", nil)
+//
+// 注意:upsc 2.8+ 启动时会往 stderr 打 "Init SSL without certificate database"
+// 这行 banner。一旦合并进 stdout,会被当成 6 个伪 UPS 名(Init/SSL/without/...
+// /database/真名),后续 upsc <伪名> 全部失败,真名的诊断信息也被覆盖掉。
+// 所以正常路径用 2>/dev/null 严格只取 stdout,诊断信息走单独的 session。
+func probeHost(client *ssh.Client) ([]upscReading, string, error) {
+	out, err := sshx.Run(client, upscPathPrefix+"upsc -l 2>/dev/null", nil)
 	if err != nil {
-		return nil, fmt.Errorf("枚举 UPS 列表失败:%w(输出:%s)", err, strings.TrimSpace(out))
+		// 命令本身失败(找不到 upsc / 非零退出),用一次带 stderr 的额外探测拿诊断信息。
+		return nil, diagnose(client, ""), nil
 	}
 	names := splitUPSNames(out)
 	if len(names) == 0 {
-		return nil, nil
+		return nil, diagnose(client, ""), nil
 	}
 	readings := make([]upscReading, 0, len(names))
+	var lastFailName string
 	for _, name := range names {
-		// upsc 输出每行 "key: value",一次 SSH session 一个,简化解析
-		raw, err := sshx.Run(client, "upsc "+sshx.ShellQuote(name)+" 2>/dev/null", nil)
-		if err != nil {
-			// 单个 UPS 读失败不阻断,但也不写空值 — 保留上一轮 state,避免被零值覆盖
-			continue
-		}
-		reading, ok := parseUPSCOutput(name, raw)
+		reading, ok := readOneUPS(client, name)
 		if !ok {
-			// upsd 偶尔短时不响应,upsc 仍 exit 0 但输出空白。这种"假成功"会把
-			// 之前的有效 ups_state 覆盖成零值,直接跳过保留上一轮。
+			// upsd 在 driver pollfreq 重新枚举 USB 的瞬间会返回 exit=0 + 空白(NUT 已知行为)。
+			// 单次失败不阻断,但也不写空值 — 保留上一轮 state,避免被零值覆盖。
+			lastFailName = name
 			continue
 		}
 		readings = append(readings, reading)
 	}
-	return readings, nil
+	if len(readings) == 0 {
+		return nil, diagnose(client, lastFailName), nil
+	}
+	return readings, "", nil
+}
+
+// readOneUPS 跑 `upsc <name>`,空白 / 解析失败时短延迟后再试两次。
+// NUT 驱动每 pollfreq 秒(默认 30s)会重新枚举 USB,期间 upsd 对该 UPS 的查询
+// 会返回 exit=0 + 空 stdout,从而和我们 30s cron 形成 50/50 共振。
+// 200ms / 500ms 内驱动一般已经回到稳定态。
+func readOneUPS(client *ssh.Client, name string) (upscReading, bool) {
+	delays := []time.Duration{0, 200 * time.Millisecond, 500 * time.Millisecond}
+	for _, d := range delays {
+		if d > 0 {
+			time.Sleep(d)
+		}
+		raw, err := sshx.Run(client, upscPathPrefix+"upsc "+sshx.ShellQuote(name)+" 2>/dev/null", nil)
+		if err != nil {
+			continue
+		}
+		if reading, ok := parseUPSCOutput(name, raw); ok {
+			return reading, true
+		}
+	}
+	return upscReading{}, false
+}
+
+// diagnose 在主探测拿不到 UPS 时,把对应 upsc 命令的 stderr 带回来给前端 toast 显示。
+// failName 为空表示连 `upsc -l` 都没拿到名字,否则是某个 UPS 名读取失败。
+func diagnose(client *ssh.Client, failName string) string {
+	cmd := upscPathPrefix + "upsc -l 2>&1"
+	if failName != "" {
+		cmd = upscPathPrefix + "upsc " + sshx.ShellQuote(failName) + " 2>&1"
+	}
+	raw, _ := sshx.Run(client, cmd, nil)
+	return strings.TrimSpace(raw)
 }
 
 // splitUPSNames 解析 `upsc -l` 的输出。
