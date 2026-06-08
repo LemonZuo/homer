@@ -92,10 +92,14 @@ func (s *Store) Series(hostKind string, hostID int64, upsName string, since time
 	if bucketSec < 60 {
 		bucketSec = 60
 	}
-	// 用 UNIX_TIMESTAMP(sampled_at) DIV bucketSec * bucketSec 把毫秒级时间打到桶起点。
-	// 注意:sampled_at 是 DATETIME(3),秒级桶可接受半秒以内误差。
+	// 分桶用 UNIX_TIMESTAMP DIV bucketSec 取整,再 FROM_UNIXTIME 转回 DATETIME 字符串。
+	// 为什么不直接 SELECT 那个 bucket 整数?— 因为 sampled_at 是 DATETIME(无时区),
+	// 当 MySQL session.time_zone 与 Go Local 不一致(例如 MySQL=UTC、Go=CST)时,
+	// 那个整数会带上 session.time_zone 的偏移误差。FROM_UNIXTIME 再用同一个 session
+	// 时区转回字符串,误差被对称地消掉;driver loc=Local 把字符串解读为 Go Local 的
+	// time.Time,得到的是钟面时间,跟 sampled_at 直接读出来语义一致。
 	type row struct {
-		Bucket     int64
+		BucketTime time.Time
 		MinBattery int
 		AvgRuntime float64
 		HasLB      int
@@ -103,12 +107,12 @@ func (s *Store) Series(hostKind string, hostID int64, upsName string, since time
 		HasOL      int
 	}
 	var rows []row
-	bucketExpr := fmt.Sprintf("(UNIX_TIMESTAMP(sampled_at) DIV %d) * %d", bucketSec, bucketSec)
+	bucketExpr := fmt.Sprintf("FROM_UNIXTIME((UNIX_TIMESTAMP(sampled_at) DIV %d) * %d)", bucketSec, bucketSec)
 	err := s.db.Model(&model.UPSSample{}).
-		Select(bucketExpr+" AS bucket, MIN(CASE WHEN battery_percent>=0 THEN battery_percent ELSE NULL END) AS min_battery, AVG(CASE WHEN runtime_minutes>=0 THEN runtime_minutes ELSE NULL END) AS avg_runtime, SUM(CASE WHEN power_source='low_battery' THEN 1 ELSE 0 END) AS has_lb, SUM(CASE WHEN power_source='battery' THEN 1 ELSE 0 END) AS has_ob, SUM(CASE WHEN power_source='mains' THEN 1 ELSE 0 END) AS has_ol").
+		Select(bucketExpr+" AS bucket_time, MIN(CASE WHEN battery_percent>=0 THEN battery_percent ELSE NULL END) AS min_battery, AVG(CASE WHEN runtime_minutes>=0 THEN runtime_minutes ELSE NULL END) AS avg_runtime, SUM(CASE WHEN power_source='low_battery' THEN 1 ELSE 0 END) AS has_lb, SUM(CASE WHEN power_source='battery' THEN 1 ELSE 0 END) AS has_ob, SUM(CASE WHEN power_source='mains' THEN 1 ELSE 0 END) AS has_ol").
 		Where("host_kind = ? AND host_id = ? AND ups_name = ? AND sampled_at >= ?", hostKind, hostID, upsName, since).
-		Group("bucket").
-		Order("bucket ASC").
+		Group("bucket_time").
+		Order("bucket_time ASC").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -125,7 +129,7 @@ func (s *Store) Series(hostKind string, hostID int64, upsName string, since time
 			ps = model.UPSPowerMains
 		}
 		points = append(points, SeriesPoint{
-			BucketStart:    time.Unix(r.Bucket, 0),
+			BucketStart:    r.BucketTime,
 			BatteryPercent: r.MinBattery,
 			RuntimeMinutes: int(r.AvgRuntime + 0.5),
 			PowerSource:    ps,
