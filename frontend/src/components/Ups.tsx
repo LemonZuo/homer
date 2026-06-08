@@ -4,7 +4,6 @@ import {
   Loader2,
   Settings2,
   Plug,
-  Zap,
   AlertTriangle,
   ChevronDown,
   ChevronUp,
@@ -748,14 +747,14 @@ function SubscriptionsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>UPS 监控机器订阅</DialogTitle>
           <DialogDescription>
             勾选哪些 SSH / 飞牛 OS 目标参与 UPS 状态采样。未勾选的机器不会被 SSH 拨号打扰。
           </DialogDescription>
         </DialogHeader>
-        <div className="-mx-1 max-h-[60vh] space-y-1 overflow-y-auto px-1">
+        <div className="-mx-1 max-h-[60dvh] space-y-1 overflow-y-auto px-1">
           {loading && (
             <div className="flex items-center justify-center py-8 text-[12px] text-muted-foreground">
               <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
@@ -770,26 +769,26 @@ function SubscriptionsDialog({
           {candidates.map((c) => (
             <div
               key={c.id}
-              className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2 transition-colors hover:bg-muted/40"
+              className="rounded-md border border-border/60 px-3 py-2 transition-colors hover:bg-muted/40"
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
                   <span className="truncate text-[13px] font-medium">{c.name}</span>
                   <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                     {HOST_KIND_LABEL[c.kind] ?? c.kind}
                   </span>
                 </div>
-                <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{c.endpoint}</div>
+                <Switch
+                  checked={c.ups_monitor}
+                  onChange={(v) => toggle(c, v)}
+                  disabled={pending === c.id}
+                />
               </div>
-              <Switch
-                checked={c.ups_monitor}
-                onChange={(v) => toggle(c, v)}
-                disabled={pending === c.id}
-              />
+              <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{c.endpoint}</div>
             </div>
           ))}
         </div>
-        <DialogFooter>
+        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             关闭
           </Button>
@@ -803,22 +802,20 @@ export default function Ups() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [autoRefresh, setAutoRefresh] = useState(true)
   const [subOpen, setSubOpen] = useState(false)
 
   const normalize = (arr: any[]): Snapshot[] =>
     (arr ?? []).map((s) => ({ ...s, upses: s?.upses ?? [] }))
 
-  // silent=true 用于 30s 轮询:不切到"加载中"占位,避免 UPSCard 重挂载丢掉 expanded / range
-  const load = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true)
+  const load = useCallback(async () => {
+    setLoading(true)
     try {
       const { data } = await api.get('/ups/snapshot')
       setSnapshots(normalize(data?.data))
     } catch (e: any) {
-      if (!silent) toast.error(e?.response?.data?.error || e?.message || '加载失败')
+      toast.error(e?.response?.data?.error || e?.message || '加载失败')
     } finally {
-      if (!silent) setLoading(false)
+      setLoading(false)
     }
   }, [])
 
@@ -842,7 +839,6 @@ export default function Ups() {
   // SSE 推送替代 30 秒轮询。订阅时后端立即发首帧,之后每轮采样完推一帧;
   // EventSource 内置断线重连(默认 3s),所以这里不用自己写 retry。
   useEffect(() => {
-    if (!autoRefresh) return
     const es = new EventSource('/api/ups/stream')
     es.addEventListener('snapshot', (ev) => {
       try {
@@ -854,7 +850,7 @@ export default function Ups() {
       }
     })
     return () => es.close()
-  }, [autoRefresh])
+  }, [])
 
   const cs = getColorSet('teal')
   const empty = !loading && snapshots.length === 0
@@ -886,7 +882,7 @@ export default function Ups() {
   return (
     <div className="mx-auto max-w-5xl px-4 pb-32 pt-4 sm:px-8 sm:pt-10">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+        <div className="hidden sm:block">
           <div className="flex items-center gap-3">
             <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
             <h1 className="text-[28px] font-bold leading-none tracking-tight">UPS 状态</h1>
@@ -904,18 +900,14 @@ export default function Ups() {
             )}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
+        <div className="flex shrink-0 gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setAutoRefresh((v) => !v)}
-            className={cn(autoRefresh && 'border-teal-500/50 text-teal-600 dark:text-teal-400')}
-            title="每 30 秒拉取最新 ups_state(不触发采样)"
+            className="flex-1 sm:flex-none"
+            onClick={triggerSample}
+            disabled={refreshing}
           >
-            <Zap className="mr-1.5 h-3.5 w-3.5" />
-            自动刷新 {autoRefresh ? '开' : '关'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={triggerSample} disabled={refreshing}>
             {refreshing ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
@@ -923,7 +915,12 @@ export default function Ups() {
             )}
             立即采样
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setSubOpen(true)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 sm:flex-none"
+            onClick={() => setSubOpen(true)}
+          >
             <Settings2 className="mr-1.5 h-3.5 w-3.5" />
             机器订阅
           </Button>
