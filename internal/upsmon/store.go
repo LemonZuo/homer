@@ -75,19 +75,22 @@ func (s *Store) LatestSamplesByHostUPS() ([]model.UPSSample, error) {
 }
 
 // SeriesPoint 一个聚合桶,前端画曲线用。
+// 缺数据的指标用 -1 表示(与 sample 表里的哨兵约定一致)。
 type SeriesPoint struct {
-	BucketStart    time.Time `json:"bucket_start"`
-	BatteryPercent int       `json:"battery_percent"` // 桶内 min(让谷底可见)
-	RuntimeMinutes int       `json:"runtime_minutes"` // 桶内 avg
-	PowerSource    string    `json:"power_source"`    // 桶内最严重
+	BucketStart  time.Time `json:"bucket_start"`
+	InputVoltage float32   `json:"input_voltage"` // V,桶内 avg
+	LoadPercent  int       `json:"load_percent"`  // %,桶内 max(峰值可见)
+	RealPower    int       `json:"real_power"`    // W,桶内 max
+	PowerSource  string    `json:"power_source"`  // 桶内最严重
 }
 
 // Series 按时间桶聚合某个 UPS 的采样序列。
 // bucketSec ≥ 60,since 是包含下界。返回按 bucket_start 升序。
 //
 // 聚合规则:
-//   - battery_percent: MIN()(谷底可见,与告警语义一致)
-//   - runtime_minutes: AVG() 取整
+//   - input_voltage: AVG()(电压一般波动小,平均能反映电网情况)
+//   - load_percent: MAX()(峰值更有意义)
+//   - real_power: MAX()
 //   - power_source: 桶内只要出现过 low_battery 就标 low_battery,否则 battery,否则 mains,否则 unknown
 func (s *Store) Series(hostKind string, hostID int64, upsName string, since time.Time, bucketSec int) ([]SeriesPoint, error) {
 	if bucketSec < 60 {
@@ -101,8 +104,9 @@ func (s *Store) Series(hostKind string, hostID int64, upsName string, since time
 	// time.Time,得到的是钟面时间,跟 sampled_at 直接读出来语义一致。
 	type row struct {
 		BucketTime time.Time
-		MinBattery int
-		AvgRuntime float64
+		AvgInputV  *float64
+		MaxLoad    *int
+		MaxRealPow *int
 		HasLB      int
 		HasOB      int
 		HasOL      int
@@ -110,7 +114,7 @@ func (s *Store) Series(hostKind string, hostID int64, upsName string, since time
 	var rows []row
 	bucketExpr := fmt.Sprintf("FROM_UNIXTIME((UNIX_TIMESTAMP(sampled_at) DIV %d) * %d)", bucketSec, bucketSec)
 	err := s.db.Model(&model.UPSSample{}).
-		Select(bucketExpr+" AS bucket_time, MIN(CASE WHEN battery_percent>=0 THEN battery_percent ELSE NULL END) AS min_battery, AVG(CASE WHEN runtime_minutes>=0 THEN runtime_minutes ELSE NULL END) AS avg_runtime, SUM(CASE WHEN power_source='low_battery' THEN 1 ELSE 0 END) AS has_lb, SUM(CASE WHEN power_source='battery' THEN 1 ELSE 0 END) AS has_ob, SUM(CASE WHEN power_source='mains' THEN 1 ELSE 0 END) AS has_ol").
+		Select(bucketExpr+" AS bucket_time, AVG(CASE WHEN input_voltage>=0 THEN input_voltage ELSE NULL END) AS avg_input_v, MAX(CASE WHEN load_percent>=0 THEN load_percent ELSE NULL END) AS max_load, MAX(CASE WHEN real_power>=0 THEN real_power ELSE NULL END) AS max_real_pow, SUM(CASE WHEN power_source='low_battery' THEN 1 ELSE 0 END) AS has_lb, SUM(CASE WHEN power_source='battery' THEN 1 ELSE 0 END) AS has_ob, SUM(CASE WHEN power_source='mains' THEN 1 ELSE 0 END) AS has_ol").
 		Where("host_kind = ? AND host_id = ? AND ups_name = ? AND sampled_at >= ?", hostKind, hostID, upsName, since).
 		Group("bucket_time").
 		Order("bucket_time ASC").
@@ -129,11 +133,24 @@ func (s *Store) Series(hostKind string, hostID int64, upsName string, since time
 		case r.HasOL > 0:
 			ps = model.UPSPowerMains
 		}
+		var iv float32 = -1
+		if r.AvgInputV != nil {
+			iv = float32(*r.AvgInputV)
+		}
+		lp := -1
+		if r.MaxLoad != nil {
+			lp = *r.MaxLoad
+		}
+		rp := -1
+		if r.MaxRealPow != nil {
+			rp = *r.MaxRealPow
+		}
 		points = append(points, SeriesPoint{
-			BucketStart:    r.BucketTime,
-			BatteryPercent: r.MinBattery,
-			RuntimeMinutes: int(r.AvgRuntime + 0.5),
-			PowerSource:    ps,
+			BucketStart:  r.BucketTime,
+			InputVoltage: iv,
+			LoadPercent:  lp,
+			RealPower:    rp,
+			PowerSource:  ps,
 		})
 	}
 	return points, nil

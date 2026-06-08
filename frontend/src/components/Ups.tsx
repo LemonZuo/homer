@@ -53,8 +53,9 @@ interface Snapshot {
 
 interface SeriesPoint {
   bucket_start: string
-  battery_percent: number
-  runtime_minutes: number
+  input_voltage: number
+  load_percent: number
+  real_power: number
   power_source: PowerSource
 }
 
@@ -102,6 +103,13 @@ const RANGE_OPTIONS = [
   { value: '24h', label: '24 小时' },
   { value: '3d', label: '3 天' },
   { value: '7d', label: '7 天' },
+]
+
+type MetricKey = 'inputV' | 'load' | 'power'
+const METRIC_OPTIONS: { value: MetricKey; label: string }[] = [
+  { value: 'inputV', label: '输入电压' },
+  { value: 'load', label: '负载' },
+  { value: 'power', label: '实时功率' },
 ]
 
 function fmtRuntime(min: number): string {
@@ -228,6 +236,7 @@ function UPSCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const [range, setRange] = useState('24h')
+  const [metric, setMetric] = useState<MetricKey>('inputV')
   const [series, setSeries] = useState<SeriesPoint[] | null>(null)
   const [seriesLoading, setSeriesLoading] = useState(false)
 
@@ -424,7 +433,23 @@ function UPSCard({
         {expanded && (
           <div className="mt-3 rounded-md border border-border/60 bg-muted/30 p-3">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11.5px] text-muted-foreground">电量曲线</span>
+              <div className="flex flex-wrap gap-1">
+                {METRIC_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => setMetric(o.value)}
+                    className={cn(
+                      'rounded-md border px-2 py-0.5 text-[11px] transition-colors',
+                      metric === o.value
+                        ? 'border-teal-500/60 bg-teal-500/10 text-teal-700 dark:text-teal-300'
+                        : 'border-border bg-background text-muted-foreground hover:border-border/80 hover:text-foreground',
+                    )}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-wrap gap-1">
                 {RANGE_OPTIONS.map((o) => (
                   <button
@@ -443,7 +468,7 @@ function UPSCard({
                 ))}
               </div>
             </div>
-            <SeriesChart points={series} loading={seriesLoading} />
+            <SeriesChart points={series} loading={seriesLoading} metric={metric} />
           </div>
         )}
       </div>
@@ -451,16 +476,101 @@ function UPSCard({
   )
 }
 
-interface ChartPoint {
+interface MiniPoint {
   t: number
-  battery: number | null
+  v: number | null
   ps: PowerSource
 }
 
-function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loading: boolean }) {
+function SeriesChart({
+  points,
+  loading,
+  metric,
+}: {
+  points: SeriesPoint[] | null
+  loading: boolean
+  metric: MetricKey
+}) {
+  if (loading) {
+    return (
+      <div className="flex h-32 items-center justify-center text-[12px] text-muted-foreground">
+        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+        加载中
+      </div>
+    )
+  }
+  if (!points || points.length === 0) {
+    return (
+      <div className="flex h-32 items-center justify-center text-[12px] text-muted-foreground">
+        暂无历史数据
+      </div>
+    )
+  }
+  const ts = points.map((p) => new Date(p.bucket_start).getTime())
+  const psArr = points.map((p) => p.power_source)
+  let data: MiniPoint[]
+  let unit: string
+  let stroke: string
+  let yMin: number | undefined
+  let yMax: number | undefined
+  let format: (v: number) => string
+  switch (metric) {
+    case 'inputV':
+      data = points.map((p, i) => ({
+        t: ts[i],
+        v: p.input_voltage < 0 ? null : p.input_voltage,
+        ps: psArr[i],
+      }))
+      unit = 'V'
+      stroke = 'rgb(20 184 166)'
+      format = (v) => v.toFixed(1)
+      break
+    case 'load':
+      data = points.map((p, i) => ({
+        t: ts[i],
+        v: p.load_percent < 0 ? null : p.load_percent,
+        ps: psArr[i],
+      }))
+      unit = '%'
+      stroke = 'rgb(59 130 246)'
+      yMin = 0
+      yMax = 100
+      format = (v) => `${Math.round(v)}`
+      break
+    case 'power':
+      data = points.map((p, i) => ({
+        t: ts[i],
+        v: p.real_power < 0 ? null : p.real_power,
+        ps: psArr[i],
+      }))
+      unit = 'W'
+      stroke = 'rgb(234 88 12)'
+      format = (v) => `${Math.round(v)}`
+      break
+  }
+  return (
+    <MiniChart data={data} unit={unit} stroke={stroke} yMin={yMin} yMax={yMax} format={format} />
+  )
+}
+
+function MiniChart({
+  unit,
+  data,
+  stroke,
+  yMin,
+  yMax,
+  format,
+}: {
+  unit: string
+  data: MiniPoint[]
+  stroke: string
+  yMin?: number
+  yMax?: number
+  format: (v: number) => string
+}) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(640)
-  const [hover, setHover] = useState<{ x: number; idx: number } | null>(null)
+  const [hover, setHover] = useState<{ idx: number } | null>(null)
 
   useEffect(() => {
     const el = wrapRef.current
@@ -474,16 +584,6 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-
-  const data = useMemo<ChartPoint[]>(
-    () =>
-      (points ?? []).map((p) => ({
-        t: new Date(p.bucket_start).getTime(),
-        battery: p.battery_percent < 0 ? null : p.battery_percent,
-        ps: p.power_source,
-      })),
-    [points],
-  )
 
   const bands = useMemo(() => {
     const out: { start: number; end: number; kind: 'battery' | 'low_battery' }[] = []
@@ -504,24 +604,11 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
     return out
   }, [data])
 
-  if (loading) {
-    return (
-      <div className="flex h-44 items-center justify-center text-[12px] text-muted-foreground">
-        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-        加载中
-      </div>
-    )
-  }
-  if (!points || points.length === 0 || data.length === 0) {
-    return (
-      <div className="flex h-44 items-center justify-center text-[12px] text-muted-foreground">
-        暂无历史数据
-      </div>
-    )
-  }
+  const validVals = data.map((d) => d.v).filter((v): v is number => v != null)
+  const allMissing = validVals.length === 0
 
-  const H = 176
-  const padL = 32
+  const H = 180
+  const padL = 40
   const padR = 8
   const padT = 8
   const padB = 18
@@ -532,22 +619,48 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
   const tMax = data[data.length - 1].t
   const tSpan = Math.max(1, tMax - tMin)
   const xOf = (t: number) => padL + ((t - tMin) / tSpan) * innerW
-  const yOf = (v: number) => padT + (1 - v / 100) * innerH
 
-  // 折线路径(允许 null 中断)
+  // y 范围:固定范围或自动适配(略带 padding)
+  let yLo: number, yHi: number
+  if (yMin != null && yMax != null) {
+    yLo = yMin
+    yHi = yMax
+  } else if (allMissing) {
+    yLo = 0
+    yHi = 1
+  } else {
+    const mn = Math.min(...validVals)
+    const mx = Math.max(...validVals)
+    if (mn === mx) {
+      yLo = mn - 1
+      yHi = mx + 1
+    } else {
+      const pad = (mx - mn) * 0.15
+      yLo = mn - pad
+      yHi = mx + pad
+    }
+    if (yMin != null) yLo = yMin
+    if (yMax != null) yHi = yMax
+  }
+  const ySpan = Math.max(0.001, yHi - yLo)
+  const yOf = (v: number) => padT + (1 - (v - yLo) / ySpan) * innerH
+
+  // y 轴 3 个刻度
+  const yTicks = [yLo, (yLo + yHi) / 2, yHi]
+
+  // 折线路径(null 中断)
   let path = ''
   let penUp = true
   for (const d of data) {
-    if (d.battery == null) {
+    if (d.v == null) {
       penUp = true
       continue
     }
     const cmd = penUp ? 'M' : 'L'
-    path += `${cmd}${xOf(d.t).toFixed(1)},${yOf(d.battery).toFixed(1)} `
+    path += `${cmd}${xOf(d.t).toFixed(1)},${yOf(d.v).toFixed(1)} `
     penUp = false
   }
 
-  const yTicks = [0, 25, 50, 75, 100]
   const xTickCount = Math.min(5, data.length)
   const xTicks = Array.from({ length: xTickCount }, (_, i) =>
     Math.round(tMin + ((tMax - tMin) * i) / Math.max(1, xTickCount - 1)),
@@ -559,7 +672,6 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
 
-  // 悬停
   const onMove = (ev: React.MouseEvent<SVGSVGElement>) => {
     const svg = ev.currentTarget
     const r = svg.getBoundingClientRect()
@@ -579,13 +691,26 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
         bestIdx = i
       }
     }
-    setHover({ x, idx: bestIdx })
+    setHover({ idx: bestIdx })
   }
 
   const hoverPoint = hover ? data[hover.idx] : null
 
   return (
-    <div ref={wrapRef} className="relative h-44 w-full">
+    <div ref={wrapRef} className="relative">
+      <div className="mb-1 flex h-4 items-center justify-end text-[11.5px] text-muted-foreground">
+        {hoverPoint && hoverPoint.v != null ? (
+          <span className="tabular-nums">
+            <span className="text-foreground font-semibold">{format(hoverPoint.v)}</span>
+            <span className="ml-0.5">{unit}</span>
+            <span className="ml-2 text-muted-foreground">
+              {new Date(hoverPoint.t).toLocaleString('zh-CN', { hour12: false })}
+            </span>
+          </span>
+        ) : (
+          <span>{unit}</span>
+        )}
+      </div>
       <svg
         width="100%"
         height={H}
@@ -594,9 +719,8 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
       >
-        {/* Y 轴网格 + 刻度 */}
-        {yTicks.map((v) => (
-          <g key={v}>
+        {yTicks.map((v, i) => (
+          <g key={i}>
             <line
               x1={padL}
               x2={width - padR}
@@ -612,12 +736,10 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
               fontSize="10"
               className="fill-muted-foreground"
             >
-              {v}%
+              {format(v)}
             </text>
           </g>
         ))}
-
-        {/* 事件色带 */}
         {bands.map((b, i) => {
           const x1 = xOf(b.start)
           const x2 = Math.max(xOf(b.end), x1 + 2)
@@ -636,8 +758,6 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
             />
           )
         })}
-
-        {/* X 轴刻度 */}
         {xTicks.map((t, i) => (
           <text
             key={i}
@@ -650,19 +770,17 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
             {fmtX(t)}
           </text>
         ))}
-
-        {/* 折线 */}
-        <path
-          d={path.trim()}
-          fill="none"
-          stroke="rgb(20 184 166)"
-          strokeWidth={1.75}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {/* 悬停指示 */}
-        {hoverPoint && hoverPoint.battery != null && (
+        {!allMissing && (
+          <path
+            d={path.trim()}
+            fill="none"
+            stroke={stroke}
+            strokeWidth={1.75}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+        {hoverPoint && hoverPoint.v != null && (
           <g>
             <line
               x1={xOf(hoverPoint.t)}
@@ -672,36 +790,21 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
               className="stroke-border"
               strokeWidth={1}
             />
-            <circle
-              cx={xOf(hoverPoint.t)}
-              cy={yOf(hoverPoint.battery)}
-              r={3.5}
-              fill="rgb(20 184 166)"
-            />
+            <circle cx={xOf(hoverPoint.t)} cy={yOf(hoverPoint.v)} r={3.5} fill={stroke} />
           </g>
         )}
+        {allMissing && (
+          <text
+            x={padL + innerW / 2}
+            y={padT + innerH / 2}
+            textAnchor="middle"
+            fontSize="11"
+            className="fill-muted-foreground"
+          >
+            该指标无数据
+          </text>
+        )}
       </svg>
-
-      {hoverPoint && hoverPoint.battery != null && (
-        <div
-          className="pointer-events-none absolute top-1 rounded-md border border-border bg-popover px-2 py-1 text-[11px] text-popover-foreground shadow-md"
-          style={{
-            left: Math.min(width - 160, Math.max(0, xOf(hoverPoint.t) + 6)),
-          }}
-        >
-          <div className="tabular-nums text-muted-foreground">
-            {new Date(hoverPoint.t).toLocaleString('zh-CN', { hour12: false })}
-          </div>
-          <div className="mt-0.5">
-            电量 <span className="font-semibold text-foreground">{hoverPoint.battery}%</span>
-            {hoverPoint.ps !== 'mains' && (
-              <span className={cn('ml-2', POWER_META[hoverPoint.ps].text)}>
-                {POWER_META[hoverPoint.ps].label}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
