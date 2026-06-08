@@ -91,38 +91,44 @@ func (s *Service) RunSample() error {
 		}
 		for _, r := range h.UPSes {
 			samples = append(samples, model.UPSSample{
-				HostKind:       h.HostKind,
-				HostID:         h.HostID,
-				HostName:       h.HostName,
-				UPSName:        r.Name,
-				Mfr:            r.Mfr,
-				Model:          r.Model,
-				PowerSource:    r.PowerSource,
-				BatteryPercent: r.BatteryPercent,
-				RuntimeMinutes: r.RuntimeMinutes,
-				InputVoltage:   r.InputVoltage,
-				OutputVoltage:  r.OutputVoltage,
-				LoadPercent:    r.LoadPercent,
-				RealPower:      r.RealPower,
-				RawStatus:      r.RawStatus,
-				SampledAt:      now,
+				HostKind:              h.HostKind,
+				HostID:                h.HostID,
+				HostName:              h.HostName,
+				UPSName:               r.Name,
+				Mfr:                   r.Mfr,
+				Model:                 r.Model,
+				PowerSource:           r.PowerSource,
+				BatteryPercent:        r.BatteryPercent,
+				RuntimeMinutes:        r.RuntimeMinutes,
+				BatteryVoltage:        r.BatteryVoltage,
+				BatteryNominalVoltage: r.BatteryNominalVoltage,
+				BatteryType:           r.BatteryType,
+				InputVoltage:          r.InputVoltage,
+				OutputVoltage:         r.OutputVoltage,
+				LoadPercent:           r.LoadPercent,
+				RealPower:             r.RealPower,
+				RawStatus:             r.RawStatus,
+				SampledAt:             now,
 			})
 			st := model.UPSState{
-				HostKind:           h.HostKind,
-				HostID:             h.HostID,
-				HostName:           h.HostName,
-				UPSName:            r.Name,
-				Mfr:                r.Mfr,
-				Model:              r.Model,
-				LastPowerSource:    r.PowerSource,
-				LastBatteryPercent: r.BatteryPercent,
-				LastRuntimeMinutes: r.RuntimeMinutes,
-				LastInputVoltage:   r.InputVoltage,
-				LastOutputVoltage:  r.OutputVoltage,
-				LastLoadPercent:    r.LoadPercent,
-				LastRealPower:      r.RealPower,
-				LastRawStatus:      r.RawStatus,
-				UpdatedAt:          now,
+				HostKind:                  h.HostKind,
+				HostID:                    h.HostID,
+				HostName:                  h.HostName,
+				UPSName:                   r.Name,
+				Mfr:                       r.Mfr,
+				Model:                     r.Model,
+				LastPowerSource:           r.PowerSource,
+				LastBatteryPercent:        r.BatteryPercent,
+				LastRuntimeMinutes:        r.RuntimeMinutes,
+				LastBatteryVoltage:        r.BatteryVoltage,
+				LastBatteryNominalVoltage: r.BatteryNominalVoltage,
+				LastBatteryType:           r.BatteryType,
+				LastInputVoltage:          r.InputVoltage,
+				LastOutputVoltage:         r.OutputVoltage,
+				LastLoadPercent:           r.LoadPercent,
+				LastRealPower:             r.RealPower,
+				LastRawStatus:             r.RawStatus,
+				UpdatedAt:                 now,
 			}
 			// 保留上一轮的 last_alert_at(后续 notifier 决定要不要重置)
 			key := stateKey(h.HostKind, h.HostID, r.Name)
@@ -234,18 +240,21 @@ type Snapshot struct {
 }
 
 type SnapshotUPS struct {
-	Name           string    `json:"name"`
-	Mfr            string    `json:"mfr"`
-	Model          string    `json:"model"`
-	PowerSource    string    `json:"power_source"`
-	BatteryPercent int       `json:"battery_percent"`
-	RuntimeMinutes int       `json:"runtime_minutes"`
-	InputVoltage   float32   `json:"input_voltage"`
-	OutputVoltage  float32   `json:"output_voltage"`
-	LoadPercent    int       `json:"load_percent"`
-	RealPower      int       `json:"real_power"`
-	RawStatus      string    `json:"raw_status"`
-	SampledAt      time.Time `json:"sampled_at"`
+	Name                  string    `json:"name"`
+	Mfr                   string    `json:"mfr"`
+	Model                 string    `json:"model"`
+	PowerSource           string    `json:"power_source"`
+	BatteryPercent        int       `json:"battery_percent"`
+	RuntimeMinutes        int       `json:"runtime_minutes"`
+	BatteryVoltage        float32   `json:"battery_voltage"`
+	BatteryNominalVoltage float32   `json:"battery_nominal_voltage"`
+	BatteryType           string    `json:"battery_type"`
+	InputVoltage          float32   `json:"input_voltage"`
+	OutputVoltage         float32   `json:"output_voltage"`
+	LoadPercent           int       `json:"load_percent"`
+	RealPower             int       `json:"real_power"`
+	RawStatus             string    `json:"raw_status"`
+	SampledAt             time.Time `json:"sampled_at"`
 }
 
 // BuildSnapshot 不重新采样,基于 ups_state(最新)+ 候选机器表组装快照。
@@ -279,18 +288,21 @@ func (s *Service) BuildSnapshot() ([]Snapshot, error) {
 		}
 		for _, st := range stateByHost[k] {
 			sn.UPSes = append(sn.UPSes, SnapshotUPS{
-				Name:           st.UPSName,
-				Mfr:            st.Mfr,
-				Model:          st.Model,
-				PowerSource:    st.LastPowerSource,
-				BatteryPercent: st.LastBatteryPercent,
-				RuntimeMinutes: st.LastRuntimeMinutes,
-				InputVoltage:   st.LastInputVoltage,
-				OutputVoltage:  st.LastOutputVoltage,
-				LoadPercent:    st.LastLoadPercent,
-				RealPower:      st.LastRealPower,
-				RawStatus:      st.LastRawStatus,
-				SampledAt:      st.UpdatedAt,
+				Name:                  st.UPSName,
+				Mfr:                   st.Mfr,
+				Model:                 st.Model,
+				PowerSource:           st.LastPowerSource,
+				BatteryPercent:        st.LastBatteryPercent,
+				RuntimeMinutes:        st.LastRuntimeMinutes,
+				BatteryVoltage:        st.LastBatteryVoltage,
+				BatteryNominalVoltage: st.LastBatteryNominalVoltage,
+				BatteryType:           st.LastBatteryType,
+				InputVoltage:          st.LastInputVoltage,
+				OutputVoltage:         st.LastOutputVoltage,
+				LoadPercent:           st.LastLoadPercent,
+				RealPower:             st.LastRealPower,
+				RawStatus:             st.LastRawStatus,
+				SampledAt:             st.UpdatedAt,
 			})
 			sn.Reachable = true
 		}

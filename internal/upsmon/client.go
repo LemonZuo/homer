@@ -17,17 +17,20 @@ import (
 // 所有数值字段统一用 -1 表哨兵值(未读到),与 battery_percent 一致,
 // 前端用 >=0 判断是否有数据,而不是用 0(0 在功率/负载场景下是有效值)。
 type upscReading struct {
-	Name           string
-	Mfr            string
-	Model          string
-	PowerSource    string  // mains | battery | low_battery | unknown
-	BatteryPercent int     // -1 未读到
-	RuntimeMinutes int     // -1 未读到
-	InputVoltage   float32 // -1 未读到
-	OutputVoltage  float32 // -1 未读到
-	LoadPercent    int     // -1 未读到
-	RealPower      int     // -1 未读到,单位 W
-	RawStatus      string  // 原始 ups.status,前端 tooltip 用
+	Name                  string
+	Mfr                   string
+	Model                 string
+	PowerSource           string  // mains | battery | low_battery | unknown
+	BatteryPercent        int     // -1 未读到
+	RuntimeMinutes        int     // -1 未读到
+	BatteryVoltage        float32 // -1 未读到,单位 V(当前电池端电压)
+	BatteryNominalVoltage float32 // -1 未读到,单位 V(电池组标称电压,如 12/24/48)
+	BatteryType           string  // 空串未读到,如 PbAc(铅酸)
+	InputVoltage          float32 // -1 未读到
+	OutputVoltage         float32 // -1 未读到
+	LoadPercent           int     // -1 未读到
+	RealPower             int     // -1 未读到,单位 W
+	RawStatus             string  // 原始 ups.status,前端 tooltip 用
 }
 
 // probeHost 在 client 上枚举本机所有 UPS 并读取状态。
@@ -103,14 +106,16 @@ func parseUPSCOutput(name, raw string) (upscReading, bool) {
 		return upscReading{}, false
 	}
 	r := upscReading{
-		Name:           name,
-		PowerSource:    model.UPSPowerUnknown,
-		BatteryPercent: -1,
-		RuntimeMinutes: -1,
-		InputVoltage:   -1,
-		OutputVoltage:  -1,
-		LoadPercent:    -1,
-		RealPower:      -1,
+		Name:                  name,
+		PowerSource:           model.UPSPowerUnknown,
+		BatteryPercent:        -1,
+		RuntimeMinutes:        -1,
+		BatteryVoltage:        -1,
+		BatteryNominalVoltage: -1,
+		InputVoltage:          -1,
+		OutputVoltage:         -1,
+		LoadPercent:           -1,
+		RealPower:             -1,
 	}
 	nominalReal := -1 // ups.realpower.nominal,仅用于在 realpower/power 都缺时推算
 	matched := 0
@@ -144,6 +149,21 @@ func parseUPSCOutput(name, raw string) (upscReading, bool) {
 		case "battery.runtime":
 			if n, err := strconv.ParseFloat(val, 64); err == nil && n >= 0 {
 				r.RuntimeMinutes = int(n / 60)
+				matched++
+			}
+		case "battery.voltage":
+			if n, err := strconv.ParseFloat(val, 64); err == nil && n >= 0 {
+				r.BatteryVoltage = float32(n)
+				matched++
+			}
+		case "battery.voltage.nominal":
+			if n, err := strconv.ParseFloat(val, 64); err == nil && n > 0 {
+				r.BatteryNominalVoltage = float32(n)
+				matched++
+			}
+		case "battery.type":
+			if val != "" {
+				r.BatteryType = val
 				matched++
 			}
 		case "input.voltage":

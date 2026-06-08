@@ -34,6 +34,9 @@ interface SnapshotUPS {
   power_source: PowerSource
   battery_percent: number
   runtime_minutes: number
+  battery_voltage: number
+  battery_nominal_voltage: number
+  battery_type: string
   input_voltage: number
   output_voltage: number
   load_percent: number
@@ -136,6 +139,27 @@ function fmtTime(s: string): string {
 function fmtNum(v: number, fractionDigits = 0): string {
   if (v == null || v < 0 || !isFinite(v)) return '—'
   return v.toFixed(fractionDigits)
+}
+
+// NUT battery.type 常见取值映射;未命中就回退展示原文。
+const BATTERY_TYPE_LABEL: Record<string, string> = {
+  pbac: '铅酸',
+  pbacid: '铅酸',
+  lead: '铅酸',
+  'lead-acid': '铅酸',
+  vrla: '铅酸 (VRLA)',
+  agm: '铅酸 (AGM)',
+  gel: '铅酸 (Gel)',
+  flooded: '铅酸 (开口)',
+  'li-ion': '锂离子',
+  liion: '锂离子',
+  lifepo4: '磷酸铁锂',
+  nicd: '镍镉',
+  nimh: '镍氢',
+}
+function fmtBatteryType(s: string): string {
+  if (!s) return '—'
+  return BATTERY_TYPE_LABEL[s.toLowerCase()] ?? s
 }
 
 function fmtDateTime(s: string): string {
@@ -323,9 +347,41 @@ function UPSCard({
           </div>
         </div>
 
+        {/* 电池信息:类型 / 电压 / 额定电压 */}
+        {(ups.battery_type || ups.battery_voltage >= 0 || ups.battery_nominal_voltage > 0) && (
+          <div className="mt-5 grid grid-cols-3 gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">电池类型</div>
+              <div className="mt-0.5 leading-none" title={ups.battery_type || undefined}>
+                <span className="text-[14px] font-semibold text-foreground">
+                  {fmtBatteryType(ups.battery_type)}
+                </span>
+              </div>
+            </div>
+            <div className="min-w-0 border-l border-border/60 pl-3">
+              <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">电池电压</div>
+              <div className="mt-0.5 flex items-baseline gap-0.5 leading-none">
+                <span className="text-[15px] font-semibold tabular-nums text-foreground">
+                  {fmtNum(ups.battery_voltage, 1)}
+                </span>
+                <span className="text-[10.5px] text-muted-foreground">V</span>
+              </div>
+            </div>
+            <div className="min-w-0 border-l border-border/60 pl-3">
+              <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">额定电压</div>
+              <div className="mt-0.5 flex items-baseline gap-0.5 leading-none">
+                <span className="text-[15px] font-semibold tabular-nums text-foreground">
+                  {fmtNum(ups.battery_nominal_voltage, 0)}
+                </span>
+                <span className="text-[10.5px] text-muted-foreground">V</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 电气指标:输入电压 / 负载 / 实时功率 */}
         {(ups.input_voltage >= 0 || ups.load_percent >= 0 || ups.real_power >= 0) && (
-          <div className="mt-5 grid grid-cols-3 gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2.5">
+          <div className="mt-3 grid grid-cols-3 gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2.5">
             <div className="min-w-0">
               <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">输入电压</div>
               <div className="mt-0.5 flex items-baseline gap-0.5 leading-none">

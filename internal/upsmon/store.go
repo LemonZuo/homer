@@ -36,6 +36,7 @@ func (s *Store) UpsertState(states []model.UPSState) error {
 		DoUpdates: clause.AssignmentColumns([]string{
 			"host_name", "mfr", "model",
 			"last_power_source", "last_battery_percent", "last_runtime_minutes",
+			"last_battery_voltage", "last_battery_nominal_voltage", "last_battery_type",
 			"last_input_voltage", "last_output_voltage", "last_load_percent", "last_real_power",
 			"last_raw_status",
 			"updated_at",
