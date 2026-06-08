@@ -922,12 +922,13 @@ export default function Ups() {
       const { data } = await api.post(`/ups/hosts/${h.id}/test`)
       const r = data?.data
       if (r?.ok) {
-        const names = ((r.ups_names ?? []) as string[]).filter(Boolean).join(', ')
-        if (names) {
-          toast.success(`连通成功:${names}`)
+        const list = ((r.ups_names ?? []) as string[]).filter(Boolean)
+        if (list.length > 0) {
+          const label = list.length === 1 ? list[0] : `${list.length} 台(${list.join(', ')})`
+          toast.success(`连通成功,已识别到 UPS:${label}`)
         } else {
           const diag = (r.diag as string) || ''
-          toast.error(diag ? `连通成功但未拿到 UPS:${diag}` : '连通成功,但未发现 UPS')
+          toast.error(diag ? `SSH 已连通,但未拿到 UPS:${diag}` : 'SSH 已连通,但未发现 UPS')
         }
       } else {
         toast.error(r?.error || '连通失败')
