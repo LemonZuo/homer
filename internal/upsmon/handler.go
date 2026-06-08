@@ -1,6 +1,7 @@
 package upsmon
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,10 +23,77 @@ func NewHandler(svc *Service, sampler *Sampler) *Handler {
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	g := rg.Group("/ups")
 	g.GET("/snapshot", h.snapshot)
+	g.GET("/stream", h.stream)
 	g.GET("/series", h.series)
 	g.POST("/refresh", h.refresh)
 	g.GET("/candidates", h.candidates)
 	g.POST("/candidates/:id/toggle", h.toggle)
+}
+
+// stream SSE 推送 snapshot,替代前端 30 秒一次的 HTTP 轮询。
+// 协议:订阅时立即发一帧当前 snapshot(避免空白等下一轮),之后每轮采样完推一帧。
+// 25 秒一次的注释行心跳(`: ping`)防止反代/浏览器把 idle 连接掐掉。
+func (h *Handler) stream(c *gin.Context) {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "ResponseWriter 不支持流式输出"})
+		return
+	}
+
+	send := func(snap []Snapshot) bool {
+		buf, err := json.Marshal(snap)
+		if err != nil {
+			return false
+		}
+		if _, err := c.Writer.WriteString("event: snapshot\ndata: "); err != nil {
+			return false
+		}
+		if _, err := c.Writer.Write(buf); err != nil {
+			return false
+		}
+		if _, err := c.Writer.WriteString("\n\n"); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	// 订阅放在首帧之前,避免"读 → 发首帧"期间错过一次广播
+	ch, unsub := h.svc.Subscribe()
+	defer unsub()
+
+	// 首帧:当前 snapshot(让前端不用等下一轮采样)
+	if snap, err := h.svc.BuildSnapshot(); err == nil {
+		if !send(snap) {
+			return
+		}
+	}
+
+	ping := time.NewTicker(25 * time.Second)
+	defer ping.Stop()
+	ctxDone := c.Request.Context().Done()
+	for {
+		select {
+		case snap, ok := <-ch:
+			if !ok {
+				return
+			}
+			if !send(snap) {
+				return
+			}
+		case <-ping.C:
+			if _, err := c.Writer.WriteString(": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-ctxDone:
+			return
+		}
+	}
 }
 
 // snapshot 返回每台已订阅机器的最新 UPS 状态(不触发采样)。

@@ -11,12 +11,13 @@ import (
 	"gorm.io/gorm"
 )
 
-// Service 串起一轮"扫描 → 采样 → 持久化 → 告警"。
+// Service 串起一轮"扫描 → 采样 → 持久化 → 告警 → SSE 广播"。
 type Service struct {
 	db        *gorm.DB
 	sampler   *Sampler
 	store     *Store
 	notifier  *Notifier
+	sse       *sseHub
 	retention time.Duration
 }
 
@@ -29,9 +30,13 @@ func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, re
 		sampler:   sampler,
 		store:     store,
 		notifier:  NewNotifier(hub.For(notify.ModuleUPS), store),
+		sse:       newSSEHub(),
 		retention: retention,
 	}
 }
+
+// Subscribe 给 SSE handler 用:订阅采样完成后的 snapshot 广播。
+func (s *Service) Subscribe() (<-chan []Snapshot, func()) { return s.sse.Subscribe() }
 
 // RunSample 是 cron 调用的入口。一轮全失败(且确实有候选机器)才回 error,
 // 让 jobmonitor 记一笔失败。单机不可达不算 job 失败。
@@ -146,6 +151,12 @@ func (s *Service) RunSample() error {
 			}
 		}
 		return fmt.Errorf("所有候选机器均不可达(%d 台);示例错误:%s", len(hosts), first)
+	}
+	// 广播最新快照给所有 SSE 订阅者。BuildSnapshot 失败只记日志,不阻断采样链路。
+	if snap, err := s.BuildSnapshot(); err == nil {
+		s.sse.Publish(snap)
+	} else {
+		logx.Warn("ups snapshot publish skipped", "err", err.Error())
 	}
 	logx.Info("ups sample done", "hosts", len(hosts), "reachable", reachableHosts, "samples", len(samples))
 	return nil

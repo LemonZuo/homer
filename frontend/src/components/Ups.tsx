@@ -839,13 +839,22 @@ export default function Ups() {
     load()
   }, [load])
 
+  // SSE 推送替代 30 秒轮询。订阅时后端立即发首帧,之后每轮采样完推一帧;
+  // EventSource 内置断线重连(默认 3s),所以这里不用自己写 retry。
   useEffect(() => {
     if (!autoRefresh) return
-    const t = setInterval(() => {
-      void load(true)
-    }, 30_000)
-    return () => clearInterval(t)
-  }, [autoRefresh, load])
+    const es = new EventSource('/api/ups/stream')
+    es.addEventListener('snapshot', (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data)
+        setSnapshots(normalize(data))
+        setLoading(false)
+      } catch {
+        // 忽略损坏的单帧,等下一帧
+      }
+    })
+    return () => es.close()
+  }, [autoRefresh])
 
   const cs = getColorSet('teal')
   const empty = !loading && snapshots.length === 0
