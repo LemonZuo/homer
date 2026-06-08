@@ -92,6 +92,7 @@ CREATE TABLE `acme_deploy_target` (
   `auth_json`   TEXT         NOT NULL                COMMENT 'driver 认证配置 JSON',
   `config_json` TEXT         NOT NULL                COMMENT 'driver 目标配置 JSON',
   `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `ups_monitor` VARCHAR(1)   NOT NULL DEFAULT '0'    COMMENT 'UPS 监控开关：仅对 kind IN (ssh,fnos) 生效，1/0',
   `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -242,7 +243,7 @@ CREATE TABLE `event_reminder` (
 --   email:   {"api_key","from","to"}（Resend）
 --   webhook: {"url"}
 -- 凭证当前以明文形式存库（P0 加密待办）。
--- module 取值：birthday | event | bypass | scheduler_alert，由代码常量约束。
+-- module 取值：birthday | event | bypass | scheduler_alert | ups，由代码常量约束。
 
 DROP TABLE IF EXISTS `notify_channel`;
 CREATE TABLE `notify_channel` (
@@ -260,7 +261,7 @@ CREATE TABLE `notify_channel` (
 DROP TABLE IF EXISTS `notify_binding`;
 CREATE TABLE `notify_binding` (
   `id`         BIGINT      NOT NULL AUTO_INCREMENT,
-  `module`     VARCHAR(32) NOT NULL                COMMENT 'birthday | event | bypass | scheduler_alert',
+  `module`     VARCHAR(32) NOT NULL                COMMENT 'birthday | event | bypass | scheduler_alert | ups',
   `channel_id` BIGINT      NOT NULL                COMMENT 'notify_channel.id',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_notify_bind` (`module`, `channel_id`)
@@ -285,3 +286,59 @@ CREATE TABLE `scheduler_job_state` (
   `updated_at`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='调度任务最近一次执行状态';
+
+
+-- ============================================================
+-- UPS 监控
+-- ============================================================
+-- 数据源：acme_deploy_target 里 kind IN ('ssh','fnos') 且 ups_monitor='1' 的机器，
+-- 通过 SSH 跑 `upsc` 拉 NUT 字段。落两张表：
+--   ups_sample —— 时间序列，按 UPS_RETENTION_DAYS 保留（默认 7d），定时清理
+--   ups_state  —— 每台 (host, ups) 的最新状态快照，告警状态机比对用
+-- 哨兵值：battery_percent / runtime_minutes / input_voltage / output_voltage /
+-- load_percent / real_power 缺数据时存 -1，前端区分「没值」与「为 0」。
+-- 告警走 notify.Hub 的 module='ups' 通道，状态转换才发（mains/battery/low_battery）。
+
+DROP TABLE IF EXISTS `ups_sample`;
+CREATE TABLE `ups_sample` (
+  `id`              BIGINT       NOT NULL AUTO_INCREMENT,
+  `host_kind`       VARCHAR(16)  NOT NULL                COMMENT 'ssh | fnos',
+  `host_id`         BIGINT       NOT NULL                COMMENT 'acme_deploy_target.id',
+  `host_name`       VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '冗余主机名，便于历史查询不依赖关联表',
+  `ups_name`        VARCHAR(64)  NOT NULL                COMMENT 'NUT upsname（同一台机器可能挂多台 UPS）',
+  `mfr`             VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '品牌',
+  `model`           VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '型号',
+  `power_source`    VARCHAR(16)  NOT NULL DEFAULT 'unknown' COMMENT 'mains | battery | low_battery | unknown',
+  `battery_percent` TINYINT      NOT NULL DEFAULT -1     COMMENT '剩余电量百分比；-1 表示无数据',
+  `runtime_minutes` INT          NOT NULL DEFAULT -1     COMMENT '预估续航分钟；-1 表示无数据',
+  `input_voltage`   DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '输入电压 V；-1 表示无数据',
+  `output_voltage`  DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '输出电压 V；-1 表示无数据',
+  `load_percent`    TINYINT      NOT NULL DEFAULT -1     COMMENT '负载百分比；-1 表示无数据',
+  `real_power`      SMALLINT     NOT NULL DEFAULT -1     COMMENT '实时功率 W（回退 ups.power）；-1 表示无数据',
+  `raw_status`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT 'NUT ups.status 原文（OL/OB/LB/CHRG ...）',
+  `sampled_at`      DATETIME(3)  NOT NULL                COMMENT '采样时刻',
+  PRIMARY KEY (`id`),
+  KEY `idx_host_ups_time` (`host_kind`, `host_id`, `ups_name`, `sampled_at` DESC),
+  KEY `idx_sampled_at` (`sampled_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 采样时间序列';
+
+DROP TABLE IF EXISTS `ups_state`;
+CREATE TABLE `ups_state` (
+  `host_kind`            VARCHAR(16)  NOT NULL                COMMENT 'ssh | fnos',
+  `host_id`              BIGINT       NOT NULL                COMMENT 'acme_deploy_target.id',
+  `ups_name`             VARCHAR(64)  NOT NULL                COMMENT 'NUT upsname',
+  `host_name`            VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '冗余主机名',
+  `mfr`                  VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '品牌',
+  `model`                VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '型号',
+  `last_power_source`    VARCHAR(16)  NOT NULL DEFAULT 'unknown' COMMENT '最近一次供电状态',
+  `last_battery_percent` TINYINT      NOT NULL DEFAULT -1     COMMENT '最近一次电量',
+  `last_runtime_minutes` INT          NOT NULL DEFAULT -1     COMMENT '最近一次续航分钟',
+  `last_input_voltage`   DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '最近一次输入电压',
+  `last_output_voltage`  DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '最近一次输出电压',
+  `last_load_percent`    TINYINT      NOT NULL DEFAULT -1     COMMENT '最近一次负载百分比',
+  `last_real_power`      SMALLINT     NOT NULL DEFAULT -1     COMMENT '最近一次实时功率 W',
+  `last_raw_status`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '最近一次 ups.status 原文',
+  `last_alert_at`        DATETIME(3)  DEFAULT NULL            COMMENT '最近一次告警时刻（去抖留痕）',
+  `updated_at`           DATETIME(3)  NOT NULL                COMMENT '本行最近一次写入时刻',
+  PRIMARY KEY (`host_kind`, `host_id`, `ups_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 最新状态快照（每台 host × UPS 一行）';
