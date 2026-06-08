@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   Server,
+  HardDrive,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -16,13 +17,12 @@ import { Card } from './ui/card'
 import { Button } from './ui/button'
 import { Switch } from './ui/switch'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './ui/dialog'
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from './ui/drawer'
 import { cn } from '../lib/utils'
 
 type PowerSource = 'mains' | 'battery' | 'low_battery' | 'unknown'
@@ -703,7 +703,37 @@ function HostBlock({ host }: { host: Snapshot }) {
   )
 }
 
-function SubscriptionsDialog({
+function SubscriptionItem({
+  candidate,
+  pending,
+  onToggle,
+}: {
+  candidate: Candidate
+  pending: boolean
+  onToggle: (enable: boolean) => void
+}) {
+  const Icon = candidate.kind === 'fnos' ? HardDrive : Server
+  return (
+    <Card className="px-3 py-2.5">
+      <div className="flex items-center gap-3">
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-mono text-[13px] font-medium">{candidate.name}</div>
+          <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
+            {candidate.endpoint}
+          </div>
+        </div>
+        <Switch
+          checked={candidate.ups_monitor}
+          onChange={onToggle}
+          disabled={pending}
+        />
+      </div>
+    </Card>
+  )
+}
+
+function SubscriptionsDrawer({
   open,
   onOpenChange,
   onChanged,
@@ -745,16 +775,19 @@ function SubscriptionsDialog({
     }
   }
 
+  const sshList = candidates.filter((c) => c.kind === 'ssh')
+  const fnosList = candidates.filter((c) => c.kind === 'fnos')
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg p-4 sm:p-6">
-        <DialogHeader>
-          <DialogTitle>UPS 监控机器订阅</DialogTitle>
-          <DialogDescription>
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>UPS 监控机器订阅</DrawerTitle>
+          <DrawerDescription>
             勾选哪些 SSH / 飞牛 OS 目标参与 UPS 状态采样。未勾选的机器不会被 SSH 拨号打扰。
-          </DialogDescription>
-        </DialogHeader>
-        <div className="-mx-1 max-h-[60dvh] space-y-1 overflow-y-auto px-1">
+          </DrawerDescription>
+        </DrawerHeader>
+        <div className="flex-1 space-y-5 overflow-auto px-4 pb-6">
           {loading && (
             <div className="flex items-center justify-center py-8 text-[12px] text-muted-foreground">
               <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
@@ -762,39 +795,55 @@ function SubscriptionsDialog({
             </div>
           )}
           {!loading && candidates.length === 0 && (
-            <div className="py-8 text-center text-[12px] text-muted-foreground">
+            <div className="py-8 text-center text-[12.5px] text-muted-foreground">
               尚未在 ACME 部署目标里添加任何 SSH / 飞牛 OS 机器。
             </div>
           )}
-          {candidates.map((c) => (
-            <div
-              key={c.id}
-              className="rounded-md border border-border/60 px-3 py-2 transition-colors hover:bg-muted/40"
-            >
+
+          {sshList.length > 0 && (
+            <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <span className="truncate text-[13px] font-medium">{c.name}</span>
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                    {HOST_KIND_LABEL[c.kind] ?? c.kind}
-                  </span>
+                <div>
+                  <div className="text-[13px] font-medium">SSH 机器</div>
+                  <div className="text-[11.5px] text-muted-foreground">{sshList.length} 台机器</div>
                 </div>
-                <Switch
-                  checked={c.ups_monitor}
-                  onChange={(v) => toggle(c, v)}
-                  disabled={pending === c.id}
-                />
               </div>
-              <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{c.endpoint}</div>
+              <div className="space-y-2">
+                {sshList.map((c) => (
+                  <SubscriptionItem
+                    key={c.id}
+                    candidate={c}
+                    pending={pending === c.id}
+                    onToggle={(v) => toggle(c, v)}
+                  />
+                ))}
+              </div>
             </div>
-          ))}
+          )}
+
+          {fnosList.length > 0 && (
+            <div className={cn('space-y-2', sshList.length > 0 && 'border-t border-border pt-5')}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[13px] font-medium">飞牛 OS</div>
+                  <div className="text-[11.5px] text-muted-foreground">{fnosList.length} 个实例</div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {fnosList.map((c) => (
+                  <SubscriptionItem
+                    key={c.id}
+                    candidate={c}
+                    pending={pending === c.id}
+                    onToggle={(v) => toggle(c, v)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-        <DialogFooter className="[&>button]:flex-1 sm:[&>button]:flex-none">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -956,7 +1005,7 @@ export default function Ups() {
         </div>
       )}
 
-      <SubscriptionsDialog open={subOpen} onOpenChange={setSubOpen} onChanged={load} />
+      <SubscriptionsDrawer open={subOpen} onOpenChange={setSubOpen} onChanged={load} />
     </div>
   )
 }
