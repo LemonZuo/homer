@@ -2,6 +2,7 @@
 .env
 bin/
 data/
+.backup/
 *.log
 
 # 前端

@@ -47,7 +47,7 @@ type Config struct {
 	// 任务连续失败达此次数才告警（防抖），默认 1（每次失败都告警）。
 	SchedulerAlertFailThreshold int
 
-	// UPS 监控。机器从 acme_deploy_target(kind in ssh/fnos 且 ups_monitor='1')取。
+	// UPS 监控。机器从 ups_host(enabled='1')取,凭证从 ups_ssh_credential 库选。
 	// SampleCron 6 段表达式;UPSSSHTimeoutSec 是单机采样的整体超时;
 	// RetentionDays 是 ups_sample 的保留天数,过期由 cleanup cron 清。
 	UPSSampleCron    string

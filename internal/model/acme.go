@@ -37,16 +37,13 @@ func (ACMEAccount) TableName() string { return "acme_account" }
 // ACMEDeployTarget 是证书部署目标的顶层抽象。
 // kind 决定 driver（ssh / safeline / ...），endpoint/auth_json/config_json 由 driver 解释。
 type ACMEDeployTarget struct {
-	ID         int64    `gorm:"primaryKey;column:id" json:"id"`
-	Name       string   `gorm:"column:name;size:64;uniqueIndex:uk_kind_name" json:"name"`
-	Kind       string   `gorm:"column:kind;size:32;uniqueIndex:uk_kind_name;index" json:"kind"`
-	Endpoint   string   `gorm:"column:endpoint;size:512" json:"endpoint"`
-	AuthJSON   string   `gorm:"column:auth_json;type:text" json:"auth_json"`
-	ConfigJSON string   `gorm:"column:config_json;type:text" json:"config_json"`
-	Enabled    BoolFlag `gorm:"column:enabled;type:varchar(1);default:'1';index" json:"enabled"`
-	// UPSMonitor 仅在 kind IN (ssh, fnos) 上有意义:UPS 监控模块会拉所有这两类
-	// 且 ups_monitor='1' 的目标,远端跑 upsc 采样。默认关,避免没接 UPS 的机器被无谓打扰。
-	UPSMonitor BoolFlag  `gorm:"column:ups_monitor;type:varchar(1);default:'0';index" json:"ups_monitor"`
+	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name       string    `gorm:"column:name;size:64;uniqueIndex:uk_kind_name" json:"name"`
+	Kind       string    `gorm:"column:kind;size:32;uniqueIndex:uk_kind_name;index" json:"kind"`
+	Endpoint   string    `gorm:"column:endpoint;size:512" json:"endpoint"`
+	AuthJSON   string    `gorm:"column:auth_json;type:text" json:"auth_json"`
+	ConfigJSON string    `gorm:"column:config_json;type:text" json:"config_json"`
+	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1';index" json:"enabled"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }

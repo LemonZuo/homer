@@ -8,22 +8,18 @@ import {
   ChevronDown,
   ChevronUp,
   Server,
-  HardDrive,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
 import { getColorSet } from '../colors'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
-import { Switch } from './ui/switch'
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-} from './ui/drawer'
 import { cn } from '../lib/utils'
+import { UpsHostsDrawer } from './ups/UpsHostsDrawer'
+import { UpsHostEditDialog } from './ups/UpsHostEditDialog'
+import { UpsCredentialsDrawer } from './ups/UpsCredentialsDrawer'
+import { UpsCredentialEditDialog } from './ups/UpsCredentialEditDialog'
+import type { UpsCredential, UpsHost } from './ups/types'
 
 type PowerSource = 'mains' | 'battery' | 'low_battery' | 'unknown'
 
@@ -53,14 +49,6 @@ interface Snapshot {
   reachable: boolean
   error?: string
   upses: SnapshotUPS[]
-}
-
-interface Candidate {
-  id: number
-  name: string
-  kind: string
-  endpoint: string
-  ups_monitor: boolean
 }
 
 interface SeriesPoint {
@@ -106,11 +94,6 @@ const POWER_META: Record<PowerSource, PowerMeta> = {
     pill: 'border-border bg-muted text-muted-foreground',
     pulse: false,
   },
-}
-
-const HOST_KIND_LABEL: Record<string, string> = {
-  ssh: 'SSH 机器',
-  fnos: '飞牛 OS',
 }
 
 const RANGE_OPTIONS = [
@@ -724,16 +707,12 @@ function SeriesChart({ points, loading }: { points: SeriesPoint[] | null; loadin
 }
 
 function HostBlock({ host }: { host: Snapshot }) {
-  const kindLabel = HOST_KIND_LABEL[host.host_kind] ?? host.host_kind
   const noUPS = host.upses.length === 0
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Server className="h-4 w-4 text-muted-foreground" />
         <span className="text-[14px] font-semibold tracking-tight">{host.host_name}</span>
-        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-          {kindLabel}
-        </span>
         <span className="text-[12px] text-muted-foreground">{host.endpoint}</span>
         {!host.reachable && noUPS && (
           <span className="ml-auto flex items-center gap-1 text-[12px] text-rose-500">
@@ -759,189 +738,18 @@ function HostBlock({ host }: { host: Snapshot }) {
   )
 }
 
-// 监听 media query。与 Layout.tsx 同款实现:Drawer 内部用来选 picker 列数档位。
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() =>
-    typeof window === 'undefined' ? false : window.matchMedia(query).matches,
-  )
-  useEffect(() => {
-    const media = window.matchMedia(query)
-    const onChange = () => setMatches(media.matches)
-    onChange()
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
-  }, [query])
-  return matches
-}
-
-// 订阅列表网格按 picker 同算法:grid-cols-6 + col-span,余数项把最后一行均分占满。
-// 1 列档不会触发 tail,SPAN_CLASS[6] 退化为整行。
-const SPAN_CLASS: Record<number, string> = {
-  2: 'col-span-2',
-  3: 'col-span-3',
-  6: 'col-span-6',
-}
-
-function SubscriptionItem({
-  candidate,
-  pending,
-  onToggle,
-}: {
-  candidate: Candidate
-  pending: boolean
-  onToggle: (enable: boolean) => void
-}) {
-  const Icon = candidate.kind === 'fnos' ? HardDrive : Server
-  return (
-    <Card className="px-3 py-2.5">
-      <div className="flex items-center gap-3">
-        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-mono text-[13px] font-medium">{candidate.name}</div>
-          <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
-            {candidate.endpoint}
-          </div>
-        </div>
-        <Switch
-          checked={candidate.ups_monitor}
-          onChange={onToggle}
-          disabled={pending}
-        />
-      </div>
-    </Card>
-  )
-}
-
-function SubscriptionsDrawer({
-  open,
-  onOpenChange,
-  onChanged,
-}: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  onChanged: () => void
-}) {
-  const [candidates, setCandidates] = useState<Candidate[]>([])
-  const [loading, setLoading] = useState(false)
-  const [pending, setPending] = useState<number | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const { data } = await api.get('/ups/candidates')
-      setCandidates(data?.data ?? [])
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (open) load()
-  }, [open, load])
-
-  const toggle = async (c: Candidate, enable: boolean) => {
-    setPending(c.id)
-    try {
-      await api.post(`/ups/candidates/${c.id}/toggle`, { enable })
-      setCandidates((prev) => prev.map((x) => (x.id === c.id ? { ...x, ups_monitor: enable } : x)))
-      onChanged()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error || e?.message || '切换失败')
-    } finally {
-      setPending(null)
-    }
-  }
-
-  const sshList = candidates.filter((c) => c.kind === 'ssh')
-  const fnosList = candidates.filter((c) => c.kind === 'fnos')
-
-  // 与 Layout 的 picker 一致:430px 起 2 列,1024px 起 3 列
-  const wide = useMediaQuery('(min-width: 430px)')
-  const desktop = useMediaQuery('(min-width: 1024px)')
-  const cols = desktop ? 3 : wide ? 2 : 1
-
-  const renderGroup = (list: Candidate[]) => {
-    const LCM = 6
-    const itemSpan = LCM / cols
-    const tail = list.length % cols
-    const tailSpan = tail > 0 ? LCM / tail : itemSpan
-    return (
-      <div className="grid grid-cols-6 gap-2">
-        {list.map((c, idx) => {
-          const isInTail = tail > 0 && idx >= list.length - tail
-          const span = isInTail ? tailSpan : itemSpan
-          return (
-            <div key={c.id} className={SPAN_CLASS[span] ?? 'col-span-6'}>
-              <SubscriptionItem
-                candidate={c}
-                pending={pending === c.id}
-                onToggle={(v) => toggle(c, v)}
-              />
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
-  return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent>
-        <DrawerHeader>
-          <DrawerTitle>UPS 监控机器订阅</DrawerTitle>
-          <DrawerDescription>
-            勾选哪些 SSH / 飞牛 OS 目标参与 UPS 状态采样。未勾选的机器不会被 SSH 拨号打扰。
-          </DrawerDescription>
-        </DrawerHeader>
-        <div className="flex-1 space-y-5 overflow-auto px-4 pb-6">
-          {loading && (
-            <div className="flex items-center justify-center py-8 text-[12px] text-muted-foreground">
-              <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-              加载中
-            </div>
-          )}
-          {!loading && candidates.length === 0 && (
-            <div className="py-8 text-center text-[12.5px] text-muted-foreground">
-              尚未在 ACME 部署目标里添加任何 SSH / 飞牛 OS 机器。
-            </div>
-          )}
-
-          {sshList.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[13px] font-medium">SSH 机器</div>
-                  <div className="text-[11.5px] text-muted-foreground">{sshList.length} 台机器</div>
-                </div>
-              </div>
-              {renderGroup(sshList)}
-            </div>
-          )}
-
-          {fnosList.length > 0 && (
-            <div className={cn('space-y-2', sshList.length > 0 && 'border-t border-border pt-5')}>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[13px] font-medium">飞牛 OS</div>
-                  <div className="text-[11.5px] text-muted-foreground">{fnosList.length} 个实例</div>
-                </div>
-              </div>
-              {renderGroup(fnosList)}
-            </div>
-          )}
-        </div>
-      </DrawerContent>
-    </Drawer>
-  )
-}
-
 export default function Ups() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [subOpen, setSubOpen] = useState(false)
+  const [hostsOpen, setHostsOpen] = useState(false)
+  const [hostEditOpen, setHostEditOpen] = useState(false)
+  const [editingHost, setEditingHost] = useState<UpsHost | null>(null)
+  const [credsOpen, setCredsOpen] = useState(false)
+  const [credEditOpen, setCredEditOpen] = useState(false)
+  const [editingCred, setEditingCred] = useState<UpsCredential | null>(null)
+  const [hosts, setHosts] = useState<UpsHost[]>([])
+  const [credentials, setCredentials] = useState<UpsCredential[]>([])
 
   const normalize = (arr: any[]): Snapshot[] =>
     (arr ?? []).map((s) => ({ ...s, upses: s?.upses ?? [] }))
@@ -957,6 +765,89 @@ export default function Ups() {
       setLoading(false)
     }
   }, [])
+
+  const loadHosts = useCallback(async () => {
+    try {
+      const { data } = await api.get('/ups/hosts')
+      setHosts(data?.data ?? [])
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '加载机器失败')
+    }
+  }, [])
+
+  const loadCredentials = useCallback(async () => {
+    try {
+      const { data } = await api.get('/ups/credentials')
+      setCredentials(data?.data ?? [])
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '加载凭证失败')
+    }
+  }, [])
+
+  const openHostsDrawer = useCallback(() => {
+    setHostsOpen(true)
+    loadHosts()
+    loadCredentials()
+  }, [loadHosts, loadCredentials])
+
+  const openCredsDrawer = useCallback(() => {
+    setCredsOpen(true)
+    loadCredentials()
+  }, [loadCredentials])
+
+  const onAddHost = () => {
+    setEditingHost(null)
+    setHostEditOpen(true)
+  }
+  const onEditHost = (h: UpsHost) => {
+    setEditingHost(h)
+    setHostEditOpen(true)
+  }
+  const onDeleteHost = async (h: UpsHost) => {
+    if (!window.confirm(`确认删除 UPS 机器「${h.name}」?`)) return
+    try {
+      await api.delete(`/ups/hosts/${h.id}`)
+      toast.success('已删除')
+      loadHosts()
+      load()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
+  const onTestHost = async (h: UpsHost) => {
+    try {
+      const { data } = await api.post(`/ups/hosts/${h.id}/test`)
+      const r = data?.data
+      if (r?.ok) {
+        const list = (r.UPSes ?? r.upses ?? []) as Array<{ name?: string }>
+        const names = list.map((u) => u?.name).filter(Boolean).join(', ')
+        toast.success(names ? `连通成功:${names}` : '连通成功,但未发现 UPS')
+      } else {
+        toast.error(r?.error || '连通失败')
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '测试失败')
+    }
+  }
+
+  const onAddCredential = () => {
+    setEditingCred(null)
+    setCredEditOpen(true)
+  }
+  const onEditCredential = (c: UpsCredential) => {
+    setEditingCred(c)
+    setCredEditOpen(true)
+  }
+  const onDeleteCredential = async (c: UpsCredential) => {
+    if (!window.confirm(`确认删除 UPS 凭证「${c.name}」?`)) return
+    try {
+      await api.delete(`/ups/credentials/${c.id}`)
+      toast.success('已删除')
+      loadCredentials()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || e?.message || '删除失败')
+    }
+  }
 
   const triggerSample = useCallback(async () => {
     setRefreshing(true)
@@ -1058,10 +949,10 @@ export default function Ups() {
             variant="outline"
             size="sm"
             className="flex-1 sm:flex-none"
-            onClick={() => setSubOpen(true)}
+            onClick={openHostsDrawer}
           >
             <Settings2 className="mr-1.5 h-3.5 w-3.5" />
-            机器订阅
+            UPS 机器
           </Button>
         </div>
       </div>
@@ -1076,15 +967,15 @@ export default function Ups() {
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <Plug className="h-5 w-5 text-muted-foreground" />
           </div>
-          <div className="text-[14px] font-medium">尚未订阅任何机器</div>
+          <div className="text-[14px] font-medium">还没有 UPS 机器</div>
           <p className="mx-auto max-w-md text-[12.5px] text-muted-foreground">
-            点右上"机器订阅"勾选要参与 UPS 采样的 SSH / 飞牛 OS 目标。机器需先在 ACME 部署目标中存在,
-            并在远端安装 NUT(<code className="rounded bg-muted px-1">nut-client</code>) +
+            点右上「UPS 机器」新增要采样的目标。机器需先在远端装好 NUT(
+            <code className="rounded bg-muted px-1">nut-client</code>) +
             <code className="ml-1 rounded bg-muted px-1">upsc</code>。
           </p>
-          <Button variant="outline" size="sm" onClick={() => setSubOpen(true)}>
+          <Button variant="outline" size="sm" onClick={openHostsDrawer}>
             <Settings2 className="mr-1.5 h-3.5 w-3.5" />
-            打开机器订阅
+            打开 UPS 机器
           </Button>
         </Card>
       ) : (
@@ -1095,7 +986,42 @@ export default function Ups() {
         </div>
       )}
 
-      <SubscriptionsDrawer open={subOpen} onOpenChange={setSubOpen} onChanged={load} />
+      <UpsHostsDrawer
+        open={hostsOpen}
+        onOpenChange={setHostsOpen}
+        hosts={hosts}
+        onAdd={onAddHost}
+        onEdit={onEditHost}
+        onDelete={onDeleteHost}
+        onTest={onTestHost}
+        onManageCredentials={openCredsDrawer}
+      />
+      <UpsHostEditDialog
+        open={hostEditOpen}
+        onOpenChange={setHostEditOpen}
+        target={editingHost}
+        hosts={hosts}
+        credentials={credentials}
+        onManageCredentials={openCredsDrawer}
+        onSaved={() => {
+          loadHosts()
+          load()
+        }}
+      />
+      <UpsCredentialsDrawer
+        open={credsOpen}
+        onOpenChange={setCredsOpen}
+        credentials={credentials}
+        onAdd={onAddCredential}
+        onEdit={onEditCredential}
+        onDelete={onDeleteCredential}
+      />
+      <UpsCredentialEditDialog
+        open={credEditOpen}
+        onOpenChange={setCredEditOpen}
+        target={editingCred}
+        onSaved={loadCredentials}
+      />
     </div>
   )
 }

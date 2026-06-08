@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/upsmon/sshhost"
 	"github.com/gin-gonic/gin"
 )
 
@@ -14,10 +16,12 @@ import (
 type Handler struct {
 	svc     *Service
 	sampler *Sampler
+	hosts   *HostStore
+	creds   *CredentialStore
 }
 
-func NewHandler(svc *Service, sampler *Sampler) *Handler {
-	return &Handler{svc: svc, sampler: sampler}
+func NewHandler(svc *Service, sampler *Sampler, hosts *HostStore, creds *CredentialStore) *Handler {
+	return &Handler{svc: svc, sampler: sampler, hosts: hosts, creds: creds}
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
@@ -26,8 +30,18 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	g.GET("/stream", h.stream)
 	g.GET("/series", h.series)
 	g.POST("/refresh", h.refresh)
-	g.GET("/candidates", h.candidates)
-	g.POST("/candidates/:id/toggle", h.toggle)
+
+	g.GET("/hosts", h.listHosts)
+	g.POST("/hosts", h.upsertHost)
+	g.PUT("/hosts/:id", h.upsertHost)
+	g.DELETE("/hosts/:id", h.deleteHost)
+	g.POST("/hosts/:id/toggle", h.toggleHost)
+	g.POST("/hosts/:id/test", h.testHost)
+
+	g.GET("/credentials", h.listCredentials)
+	g.POST("/credentials", h.upsertCredential)
+	g.PUT("/credentials/:id", h.upsertCredential)
+	g.DELETE("/credentials/:id", h.deleteCredential)
 }
 
 // stream SSE 推送 snapshot,替代前端 30 秒一次的 HTTP 轮询。
@@ -62,11 +76,9 @@ func (h *Handler) stream(c *gin.Context) {
 		return true
 	}
 
-	// 订阅放在首帧之前,避免"读 → 发首帧"期间错过一次广播
 	ch, unsub := h.svc.Subscribe()
 	defer unsub()
 
-	// 首帧:当前 snapshot(让前端不用等下一轮采样)
 	if snap, err := h.svc.BuildSnapshot(); err == nil {
 		if !send(snap) {
 			return
@@ -148,37 +160,91 @@ func (h *Handler) refresh(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": data})
 }
 
-// candidates 列出所有 ssh/fnos 目标(忽略 ups_monitor),供"订阅管理"页用。
-func (h *Handler) candidates(c *gin.Context) {
-	rows, err := h.sampler.ListCandidates()
+// hostDTO 列表返回形态:把 auth_json/config_json 展平,前端直接展示。
+type hostDTO struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Endpoint      string `json:"endpoint"`
+	AuthSource    string `json:"auth_source"`
+	CredentialID  int64  `json:"credential_id"`
+	Username      string `json:"username"`
+	AuthType      string `json:"auth_type"`
+	BastionHostID int64  `json:"bastion_host_id"`
+	Enabled       bool   `json:"enabled"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+func toHostDTO(row model.UPSHost) hostDTO {
+	t, _ := sshhost.ParseTarget(row)
+	dto := hostDTO{
+		ID:        row.ID,
+		Name:      row.Name,
+		Endpoint:  row.Endpoint,
+		Enabled:   bool(row.Enabled),
+		CreatedAt: row.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: row.UpdatedAt.Format(time.RFC3339),
+	}
+	if t != nil {
+		dto.AuthSource = t.AuthSource
+		dto.CredentialID = t.CredentialID
+		dto.Username = t.Username
+		dto.AuthType = t.AuthType
+		dto.BastionHostID = t.BastionHostID
+	}
+	return dto
+}
+
+func (h *Handler) listHosts(c *gin.Context) {
+	rows, err := h.hosts.List()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	type item struct {
-		ID         int64  `json:"id"`
-		Name       string `json:"name"`
-		Kind       string `json:"kind"`
-		Endpoint   string `json:"endpoint"`
-		UPSMonitor bool   `json:"ups_monitor"`
-	}
-	out := make([]item, 0, len(rows))
+	out := make([]hostDTO, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, item{
-			ID:         r.ID,
-			Name:       r.Name,
-			Kind:       r.Kind,
-			Endpoint:   r.Endpoint,
-			UPSMonitor: bool(r.UPSMonitor),
-		})
+		out = append(out, toHostDTO(r))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
-// toggle 切换某台机器的 ups_monitor 开关。Body: {"enable": true|false}。
-func (h *Handler) toggle(c *gin.Context) {
-	idStr := c.Param("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+func (h *Handler) upsertHost(c *gin.Context) {
+	var in HostInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体无效"})
+		return
+	}
+	if idStr := c.Param("id"); idStr != "" {
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "id 无效"})
+			return
+		}
+		in.ID = id
+	}
+	row, err := h.hosts.Upsert(in)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": toHostDTO(*row)})
+}
+
+func (h *Handler) deleteHost(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 无效"})
+		return
+	}
+	if err := h.hosts.Delete(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": id}})
+}
+
+func (h *Handler) toggleHost(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id 无效"})
 		return
@@ -190,11 +256,97 @@ func (h *Handler) toggle(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体无效"})
 		return
 	}
-	if err := h.sampler.SetMonitor(id, body.Enable); err != nil {
+	if err := h.hosts.SetEnabled(id, body.Enable); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": id, "ups_monitor": body.Enable}})
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": id, "enabled": body.Enable}})
+}
+
+// testHost 立即拨号一次,跑 upsc -l 探测,前端用于"测试连通性"按钮。
+func (h *Handler) testHost(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 无效"})
+		return
+	}
+	res, err := h.sampler.ProbeByHostID(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": res})
+}
+
+// credentialDTO 列表返回形态:不回吐密码 / 私钥明文,只暴露元数据。
+type credentialDTO struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Username  string `json:"username"`
+	AuthType  string `json:"auth_type"`
+	RefCount  int64  `json:"ref_count"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func toCredentialDTO(c model.UPSSSHCredential) credentialDTO {
+	return credentialDTO{
+		ID:        c.ID,
+		Name:      c.Name,
+		Username:  c.Username,
+		AuthType:  c.AuthType,
+		RefCount:  c.RefCount,
+		CreatedAt: c.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: c.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func (h *Handler) listCredentials(c *gin.Context) {
+	rows, err := h.creds.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	out := make([]credentialDTO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toCredentialDTO(r))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+func (h *Handler) upsertCredential(c *gin.Context) {
+	var in model.UPSSSHCredential
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体无效"})
+		return
+	}
+	if idStr := c.Param("id"); idStr != "" {
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "id 无效"})
+			return
+		}
+		in.ID = id
+	}
+	row, err := h.creds.Upsert(&in)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": toCredentialDTO(*row)})
+}
+
+func (h *Handler) deleteCredential(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 无效"})
+		return
+	}
+	if err := h.creds.Delete(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": id}})
 }
 
 // parseRange 把人类时间窗映射到 time.Duration。未知值回落 24h。

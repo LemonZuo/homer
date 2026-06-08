@@ -257,10 +257,10 @@ type SnapshotUPS struct {
 	SampledAt             time.Time `json:"sampled_at"`
 }
 
-// BuildSnapshot 不重新采样,基于 ups_state(最新)+ 候选机器表组装快照。
-// 离线机器走 ups_sample 最旧的 host_name 没法定位,所以直接读 acme_deploy_target 表。
+// BuildSnapshot 不重新采样,基于 ups_state(最新)+ ups_host 表组装快照。
+// 离线机器走 ups_sample 没法定位,直接读 ups_host 表保证 endpoint/name 总是有值。
 func (s *Service) BuildSnapshot() ([]Snapshot, error) {
-	targets, err := s.sampler.listTargets()
+	targets, err := s.sampler.hosts.ListEnabled()
 	if err != nil {
 		return nil, err
 	}
@@ -278,9 +278,9 @@ func (s *Service) BuildSnapshot() ([]Snapshot, error) {
 	}
 	out := make([]Snapshot, 0, len(targets))
 	for _, t := range targets {
-		k := hostKey(t.Kind, t.ID)
+		k := hostKey(model.UPSHostKind, t.ID)
 		sn := Snapshot{
-			HostKind: t.Kind,
+			HostKind: model.UPSHostKind,
 			HostID:   t.ID,
 			HostName: t.Name,
 			Endpoint: t.Endpoint,
@@ -361,4 +361,4 @@ func hostKey(hostKind string, hostID int64) string {
 }
 
 // ErrNoCandidates 表示没有候选机器(用于 handler 区分"没接 UPS"与"接了但全坏")。
-var ErrNoCandidates = errors.New("没有可监控的机器(需要在 ACME 部署目标里添加 ssh/fnos 主机)")
+var ErrNoCandidates = errors.New("没有可监控的机器(请在「UPS 机器」里添加要采样的主机)")

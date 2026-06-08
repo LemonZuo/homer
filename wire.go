@@ -54,6 +54,8 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 		&model.SSHCredential{},
 		&model.UPSSample{},
 		&model.UPSState{},
+		&model.UPSHost{},
+		&model.UPSSSHCredential{},
 	); err != nil {
 		return nil, nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -69,7 +71,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	cdnopsSvc := cdnops.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
 	certstoreSvc := certstore.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
 	acmeSvc := buildACMEService(gormDB, cfg)
-	upsSvc, upsSampler := buildUPSService(gormDB, cfg, hub)
+	upsSvc, upsSampler, upsHosts, upsCreds := buildUPSService(gormDB, cfg, hub)
 
 	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, upsSvc, hub)
 
@@ -80,7 +82,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	smsHandler := handler.NewSMSHandler(gormDB)
 	schedulerHandler := handler.NewSchedulerHandler(sched)
 	notifyHandler := handler.NewNotifyHandler(notifyStore)
-	upsHandler := upsmon.NewHandler(upsSvc, upsSampler)
+	upsHandler := upsmon.NewHandler(upsSvc, upsSampler, upsHosts, upsCreds)
 
 	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnopsHandler, certstoreHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, upsHandler, frontend)
 	r.GET("/healthz", handler.Health(gormDB, sched))
@@ -116,14 +118,16 @@ func buildACMEService(gormDB *gorm.DB, cfg *config.Config) *acme.Service {
 	)
 }
 
-// buildUPSService 组装 UPS 监控:复用 ACME 侧的 SSHCredentialStore(同一份凭证库),
-// sampler/store/service 各司其职,handler 持有 service+sampler 暴露快照与订阅管理。
-func buildUPSService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*upsmon.Service, *upsmon.Sampler) {
-	sshCreds := acme.NewSSHCredentialStore(gormDB)
-	sampler := upsmon.NewSampler(gormDB, sshCreds, time.Duration(cfg.UPSSSHTimeoutSec)*time.Second)
+// buildUPSService 组装 UPS 监控:用 UPS 自带的 HostStore / CredentialStore(完全独立的 ups_host /
+// ups_ssh_credential 表),与 ACME 解耦。sampler 通过 CredentialResolver 接口拿凭证,handler 持有
+// service+sampler+hosts+creds 暴露快照、订阅管理与 CRUD。
+func buildUPSService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*upsmon.Service, *upsmon.Sampler, *upsmon.HostStore, *upsmon.CredentialStore) {
+	hosts := upsmon.NewHostStore(gormDB)
+	creds := upsmon.NewCredentialStore(gormDB, hosts)
+	sampler := upsmon.NewSampler(gormDB, hosts, creds, time.Duration(cfg.UPSSSHTimeoutSec)*time.Second)
 	store := upsmon.NewStore(gormDB)
 	svc := upsmon.NewService(gormDB, sampler, store, hub, time.Duration(cfg.UPSRetentionDays)*24*time.Hour)
-	return svc, sampler
+	return svc, sampler, hosts, creds
 }
 
 // startScheduler 注册后台任务、挂上 jobmonitor（持久化 + 失败告警）并启动，

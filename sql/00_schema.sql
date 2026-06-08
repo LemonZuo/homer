@@ -92,7 +92,6 @@ CREATE TABLE `acme_deploy_target` (
   `auth_json`   TEXT         NOT NULL                COMMENT 'driver 认证配置 JSON',
   `config_json` TEXT         NOT NULL                COMMENT 'driver 目标配置 JSON',
   `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
-  `ups_monitor` VARCHAR(1)   NOT NULL DEFAULT '0'    COMMENT 'UPS 监控开关：仅对 kind IN (ssh,fnos) 生效，1/0',
   `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -291,19 +290,51 @@ CREATE TABLE `scheduler_job_state` (
 -- ============================================================
 -- UPS 监控
 -- ============================================================
--- 数据源：acme_deploy_target 里 kind IN ('ssh','fnos') 且 ups_monitor='1' 的机器，
--- 通过 SSH 跑 `upsc` 拉 NUT 字段。落两张表：
+-- 数据源：ups_host 表里 enabled='1' 的机器，通过 SSH 跑 `upsc` 拉 NUT 字段。
+-- SSH 凭证独立维护在 ups_ssh_credential，与 ACME 的 ssh_credential 完全隔离，
+-- 这样可以给 UPS 配只允许执行 upsc 的低权账号。
+-- 落两张表：
 --   ups_sample —— 时间序列，按 UPS_RETENTION_DAYS 保留（默认 7d），定时清理
 --   ups_state  —— 每台 (host, ups) 的最新状态快照，告警状态机比对用
 -- 哨兵值：battery_percent / runtime_minutes / input_voltage / output_voltage /
--- load_percent / real_power 缺数据时存 -1，前端区分「没值」与「为 0」。
+-- load_percent / real_power / battery_voltage / battery_nominal_voltage 缺数据时存 -1。
 -- 告警走 notify.Hub 的 module='ups' 通道，状态转换才发（mains/battery/low_battery）。
+
+DROP TABLE IF EXISTS `ups_ssh_credential`;
+CREATE TABLE `ups_ssh_credential` (
+  `id`          BIGINT       NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(64)  NOT NULL                COMMENT '凭证名称，前端下拉显示',
+  `username`    VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '登录用户名',
+  `auth_type`   VARCHAR(16)  NOT NULL DEFAULT 'password' COMMENT 'password | key',
+  `password`    TEXT         NULL                    COMMENT 'password 模式登录密码',
+  `private_key` TEXT         NULL                    COMMENT 'key 模式 OpenSSH 私钥',
+  `passphrase`  TEXT         NULL                    COMMENT 'key 模式私钥口令（可选）',
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 模块专用 SSH 凭证';
+
+DROP TABLE IF EXISTS `ups_host`;
+CREATE TABLE `ups_host` (
+  `id`          BIGINT       NOT NULL AUTO_INCREMENT,
+  `name`        VARCHAR(64)  NOT NULL                COMMENT '机器名称',
+  `endpoint`    VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'host:port（NUT upsd 所在机器 SSH 入口）',
+  `auth_json`   TEXT         NOT NULL                COMMENT 'JSON: {"auth_source":"inline|credential","credential_id":N,"username":...,"auth_type":"password|key","password":...,"private_key":...,"passphrase":...}',
+  `config_json` TEXT         NOT NULL                COMMENT 'JSON: {"bastion_host_id":N} 或空 {}',
+  `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_name` (`name`),
+  KEY `idx_enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 监控目标机器';
 
 DROP TABLE IF EXISTS `ups_sample`;
 CREATE TABLE `ups_sample` (
   `id`              BIGINT       NOT NULL AUTO_INCREMENT,
-  `host_kind`       VARCHAR(16)  NOT NULL                COMMENT 'ssh | fnos',
-  `host_id`         BIGINT       NOT NULL                COMMENT 'acme_deploy_target.id',
+  `host_kind`       VARCHAR(16)  NOT NULL                COMMENT '固定 ups（保留列名，便于将来扩展）',
+  `host_id`         BIGINT       NOT NULL                COMMENT 'ups_host.id',
   `host_name`       VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '冗余主机名，便于历史查询不依赖关联表',
   `ups_name`        VARCHAR(64)  NOT NULL                COMMENT 'NUT upsname（同一台机器可能挂多台 UPS）',
   `mfr`             VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '品牌',
@@ -327,8 +358,8 @@ CREATE TABLE `ups_sample` (
 
 DROP TABLE IF EXISTS `ups_state`;
 CREATE TABLE `ups_state` (
-  `host_kind`            VARCHAR(16)  NOT NULL                COMMENT 'ssh | fnos',
-  `host_id`              BIGINT       NOT NULL                COMMENT 'acme_deploy_target.id',
+  `host_kind`            VARCHAR(16)  NOT NULL                COMMENT '固定 ups（保留列名，便于将来扩展）',
+  `host_id`              BIGINT       NOT NULL                COMMENT 'ups_host.id',
   `ups_name`             VARCHAR(64)  NOT NULL                COMMENT 'NUT upsname',
   `host_name`            VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '冗余主机名',
   `mfr`                  VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '品牌',

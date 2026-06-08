@@ -6,18 +6,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LemonZuo/homer/internal/acme"
-	"github.com/LemonZuo/homer/internal/acme/deployer/sshlike"
 	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/upsmon/sshhost"
 	"gorm.io/gorm"
 )
 
-// 支持的机器 kind(对应 acme_deploy_target.kind)。fnos 和 ssh 共用 sshlike 解析。
-var supportedHostKinds = []string{acme.DeployKindSSH, acme.DeployKindFnOS}
-
-// HostResult 单台机器一轮采样的结果。
+// HostResult 单台机器一轮采样的结果。HostKind 恒为 model.UPSHostKind = "ups"。
 type HostResult struct {
 	HostKind string        `json:"host_kind"`
 	HostID   int64         `json:"host_id"`
@@ -30,26 +26,27 @@ type HostResult struct {
 	StartAt  time.Time     `json:"-"`
 }
 
-// Sampler 负责一轮"扫所有目标 → 并发 SSH → 跑 upsc → 聚合结果"。
+// Sampler 负责一轮"扫所有 ups_host → 并发 SSH → 跑 upsc → 聚合结果"。
 type Sampler struct {
 	db          *gorm.DB
-	credentials *acme.SSHCredentialStore
+	hosts       *HostStore
+	credentials sshhost.CredentialResolver
 	timeout     time.Duration
 }
 
-func NewSampler(db *gorm.DB, credentials *acme.SSHCredentialStore, sshTimeout time.Duration) *Sampler {
+func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshhost.CredentialResolver, sshTimeout time.Duration) *Sampler {
 	if sshTimeout <= 0 {
 		sshTimeout = 5 * time.Second
 	}
-	return &Sampler{db: db, credentials: credentials, timeout: sshTimeout}
+	return &Sampler{db: db, hosts: hosts, credentials: credentials, timeout: sshTimeout}
 }
 
-// Run 扫一轮所有候选机器并发采样,聚合返回。
-// 单机失败不影响其他;返回的 HostResult 顺序与 acme_deploy_target.id 升序一致。
+// Run 扫一轮所有启用的 ups_host 并发采样,聚合返回。
+// 单机失败不影响其他;返回的 HostResult 顺序与 ups_host.id 升序一致。
 func (s *Sampler) Run() ([]HostResult, error) {
-	targets, err := s.listTargets()
+	targets, err := s.hosts.ListEnabled()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("列出 UPS 主机失败:%w", err)
 	}
 	if len(targets) == 0 {
 		return nil, nil
@@ -59,84 +56,33 @@ func (s *Sampler) Run() ([]HostResult, error) {
 	var wg sync.WaitGroup
 	for i := range targets {
 		wg.Add(1)
-		go func(idx int, t model.ACMEDeployTarget) {
+		go func(idx int, h model.UPSHost) {
 			defer wg.Done()
-			results[idx] = s.probeOne(t)
+			results[idx] = s.probeOne(h)
 		}(i, targets[i])
 	}
 	wg.Wait()
 	return results, nil
 }
 
-// listTargets 读 acme_deploy_target,过滤 enabled=1 + kind in (ssh, fnos) + ups_monitor=1。
-// ups_monitor 是显式订阅开关,用户没勾选的机器不会被采样打扰。
-func (s *Sampler) listTargets() ([]model.ACMEDeployTarget, error) {
-	var rows []model.ACMEDeployTarget
-	err := s.db.
-		Where("kind IN ?", supportedHostKinds).
-		Where("enabled = ?", "1").
-		Where("ups_monitor = ?", "1").
-		Order("id").
-		Find(&rows).Error
-	if err != nil {
-		return nil, fmt.Errorf("列出主机失败:%w", err)
-	}
-	return rows, nil
-}
-
-// ListCandidates 给前端"机器订阅"区用:返回所有 ssh/fnos 目标(忽略 ups_monitor),
-// 用户在 UI 上挨个勾选哪些纳入采样。
-func (s *Sampler) ListCandidates() ([]model.ACMEDeployTarget, error) {
-	var rows []model.ACMEDeployTarget
-	err := s.db.
-		Where("kind IN ?", supportedHostKinds).
-		Where("enabled = ?", "1").
-		Order("id").
-		Find(&rows).Error
-	if err != nil {
-		return nil, fmt.Errorf("列出候选主机失败:%w", err)
-	}
-	return rows, nil
-}
-
-// SetMonitor 切换某个目标的 ups_monitor 开关。
-// hostKind 限制在 ssh/fnos —— 不让用户误改其他 driver 的目标。
-func (s *Sampler) SetMonitor(hostID int64, enable bool) error {
-	val := "0"
-	if enable {
-		val = "1"
-	}
-	res := s.db.Model(&model.ACMEDeployTarget{}).
-		Where("id = ? AND kind IN ?", hostID, supportedHostKinds).
-		Update("ups_monitor", val)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return fmt.Errorf("未找到 id=%d 的 ssh/fnos 目标", hostID)
-	}
-	return nil
-}
-
 // probeOne 单台机器一轮:连 SSH → 跑 upsc → 关闭。任何一步失败封装到 HostResult.Error。
-func (s *Sampler) probeOne(t model.ACMEDeployTarget) HostResult {
+func (s *Sampler) probeOne(h model.UPSHost) HostResult {
 	res := HostResult{
-		HostKind: t.Kind,
-		HostID:   t.ID,
-		HostName: t.Name,
-		Endpoint: t.Endpoint,
+		HostKind: model.UPSHostKind,
+		HostID:   h.ID,
+		HostName: h.Name,
+		Endpoint: h.Endpoint,
 		StartAt:  time.Now(),
 	}
 
-	target, err := sshlike.ParseTarget(t, sshlike.Labels{Auth: "UPS", Config: "UPS", Host: "UPS"})
+	target, err := sshhost.ParseTarget(h)
 	if err != nil {
 		res.Error = err.Error()
 		return res
 	}
-	conn, err := sshlike.ConnFor(target, sshlike.ConnOptions{
-		Credentials:        s.credentials,
-		DB:                 s.db,
-		RejectBastionChain: true,
+	conn, err := sshhost.ConnFor(target, sshhost.ConnOptions{
+		Credentials: s.credentials,
+		DB:          s.db,
 	})
 	if err != nil {
 		res.Error = err.Error()
@@ -166,11 +112,21 @@ func (s *Sampler) probeOne(t model.ACMEDeployTarget) HostResult {
 
 	if probeErr != nil {
 		res.Error = probeErr.Error()
-		logx.Debug("ups probe failed", "host", t.Name, "kind", t.Kind, "err", probeErr)
+		logx.Debug("ups probe failed", "host", h.Name, "err", probeErr)
 		return res
 	}
 	res.OK = true
 	res.HasUPS = len(readings) > 0
 	res.UPSes = readings
 	return res
+}
+
+// ProbeByHostID 给 handler 的 /ups/hosts/:id/test 用:按 id 拉一条立即探测。
+// 返回 HostResult 即可,前端展示 OK/Error + 探到的 UPS 名列表。
+func (s *Sampler) ProbeByHostID(id int64) (HostResult, error) {
+	h, err := s.hosts.Get(id)
+	if err != nil {
+		return HostResult{}, err
+	}
+	return s.probeOne(*h), nil
 }

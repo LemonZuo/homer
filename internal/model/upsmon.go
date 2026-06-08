@@ -2,6 +2,42 @@ package model
 
 import "time"
 
+// UPSHostKind 写入 ups_sample / ups_state 的 host_kind 列常量。
+// 现在恒为 "ups"——历史上曾用 "ssh"/"fnos" 区分,迁移到 ups_host 表后单一来源。
+const UPSHostKind = "ups"
+
+// UPSHost UPS 监控目标机器。自带 SSH 凭证维度,与 ACME 部署目标完全解耦。
+// auth_json/config_json 结构详见 sql 注释;driver 行为对齐 sshlike,但实现在 internal/upsmon/sshhost 子包。
+type UPSHost struct {
+	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name       string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
+	Endpoint   string    `gorm:"column:endpoint;size:512" json:"endpoint"`
+	AuthJSON   string    `gorm:"column:auth_json;type:text" json:"auth_json"`
+	ConfigJSON string    `gorm:"column:config_json;type:text" json:"config_json"`
+	Enabled    BoolFlag  `gorm:"column:enabled;type:varchar(1);default:'1';index" json:"enabled"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (UPSHost) TableName() string { return "ups_host" }
+
+// UPSSSHCredential UPS 模块专属 SSH 凭证。结构与 SSHCredential 一致,但物理上分表,
+// 这样 UPS 可以用一个只允许执行 upsc 的低权账号,跟 ACME 的强权 SSH 凭证隔离。
+type UPSSSHCredential struct {
+	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
+	Name       string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
+	Username   string    `gorm:"column:username;size:128" json:"username"`
+	AuthType   string    `gorm:"column:auth_type;size:16" json:"auth_type"`
+	Password   string    `gorm:"column:password;type:text" json:"password"`
+	PrivateKey string    `gorm:"column:private_key;type:text" json:"private_key"`
+	Passphrase string    `gorm:"column:passphrase;type:text" json:"passphrase"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	RefCount   int64     `gorm:"-" json:"ref_count"`
+}
+
+func (UPSSSHCredential) TableName() string { return "ups_ssh_credential" }
+
 // UPS 监控相关常量。供电类型枚举与 NUT 的 ups.status 映射:
 //   - mains       <- OL(on-line,市电)
 //   - battery     <- OB(on-battery)
