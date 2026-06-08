@@ -703,6 +703,29 @@ function HostBlock({ host }: { host: Snapshot }) {
   )
 }
 
+// 监听 media query。与 Layout.tsx 同款实现:Drawer 内部用来选 picker 列数档位。
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia(query).matches,
+  )
+  useEffect(() => {
+    const media = window.matchMedia(query)
+    const onChange = () => setMatches(media.matches)
+    onChange()
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [query])
+  return matches
+}
+
+// 订阅列表网格按 picker 同算法:grid-cols-6 + col-span,余数项把最后一行均分占满。
+// 1 列档不会触发 tail,SPAN_CLASS[6] 退化为整行。
+const SPAN_CLASS: Record<number, string> = {
+  2: 'col-span-2',
+  3: 'col-span-3',
+  6: 'col-span-6',
+}
+
 function SubscriptionItem({
   candidate,
   pending,
@@ -778,6 +801,35 @@ function SubscriptionsDrawer({
   const sshList = candidates.filter((c) => c.kind === 'ssh')
   const fnosList = candidates.filter((c) => c.kind === 'fnos')
 
+  // 与 Layout 的 picker 一致:430px 起 2 列,1024px 起 3 列
+  const wide = useMediaQuery('(min-width: 430px)')
+  const desktop = useMediaQuery('(min-width: 1024px)')
+  const cols = desktop ? 3 : wide ? 2 : 1
+
+  const renderGroup = (list: Candidate[]) => {
+    const LCM = 6
+    const itemSpan = LCM / cols
+    const tail = list.length % cols
+    const tailSpan = tail > 0 ? LCM / tail : itemSpan
+    return (
+      <div className="grid grid-cols-6 gap-2">
+        {list.map((c, idx) => {
+          const isInTail = tail > 0 && idx >= list.length - tail
+          const span = isInTail ? tailSpan : itemSpan
+          return (
+            <div key={c.id} className={SPAN_CLASS[span] ?? 'col-span-6'}>
+              <SubscriptionItem
+                candidate={c}
+                pending={pending === c.id}
+                onToggle={(v) => toggle(c, v)}
+              />
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent>
@@ -808,16 +860,7 @@ function SubscriptionsDrawer({
                   <div className="text-[11.5px] text-muted-foreground">{sshList.length} 台机器</div>
                 </div>
               </div>
-              <div className="space-y-2">
-                {sshList.map((c) => (
-                  <SubscriptionItem
-                    key={c.id}
-                    candidate={c}
-                    pending={pending === c.id}
-                    onToggle={(v) => toggle(c, v)}
-                  />
-                ))}
-              </div>
+              {renderGroup(sshList)}
             </div>
           )}
 
@@ -829,16 +872,7 @@ function SubscriptionsDrawer({
                   <div className="text-[11.5px] text-muted-foreground">{fnosList.length} 个实例</div>
                 </div>
               </div>
-              <div className="space-y-2">
-                {fnosList.map((c) => (
-                  <SubscriptionItem
-                    key={c.id}
-                    candidate={c}
-                    pending={pending === c.id}
-                    onToggle={(v) => toggle(c, v)}
-                  />
-                ))}
-              </div>
+              {renderGroup(fnosList)}
             </div>
           )}
         </div>
