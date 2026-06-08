@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ComponentType } from 'react'
 import {
+  Activity,
   Cake,
   CalendarClock,
   CheckCircle2,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Timer,
+  Trash2,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -44,6 +46,8 @@ const JOB_META: Record<string, { icon: ComponentType<{ className?: string }>; la
   event: { icon: CalendarClock, label: '事项提醒' },
   'acme-renew': { icon: ShieldCheck, label: 'ACME 续期' },
   'acme-deploy-retry': { icon: RefreshCw, label: '部署失败重试' },
+  'ups-sample': { icon: Activity, label: 'UPS 采样' },
+  'ups-cleanup': { icon: Trash2, label: 'UPS 采样清理' },
 }
 
 function fmtTime(v?: string): string {
