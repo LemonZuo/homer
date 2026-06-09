@@ -164,8 +164,16 @@ function fmtDateTime(s: string): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// 垂直电池:≤20% rose / ≤50% amber / 否则 emerald;飞牛风方形圆角 + 一条清晰白光
-function BatteryCell({ percent }: { percent: number }) {
+// 垂直电池:≤20% rose / ≤50% amber / 否则 emerald;飞牛风方形圆角 + 一条清晰白光。
+// 动效按 power_source 区分:mains 走上升扫描光(在线/充电感),battery/low_battery
+// 走整体呼吸 opacity(正在被消耗),unknown / 离线无动效。
+function BatteryCell({
+  percent,
+  powerSource = 'unknown',
+}: {
+  percent: number
+  powerSource?: PowerSource
+}) {
   const hasData = percent >= 0
   const safe = hasData ? Math.max(0, Math.min(100, percent)) : 0
   const tone = !hasData
@@ -185,6 +193,11 @@ function BatteryCell({ percent }: { percent: number }) {
   const uid = useId().replace(/:/g, '')
   const gradId = `bat-${uid}-g`
   const clipId = `bat-${uid}-c`
+
+  // 扫描光太短就别播了(液面 <8px 看不出来),呼吸节奏 mains 缓 / lb 急。
+  const showSpark = hasData && powerSource === 'mains' && fillH > 8
+  const showBlink = hasData && (powerSource === 'battery' || powerSource === 'low_battery')
+  const blinkDur = powerSource === 'low_battery' ? '1.1s' : '2s'
 
   return (
     <svg
@@ -208,7 +221,34 @@ function BatteryCell({ percent }: { percent: number }) {
 
       <g clipPath={`url(#${clipId})`}>
         {hasData && (
-          <rect x={0} y={fillTop} width={W} height={fillH} fill={`url(#${gradId})`} />
+          <rect x={0} y={fillTop} width={W} height={fillH} fill={`url(#${gradId})`}>
+            {showBlink && (
+              <animate
+                attributeName="opacity"
+                values="1;0.55;1"
+                dur={blinkDur}
+                repeatCount="indefinite"
+              />
+            )}
+          </rect>
+        )}
+        {showSpark && (
+          <rect x={0} width={W} height={3} fill="#ffffff" opacity={0}>
+            <animate
+              attributeName="y"
+              from={H}
+              to={fillTop - 3}
+              dur="2.6s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0;0.18;0.18;0"
+              keyTimes="0;0.15;0.85;1"
+              dur="2.6s"
+              repeatCount="indefinite"
+            />
+          </rect>
         )}
       </g>
 
@@ -317,7 +357,7 @@ function UPSCard({
         {/* 主体 */}
         <div className="mt-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <BatteryCell percent={ups.battery_percent} />
+            <BatteryCell percent={ups.battery_percent} powerSource={ups.power_source} />
             <div>
               {hasData ? (
                 <div className={cn('flex items-baseline gap-1 leading-none', meta.text)}>
