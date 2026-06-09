@@ -134,10 +134,13 @@ function fmtNum(v: number, fractionDigits = 0): string {
 
 // NUT battery.type 常见取值映射;未命中就回退展示原文。
 const BATTERY_TYPE_LABEL: Record<string, string> = {
+  pb: '铅酸',
   pbac: '铅酸',
   pbacid: '铅酸',
   lead: '铅酸',
   'lead-acid': '铅酸',
+  sla: '铅酸 (SLA)',
+  'sealed lead acid': '铅酸 (SLA)',
   vrla: '铅酸 (VRLA)',
   agm: '铅酸 (AGM)',
   gel: '铅酸 (Gel)',
