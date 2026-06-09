@@ -170,9 +170,11 @@ function fmtDateTime(s: string): string {
 function BatteryCell({
   percent,
   powerSource = 'unknown',
+  charging = false,
 }: {
   percent: number
   powerSource?: PowerSource
+  charging?: boolean
 }) {
   const hasData = percent >= 0
   const safe = hasData ? Math.max(0, Math.min(100, percent)) : 0
@@ -251,6 +253,26 @@ function BatteryCell({
           </rect>
         )}
       </g>
+
+      {/* 充电闪电:浮在液面之上,淡黄填 + 深色描边保证任意背景对比;opacity 缓脉动。*/}
+      {hasData && charging && (
+        <g transform="translate(8.2 13.2) scale(1.4)" opacity={0.9}>
+          <path
+            d="M13 2 L3 14 L12 14 L11 22 L21 10 L12 10 L13 2 Z"
+            fill="#fef08a"
+            stroke="#ca8a04"
+            strokeWidth={0.6}
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          <animate
+            attributeName="opacity"
+            values="0.5;1;0.5"
+            dur="2.4s"
+            repeatCount="indefinite"
+          />
+        </g>
+      )}
 
       {!hasData && (
         <text
@@ -357,7 +379,11 @@ function UPSCard({
         {/* 主体 */}
         <div className="mt-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <BatteryCell percent={ups.battery_percent} powerSource={ups.power_source} />
+            <BatteryCell
+              percent={ups.battery_percent}
+              powerSource={ups.power_source}
+              charging={/\bCHRG\b/.test((ups.raw_status ?? '').toUpperCase())}
+            />
             <div>
               {hasData ? (
                 <div className={cn('flex items-baseline gap-1 leading-none', meta.text)}>
