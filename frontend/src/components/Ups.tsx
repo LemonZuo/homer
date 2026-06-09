@@ -184,7 +184,7 @@ function BatteryCell({
       ? { top: '#f43f5e', bot: '#be123c' }
       : safe <= 50
         ? { top: '#f59e0b', bot: '#b45309' }
-        : { top: '#00B26F', bot: '#009E61' }
+        : { top: '#34d399', bot: '#10b981' }
 
   const W = 50
   const H = 60
@@ -196,8 +196,8 @@ function BatteryCell({
   const gradId = `bat-${uid}-g`
   const clipId = `bat-${uid}-c`
 
-  // 扫描光太短就别播了(液面 <8px 看不出来),呼吸节奏 mains 缓 / lb 急。
-  const showSpark = hasData && powerSource === 'mains' && fillH > 8
+  // mains 走极轻液面呼吸,battery / low_battery 走更明显的脉动,lb 节奏更急。
+  const showMainsBreath = hasData && powerSource === 'mains'
   const showBlink = hasData && (powerSource === 'battery' || powerSource === 'low_battery')
   const blinkDur = powerSource === 'low_battery' ? '1.1s' : '2s'
 
@@ -232,24 +232,16 @@ function BatteryCell({
                 repeatCount="indefinite"
               />
             )}
-          </rect>
-        )}
-        {showSpark && (
-          <rect x={0} width={W} height={3} fill="#ffffff" opacity={0}>
-            <animate
-              attributeName="y"
-              from={H}
-              to={fillTop - 3}
-              dur="2.6s"
-              repeatCount="indefinite"
-            />
-            <animate
-              attributeName="opacity"
-              values="0;0.18;0.18;0"
-              keyTimes="0;0.15;0.85;1"
-              dur="2.6s"
-              repeatCount="indefinite"
-            />
+            {showMainsBreath && (
+              <animate
+                attributeName="opacity"
+                values="1;0.72;1"
+                dur="5s"
+                calcMode="spline"
+                keySplines="0.4 0 0.6 1;0.4 0 0.6 1"
+                repeatCount="indefinite"
+              />
+            )}
           </rect>
         )}
       </g>
