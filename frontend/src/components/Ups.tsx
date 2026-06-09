@@ -1072,13 +1072,23 @@ function HostBlock({ host }: { host: Snapshot }) {
 }
 
 function DemoSection({ onClose }: { onClose: () => void }) {
+  const demoSnapshots: Snapshot[] = [
+    {
+      host_kind: 'demo',
+      host_id: -1,
+      host_name: '演示机器',
+      endpoint: 'demo:0',
+      reachable: true,
+      upses: DEMO_BATTERY_VARIANTS,
+    },
+  ]
   return (
     <div className="mt-10 rounded-2xl border border-dashed border-muted-foreground/30 bg-muted/20 p-4 sm:p-5">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="text-[14px] font-semibold">样式演示</div>
           <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-            非真实数据,仅展示不同电量 / 电源 / 充电状态下的电池图标效果。
+            非真实数据,仅展示聚合总览卡、不同电量 / 电源 / 充电状态下的电池图标效果。
           </div>
         </div>
         <Button variant="ghost" size="sm" onClick={onClose}>
@@ -1086,6 +1096,7 @@ function DemoSection({ onClose }: { onClose: () => void }) {
           退出演示
         </Button>
       </div>
+      <SummaryCard snapshots={demoSnapshots} />
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {DEMO_BATTERY_VARIANTS.map((u) => (
           <UPSCard key={u.name} ups={u} hostKind="demo" hostID={-1} />
