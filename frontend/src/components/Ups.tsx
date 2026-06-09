@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   Server,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -103,6 +104,164 @@ const RANGE_OPTIONS = [
   { value: '24h', label: '24 小时' },
   { value: '3d', label: '3 天' },
   { value: '7d', label: '7 天' },
+]
+
+// 隐藏式样式演示数据:主页标题左侧的状态点连点 5 次进入演示模式渲染。
+// 仅用于本地预览不同电量 / 电源 / 充电状态下的电池图标效果。
+const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
+  {
+    name: 'demo-75',
+    mfr: 'Demo',
+    model: '高电量(75)',
+    power_source: 'mains',
+    battery_percent: 75,
+    runtime_minutes: 42,
+    battery_voltage: 13.5,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 226,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OL',
+    sampled_at: new Date().toISOString(),
+  },
+  {
+    name: 'demo-35',
+    mfr: 'Demo',
+    model: '中电量(35)',
+    power_source: 'mains',
+    battery_percent: 35,
+    runtime_minutes: 14,
+    battery_voltage: 12.8,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 226,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OL',
+    sampled_at: new Date().toISOString(),
+  },
+  {
+    name: 'demo-12',
+    mfr: 'Demo',
+    model: '低电量(12)',
+    power_source: 'mains',
+    battery_percent: 12,
+    runtime_minutes: 4,
+    battery_voltage: 11.4,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 226,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OL',
+    sampled_at: new Date().toISOString(),
+  },
+  {
+    name: 'demo-chrg-60',
+    mfr: 'Demo',
+    model: '充电中(60)',
+    power_source: 'mains',
+    battery_percent: 60,
+    runtime_minutes: 28,
+    battery_voltage: 13.2,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 226,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OL CHRG',
+    sampled_at: new Date().toISOString(),
+  },
+  {
+    name: 'demo-chrg-35',
+    mfr: 'Demo',
+    model: '充电中(35)',
+    power_source: 'mains',
+    battery_percent: 35,
+    runtime_minutes: 14,
+    battery_voltage: 12.6,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 226,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OL CHRG',
+    sampled_at: new Date().toISOString(),
+  },
+  {
+    name: 'demo-chrg-12',
+    mfr: 'Demo',
+    model: '充电中(12)',
+    power_source: 'mains',
+    battery_percent: 12,
+    runtime_minutes: 4,
+    battery_voltage: 11.6,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 226,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OL CHRG',
+    sampled_at: new Date().toISOString(),
+  },
+  {
+    name: 'demo-bat-75',
+    mfr: 'Demo',
+    model: '电池供电(75)',
+    power_source: 'battery',
+    battery_percent: 75,
+    runtime_minutes: 38,
+    battery_voltage: 12.6,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 0,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OB DISCHRG',
+    sampled_at: new Date().toISOString(),
+  },
+  {
+    name: 'demo-bat-35',
+    mfr: 'Demo',
+    model: '电池供电(35)',
+    power_source: 'battery',
+    battery_percent: 35,
+    runtime_minutes: 12,
+    battery_voltage: 12.1,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 0,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OB DISCHRG',
+    sampled_at: new Date().toISOString(),
+  },
+  {
+    name: 'demo-bat-12',
+    mfr: 'Demo',
+    model: '电量过低(12)',
+    power_source: 'low_battery',
+    battery_percent: 12,
+    runtime_minutes: 3,
+    battery_voltage: 11.4,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 0,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OB LB DISCHRG',
+    sampled_at: new Date().toISOString(),
+  },
 ]
 
 type MetricKey = 'inputV' | 'load' | 'power'
@@ -902,6 +1061,30 @@ function HostBlock({ host }: { host: Snapshot }) {
   )
 }
 
+function DemoSection({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="mt-10 rounded-2xl border border-dashed border-muted-foreground/30 bg-muted/20 p-4 sm:p-5">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[14px] font-semibold">样式演示</div>
+          <div className="mt-0.5 text-[11.5px] text-muted-foreground">
+            非真实数据,仅展示不同电量 / 电源 / 充电状态下的电池图标效果。
+          </div>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          <X className="mr-1 h-3.5 w-3.5" />
+          退出演示
+        </Button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {DEMO_BATTERY_VARIANTS.map((u) => (
+          <UPSCard key={u.name} ups={u} hostKind="demo" hostID={-1} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Ups() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [loading, setLoading] = useState(true)
@@ -914,6 +1097,28 @@ export default function Ups() {
   const [editingCred, setEditingCred] = useState<UpsCredential | null>(null)
   const [hosts, setHosts] = useState<UpsHost[]>([])
   const [credentials, setCredentials] = useState<UpsCredential[]>([])
+  const [demoMode, setDemoMode] = useState(false)
+  const demoTapRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({
+    count: 0,
+    timer: null,
+  })
+  // 标题左侧状态点 5 秒内连点 5 次进入演示模式;再次进入只需关闭按钮退出。
+  const bumpDemoTap = useCallback(() => {
+    if (demoMode) return
+    const s = demoTapRef.current
+    s.count += 1
+    if (s.timer) clearTimeout(s.timer)
+    s.timer = setTimeout(() => {
+      s.count = 0
+      s.timer = null
+    }, 5000)
+    if (s.count >= 5) {
+      s.count = 0
+      if (s.timer) clearTimeout(s.timer)
+      s.timer = null
+      setDemoMode(true)
+    }
+  }, [demoMode])
 
   const normalize = (arr: any[]): Snapshot[] =>
     (arr ?? []).map((s) => ({ ...s, upses: s?.upses ?? [] }))
@@ -1083,7 +1288,11 @@ export default function Ups() {
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="hidden sm:block">
           <div className="flex items-center gap-3">
-            <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
+            <span
+              className={cn('h-2 w-2 cursor-pointer rounded-full', cs.dot)}
+              onClick={bumpDemoTap}
+              aria-hidden
+            />
             <h1 className="text-[28px] font-bold leading-none tracking-tight">UPS 状态</h1>
           </div>
           <p className="mt-2 text-[12.5px] text-muted-foreground">
@@ -1154,6 +1363,8 @@ export default function Ups() {
           ))}
         </div>
       )}
+
+      {demoMode && <DemoSection onClose={() => setDemoMode(false)} />}
 
       <UpsHostsDrawer
         open={hostsOpen}
