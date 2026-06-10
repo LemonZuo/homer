@@ -192,7 +192,7 @@ const LINE_COLORS = [
 
 // --- 小工具 ---
 
-const STALE_THRESHOLD_MS = 60_000
+const STALE_THRESHOLD_MS = 10 * 60_000
 
 function useNowTick(intervalMs = 10_000): number {
   const [now, setNow] = useState(() => Date.now())
