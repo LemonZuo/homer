@@ -9,7 +9,8 @@
 - 证书管理（ACME 自动续期、部署到 SSH / SafeLine / 阿里云 CAS / 飞牛 fnOS、失败重试；阿里云 CAS 证书归档、CDN 加速域名只读查看）
 - 生日 / 纪念日提醒
 - SmsForwarder 短信转发、12306Bypass webhook 中转
-- UPS 状态监控（SSH 拉取 NUT `upsc`，状态机告警 + SSE 推送 + 历史曲线）
+- UPS 状态监控（SSH 拉取 NUT `upsc`，状态机告警 + SSE 推送 + 历史曲线；机器/凭证独立于 ACME）
+- ESXi 监控（SSH 跑 esxcli/vsish/vim-cmd 采集硬件/温度/磁盘 SMART/容量用量/MCE/USB/VM；阈值告警走"新增超阈值"语义不重复推送）
 - 其他偶尔会扩进来的自用小功能
 
 ## 技术栈
@@ -41,7 +42,8 @@ homer/
 │   ├── model/       # 业务模型（按模块拆分文件即可）
 │   ├── notify/、sms/
 │   ├── router/、scheduler/
-│   ├── upsmon/    # UPS:sampler(SSH+upsc)+ store + service(状态机/SSE)+ handler
+│   ├── upsmon/    # UPS：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
+│   ├── esximon/   # ESXi：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + handler
 │   └── web/
 ├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程）
 └── frontend/

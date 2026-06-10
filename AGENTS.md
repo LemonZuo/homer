@@ -11,7 +11,8 @@
 - 证书管理：ACME 自动续期、部署到 SSH / SafeLine / 阿里云 CAS / 飞牛 fnOS、失败重试；阿里云 CAS 证书归档；CDN 加速域名只读查看
 - 生日 / 纪念日提醒
 - SmsForwarder 短信转发、12306Bypass webhook 中转
-- UPS 状态监控：通过 SSH 调用 NUT(`upsc`)采样，市电/电池/低电状态转换告警，SSE 实时推送，历史曲线
+- UPS 状态监控：SSH 调用 NUT(`upsc`)采样，市电/电池/低电状态转换告警，SSE 实时推送，历史曲线；机器与凭证表独立于 ACME
+- ESXi 状态监控：SSH 跑 esxcli/vsish/vim-cmd 采平台/CPU/内存/温度/磁盘 SMART 与容量用量/MCE/USB/VM；阈值告警仅在新增超阈值时推送
 - 其他自用小功能
 
 ## Tech Stack
@@ -44,6 +45,7 @@ homer/
 │   ├── notify/、sms/
 │   ├── router/、scheduler/
 │   ├── upsmon/
+│   ├── esximon/
 │   └── web/
 ├── sql/
 └── frontend/
