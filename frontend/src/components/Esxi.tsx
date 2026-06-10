@@ -390,7 +390,7 @@ function CPUTempCard({ t }: { t: CPUTemperature }) {
       {cores.length === 0 ? (
         <p className="py-2 text-center text-[11.5px] text-muted-foreground">未拿到 CPU 温度(vsish MSR 不可读)</p>
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-2.5">
           {cores.map((c) => {
             const tone = tempTone(c.temp_c, c.headroom_c)
             const pct = Math.max(0, Math.min(100, (c.temp_c / tjmax) * 100))
@@ -480,7 +480,7 @@ function DisksCard({ disks }: { disks: DiskTemperature[] }) {
       {disks.length === 0 ? (
         <p className="py-2 text-center text-[11.5px] text-muted-foreground">未拿到 SMART 数据</p>
       ) : (
-        <div className="space-y-1.5">
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
           {disks.map((d) => {
             const p = diskStatusPill(d.status)
             return (
@@ -498,9 +498,6 @@ function DisksCard({ disks }: { disks: DiskTemperature[] }) {
                         {d.type}
                       </span>
                     )}
-                  </div>
-                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground" title={d.device}>
-                    {d.device}
                   </div>
                 </div>
                 <span className="shrink-0 text-[13px] font-semibold tabular-nums text-foreground">
