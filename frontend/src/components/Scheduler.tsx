@@ -48,6 +48,8 @@ const JOB_META: Record<string, { icon: ComponentType<{ className?: string }>; la
   'acme-deploy-retry': { icon: RefreshCw, label: '部署失败重试' },
   'ups-sample': { icon: Activity, label: 'UPS 采样' },
   'ups-cleanup': { icon: Trash2, label: 'UPS 采样清理' },
+  'esxi-sample': { icon: Activity, label: 'ESXi 采样' },
+  'esxi-cleanup': { icon: Trash2, label: 'ESXi 采样清理' },
 }
 
 function fmtTime(v?: string): string {
