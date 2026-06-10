@@ -70,7 +70,7 @@ export function SSHTargetEditDialog({
     setPrivateKey(target?.private_key ?? '')
     setPassphrase(target?.passphrase ?? '')
     setEnabled(target?.enabled ?? true)
-    setBastionID(target?.bastion_target_id ?? 0)
+    setBastionID(target?.bastion_id ?? 0)
   }, [open, target])
 
   const bastionCandidates = [
@@ -80,12 +80,12 @@ export function SSHTargetEditDialog({
 
   // 单跳：候选必须是 启用 + 不是自己 + 自身不再依赖跳板（避免链）
   const bastionOptions = bastionCandidates
-    .filter((t) => t.enabled && t.id !== (target?.id ?? 0) && !(t.bastion_target_id && t.bastion_target_id > 0))
+    .filter((t) => t.enabled && t.id !== (target?.id ?? 0) && !(t.bastion_id && t.bastion_id > 0))
     .map((t) => ({ value: t.id, label: `${t.kind_label} · ${t.name} · ${t.host}:${t.port || 22}` }))
 
   // 当前机器已被别人当跳板？若是，则本机不能再设置自己的跳板，否则链就破了
   const upstreamRef = target?.id
-    ? bastionCandidates.find((t) => t.bastion_target_id === target.id)
+    ? bastionCandidates.find((t) => t.bastion_id === target.id)
     : undefined
   const bastionLocked = !!upstreamRef
 
@@ -105,7 +105,7 @@ export function SSHTargetEditDialog({
       private_key: credential ? '' : privateKey.trim(),
       passphrase: credential ? '' : passphrase.trim(),
       enabled,
-      bastion_target_id: !bastionLocked && bastionID > 0 ? bastionID : 0,
+      bastion_id: !bastionLocked && bastionID > 0 ? bastionID : 0,
       created_at: target?.created_at ?? '',
       updated_at: target?.updated_at ?? '',
     }

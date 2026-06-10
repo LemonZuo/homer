@@ -81,11 +81,11 @@ export function UpsHostsDrawer({
                             ? `凭证@${t.endpoint} · 登录凭证`
                             : `${t.username || '未配置用户'}@${t.endpoint} · ${authLabel(t.auth_type)}`}
                         </span>
-                        {t.bastion_host_id > 0 && (() => {
-                          const b = hosts.find((x) => x.id === t.bastion_host_id)
+                        {t.bastion_id > 0 && (() => {
+                          const b = hosts.find((x) => x.id === t.bastion_id)
                           return (
                             <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-                              经 {b ? b.name : `#${t.bastion_host_id}`}
+                              经 {b ? b.name : `#${t.bastion_id}`}
                             </span>
                           )
                         })()}

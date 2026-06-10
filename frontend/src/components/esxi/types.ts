@@ -7,7 +7,7 @@ export interface EsxiHost {
   credential_id: number
   username: string
   auth_type: 'password' | 'key'
-  bastion_host_id: number
+  bastion_id: number
   enabled: boolean
   created_at: string
   updated_at: string
@@ -35,7 +35,7 @@ export interface EsxiHostInput {
   password: string
   private_key: string
   passphrase: string
-  bastion_host_id: number
+  bastion_id: number
   enabled?: boolean
 }
 

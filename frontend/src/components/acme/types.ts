@@ -76,7 +76,7 @@ export interface SSHTarget {
   private_key: string
   passphrase: string
   enabled: boolean
-  bastion_target_id?: number
+  bastion_id?: number
   created_at?: string
   updated_at?: string
 }
@@ -170,7 +170,7 @@ export interface FnOSTarget {
   private_key: string
   passphrase: string
   enabled: boolean
-  bastion_target_id?: number
+  bastion_id?: number
   created_at: string
   updated_at: string
 }

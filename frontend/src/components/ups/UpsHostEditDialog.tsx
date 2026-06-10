@@ -88,16 +88,16 @@ export function UpsHostEditDialog({
     setPrivateKey('')
     setPassphrase('')
     setEnabled(target?.enabled ?? true)
-    setBastionID(target?.bastion_host_id ?? 0)
+    setBastionID(target?.bastion_id ?? 0)
   }, [open, target])
 
   // 单跳:候选必须是启用 + 不是自己 + 自身不再依赖跳板(避免链)
   const bastionOptions = hosts
-    .filter((t) => t.enabled && t.id !== (target?.id ?? 0) && !(t.bastion_host_id && t.bastion_host_id > 0))
+    .filter((t) => t.enabled && t.id !== (target?.id ?? 0) && !(t.bastion_id && t.bastion_id > 0))
     .map((t) => ({ value: t.id, label: `${t.name} · ${t.endpoint}` }))
 
   // 当前机器已被别人当跳板?若是,本机不能再设置自己的跳板
-  const upstreamRef = target?.id ? hosts.find((t) => t.bastion_host_id === target.id) : undefined
+  const upstreamRef = target?.id ? hosts.find((t) => t.bastion_id === target.id) : undefined
   const bastionLocked = !!upstreamRef
 
   const save = async () => {
@@ -148,7 +148,7 @@ export function UpsHostEditDialog({
       password: isCredential ? '' : password.trim(),
       private_key: isCredential ? '' : privateKey.trim(),
       passphrase: isCredential ? '' : passphrase.trim(),
-      bastion_host_id: !bastionLocked && bastionID > 0 ? bastionID : 0,
+      bastion_id: !bastionLocked && bastionID > 0 ? bastionID : 0,
       enabled,
     }
 

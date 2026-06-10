@@ -31,7 +31,7 @@ export function deployTargetToSSH(t: DeployTarget): SSHTarget {
     private_key: String(auth.private_key ?? ''),
     passphrase: String(auth.passphrase ?? ''),
     enabled: t.enabled,
-    bastion_target_id: Number(cfg.bastion_target_id ?? 0) || 0,
+    bastion_id: Number(cfg.bastion_id ?? 0) || 0,
     created_at: t.created_at ?? '',
     updated_at: t.updated_at ?? '',
   }
@@ -82,7 +82,7 @@ export function deployTargetToFnOS(t: DeployTarget): FnOSTarget {
     private_key: String(auth.private_key ?? ''),
     passphrase: String(auth.passphrase ?? ''),
     enabled: t.enabled,
-    bastion_target_id: Number(cfg.bastion_target_id ?? 0) || 0,
+    bastion_id: Number(cfg.bastion_id ?? 0) || 0,
     created_at: t.created_at ?? '',
     updated_at: t.updated_at ?? '',
   }
@@ -109,8 +109,8 @@ export function sshTargetToDeployTarget(t: SSHTarget): DeployTarget {
         private_key: t.private_key,
         passphrase: t.passphrase,
       }
-  const cfg = t.bastion_target_id && t.bastion_target_id > 0
-    ? { bastion_target_id: t.bastion_target_id }
+  const cfg = t.bastion_id && t.bastion_id > 0
+    ? { bastion_id: t.bastion_id }
     : {}
   return {
     id: t.id,
@@ -162,8 +162,8 @@ export function fnosTargetToDeployTarget(t: FnOSTarget): DeployTarget {
         private_key: t.private_key,
         passphrase: t.passphrase,
       }
-  const cfg = t.bastion_target_id && t.bastion_target_id > 0
-    ? { bastion_target_id: t.bastion_target_id }
+  const cfg = t.bastion_id && t.bastion_id > 0
+    ? { bastion_id: t.bastion_id }
     : {}
   return {
     id: t.id,
