@@ -291,6 +291,35 @@ function fmtNum(v: number, fractionDigits = 0): string {
   return v.toFixed(fractionDigits)
 }
 
+// 超过 60s 没拿到新一帧采样即视为离线(SSE 推送 + 后端调度通常每轮 < 30s)
+const STALE_THRESHOLD_MS = 60_000
+
+function useNowTick(intervalMs = 10_000): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return now
+}
+
+function isStaleSample(sampledAt: string, now: number): boolean {
+  if (!sampledAt) return true
+  const t = new Date(sampledAt).getTime()
+  if (!isFinite(t)) return true
+  return now - t > STALE_THRESHOLD_MS
+}
+
+function fmtStaleAge(ms: number): string {
+  if (ms < 0) return ''
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m`
+  const h = Math.floor(min / 60)
+  return `${h}h ${min % 60}m`
+}
+
 function extractErr(e: unknown, fallback: string): string {
   if (e && typeof e === 'object') {
     const obj = e as { response?: { data?: { error?: string } }; message?: string }
@@ -467,6 +496,10 @@ function UPSCard({
   const meta = POWER_META[ups.power_source] ?? POWER_META.unknown
   const hasData = ups.battery_percent >= 0
   const cs = getColorSet('teal')
+  const now = useNowTick()
+  const sampledAtMs = ups.sampled_at ? new Date(ups.sampled_at).getTime() : 0
+  const isStale = isStaleSample(ups.sampled_at, now)
+  const staleAge = isStale && sampledAtMs > 0 ? fmtStaleAge(now - sampledAtMs) : ''
 
   const loadSeries = useCallback(
     async (r: string) => {
@@ -498,7 +531,12 @@ function UPSCard({
   }, [expanded, range, loadSeries])
 
   return (
-    <Card className={cn('group transition-[transform,box-shadow,border-color] duration-500 ease-out hover:-translate-y-0.5', cs.border, cs.halo)}>
+    <Card className={cn(
+      'group transition-[transform,box-shadow,border-color,opacity,filter] duration-500 ease-out hover:-translate-y-0.5',
+      cs.border,
+      cs.halo,
+      isStale && 'opacity-60 saturate-50',
+    )}>
       <div className="p-5">
         {/* 顶部 */}
         <div className="flex items-start justify-between gap-3">
@@ -518,23 +556,35 @@ function UPSCard({
               {ups.model || '(无型号)'}
             </div>
           </div>
-          <span
-            className={cn(
-              'shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium',
-              meta.pill,
-            )}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <span
-                className={cn(
-                  'h-1.5 w-1.5 rounded-full',
-                  meta.dot,
-                  meta.pulse && 'animate-pulse',
-                )}
-              />
-              {meta.label}
+          {isStale ? (
+            <span
+              className="shrink-0 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+              title={ups.sampled_at ? `最近采样 ${ups.sampled_at}` : '未拿到任何采样'}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+                已离线{staleAge && ` · ${staleAge}`}
+              </span>
             </span>
-          </span>
+          ) : (
+            <span
+              className={cn(
+                'shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                meta.pill,
+              )}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    'h-1.5 w-1.5 rounded-full',
+                    meta.dot,
+                    meta.pulse && 'animate-pulse',
+                  )}
+                />
+                {meta.label}
+              </span>
+            </span>
+          )}
         </div>
 
         {/* 主体 */}
@@ -1072,6 +1122,31 @@ function HostBlock({ host }: { host: Snapshot }) {
 }
 
 function DemoSection({ onClose }: { onClose: () => void }) {
+  // 演示卡刷新采样时间为"进入演示模式那一刻",避免页面闲置时被误判离线;
+  // 单独追加一张 5 分钟前的"离线"演示卡,直观展示离线样式。
+  // 用 useState 懒初始化把 Date.now() 关在 React 的初始化窗口里,避免触发 react-hooks/purity 规则。
+  const [demoUpses] = useState<SnapshotUPS[]>(() => {
+    const nowIso = new Date().toISOString()
+    const fresh = DEMO_BATTERY_VARIANTS.map((u) => ({ ...u, sampled_at: nowIso }))
+    const offline: SnapshotUPS = {
+      name: 'demo-offline',
+      mfr: 'Demo',
+      model: '离线(5 分钟未上报)',
+      power_source: 'unknown',
+      battery_percent: 60,
+      runtime_minutes: 22,
+      battery_voltage: 13.4,
+      battery_nominal_voltage: 12,
+      battery_type: 'pbac',
+      input_voltage: 225,
+      output_voltage: 226,
+      load_percent: 18,
+      real_power: 100,
+      raw_status: 'OL',
+      sampled_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    }
+    return [...fresh, offline]
+  })
   const demoSnapshots: Snapshot[] = [
     {
       host_kind: 'demo',
@@ -1079,7 +1154,7 @@ function DemoSection({ onClose }: { onClose: () => void }) {
       host_name: '演示机器',
       endpoint: 'demo:0',
       reachable: true,
-      upses: DEMO_BATTERY_VARIANTS,
+      upses: demoUpses,
     },
   ]
   return (
@@ -1088,7 +1163,7 @@ function DemoSection({ onClose }: { onClose: () => void }) {
         <div>
           <div className="text-[14px] font-semibold">样式演示</div>
           <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-            非真实数据,仅展示聚合总览卡、不同电量 / 电源 / 充电状态下的电池图标效果。
+            非真实数据,仅展示聚合总览卡、不同电量 / 电源 / 充电状态、以及超过 1 分钟未上报的离线样式。
           </div>
         </div>
         <Button variant="ghost" size="sm" onClick={onClose}>
@@ -1098,7 +1173,7 @@ function DemoSection({ onClose }: { onClose: () => void }) {
       </div>
       <SummaryCard snapshots={demoSnapshots} />
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {DEMO_BATTERY_VARIANTS.map((u) => (
+        {demoUpses.map((u) => (
           <UPSCard key={u.name} ups={u} hostKind="demo" hostID={-1} />
         ))}
       </div>
@@ -1107,15 +1182,21 @@ function DemoSection({ onClose }: { onClose: () => void }) {
 }
 
 function SummaryCard({ snapshots }: { snapshots: Snapshot[] }) {
+  const now = useNowTick()
   const agg = useMemo(() => {
     let mainsCount = 0
     let batteryCount = 0
     let lowCount = 0
+    let offlineCount = 0
     let totalPower = 0
     let maxLoad = -1
     let minRuntime = -1
     for (const s of snapshots) {
       for (const u of s.upses) {
+        if (isStaleSample(u.sampled_at, now)) {
+          offlineCount++
+          continue
+        }
         if (u.power_source === 'mains') mainsCount++
         else if (u.power_source === 'battery') batteryCount++
         else if (u.power_source === 'low_battery') lowCount++
@@ -1126,8 +1207,8 @@ function SummaryCard({ snapshots }: { snapshots: Snapshot[] }) {
         }
       }
     }
-    return { mainsCount, batteryCount, lowCount, totalPower, maxLoad, minRuntime }
-  }, [snapshots])
+    return { mainsCount, batteryCount, lowCount, offlineCount, totalPower, maxLoad, minRuntime }
+  }, [snapshots, now])
 
   const alerts = agg.batteryCount + agg.lowCount
 
@@ -1157,6 +1238,15 @@ function SummaryCard({ snapshots }: { snapshots: Snapshot[] }) {
                 {alerts}
               </span>
               <span className="text-[12px] text-muted-foreground">告警</span>
+            </>
+          )}
+          {agg.offlineCount > 0 && (
+            <>
+              <span className="text-[12px] text-muted-foreground/60">/</span>
+              <span className="text-[18px] font-semibold leading-none tabular-nums text-muted-foreground">
+                {agg.offlineCount}
+              </span>
+              <span className="text-[12px] text-muted-foreground">离线</span>
             </>
           )}
         </div>
