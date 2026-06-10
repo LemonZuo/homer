@@ -262,6 +262,24 @@ const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     raw_status: 'OB LB DISCHRG',
     sampled_at: new Date().toISOString(),
   },
+  {
+    // demo-offline:DemoSection 里会把 sampled_at 改写为 now - 5min,触发离线样式
+    name: 'demo-offline',
+    mfr: 'Demo',
+    model: '离线(5 分钟未上报)',
+    power_source: 'unknown',
+    battery_percent: 60,
+    runtime_minutes: 22,
+    battery_voltage: 13.4,
+    battery_nominal_voltage: 12,
+    battery_type: 'pbac',
+    input_voltage: 225,
+    output_voltage: 226,
+    load_percent: 18,
+    real_power: 100,
+    raw_status: 'OL',
+    sampled_at: new Date().toISOString(),
+  },
 ]
 
 type MetricKey = 'inputV' | 'load' | 'power'
@@ -1122,31 +1140,18 @@ function HostBlock({ host }: { host: Snapshot }) {
 }
 
 function DemoSection({ onClose }: { onClose: () => void }) {
-  // 演示卡的 sampled_at 跟着 useNowTick 滴答推进,"fresh 卡"始终保持当前时刻、不会被判离线;
-  // 单独一张 demo-offline 卡的 sampled_at = now - 5 分钟,始终展示离线样式。
+  // 演示卡的 sampled_at 跟着 useNowTick 滴答推进:
+  //   demo-offline → now - 5min,始终展示离线样式
+  //   其余卡        → now,始终保持新鲜
   const now = useNowTick()
-  const demoUpses = useMemo<SnapshotUPS[]>(() => {
-    const nowIso = new Date(now).toISOString()
-    const fresh = DEMO_BATTERY_VARIANTS.map((u) => ({ ...u, sampled_at: nowIso }))
-    const offline: SnapshotUPS = {
-      name: 'demo-offline',
-      mfr: 'Demo',
-      model: '离线(5 分钟未上报)',
-      power_source: 'unknown',
-      battery_percent: 60,
-      runtime_minutes: 22,
-      battery_voltage: 13.4,
-      battery_nominal_voltage: 12,
-      battery_type: 'pbac',
-      input_voltage: 225,
-      output_voltage: 226,
-      load_percent: 18,
-      real_power: 100,
-      raw_status: 'OL',
-      sampled_at: new Date(now - 5 * 60 * 1000).toISOString(),
-    }
-    return [...fresh, offline]
-  }, [now])
+  const demoUpses = useMemo<SnapshotUPS[]>(
+    () =>
+      DEMO_BATTERY_VARIANTS.map((u) => ({
+        ...u,
+        sampled_at: new Date(u.name === 'demo-offline' ? now - 5 * 60 * 1000 : now).toISOString(),
+      })),
+    [now],
+  )
   const demoSnapshots: Snapshot[] = [
     {
       host_kind: 'demo',
