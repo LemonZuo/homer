@@ -1122,11 +1122,11 @@ function HostBlock({ host }: { host: Snapshot }) {
 }
 
 function DemoSection({ onClose }: { onClose: () => void }) {
-  // 演示卡刷新采样时间为"进入演示模式那一刻",避免页面闲置时被误判离线;
-  // 单独追加一张 5 分钟前的"离线"演示卡,直观展示离线样式。
-  // 用 useState 懒初始化把 Date.now() 关在 React 的初始化窗口里,避免触发 react-hooks/purity 规则。
-  const [demoUpses] = useState<SnapshotUPS[]>(() => {
-    const nowIso = new Date().toISOString()
+  // 演示卡的 sampled_at 跟着 useNowTick 滴答推进,"fresh 卡"始终保持当前时刻、不会被判离线;
+  // 单独一张 demo-offline 卡的 sampled_at = now - 5 分钟,始终展示离线样式。
+  const now = useNowTick()
+  const demoUpses = useMemo<SnapshotUPS[]>(() => {
+    const nowIso = new Date(now).toISOString()
     const fresh = DEMO_BATTERY_VARIANTS.map((u) => ({ ...u, sampled_at: nowIso }))
     const offline: SnapshotUPS = {
       name: 'demo-offline',
@@ -1143,10 +1143,10 @@ function DemoSection({ onClose }: { onClose: () => void }) {
       load_percent: 18,
       real_power: 100,
       raw_status: 'OL',
-      sampled_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      sampled_at: new Date(now - 5 * 60 * 1000).toISOString(),
     }
     return [...fresh, offline]
-  })
+  }, [now])
   const demoSnapshots: Snapshot[] = [
     {
       host_kind: 'demo',
