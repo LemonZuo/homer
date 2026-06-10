@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/sshlike"
 	"gorm.io/gorm"
 )
 
@@ -73,6 +74,22 @@ func (s *SSHCredentialStore) Get(id int64) (*model.SSHCredential, error) {
 		return nil, err
 	}
 	return &row, nil
+}
+
+// Resolve 实现 sshlike.CredentialResolver,把 GORM 行扁平化成 sshlike.Credential。
+// 让 sshlike 包不依赖 internal/model。
+func (s *SSHCredentialStore) Resolve(id int64) (sshlike.Credential, error) {
+	row, err := s.Get(id)
+	if err != nil {
+		return sshlike.Credential{}, err
+	}
+	return sshlike.Credential{
+		Username:   row.Username,
+		AuthType:   row.AuthType,
+		Password:   row.Password,
+		PrivateKey: row.PrivateKey,
+		Passphrase: row.Passphrase,
+	}, nil
 }
 
 // Upsert 创建或按 id 更新。id=0 走创建，否则走更新。

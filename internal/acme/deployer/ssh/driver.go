@@ -10,31 +10,18 @@ import (
 	"strings"
 
 	"github.com/LemonZuo/homer/internal/acme"
-	"github.com/LemonZuo/homer/internal/acme/deployer/sshlike"
 	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/sshlike"
 	"gorm.io/gorm"
 )
 
 // Driver 实现 acme.DeployDriver，把证书写到远端 SSH 机器并执行部署命令。
-// db 用于跳板机模式下按 BastionTargetID 反查另一台 SSH 机器。
+// db 用于跳板机模式下按 BastionID 反查另一台 SSH 机器。
 type Driver struct {
 	credentials *acme.SSHCredentialStore
 	db          *gorm.DB
 }
-
-// TargetAuth 是 acme_deploy_target.auth_json 在 SSH 场景下的结构。
-// AuthSource:
-//   - ""/"inline"：使用本结构里的 Username + 密码/私钥
-//   - "credential"：忽略 inline 字段，运行时按 CredentialID 加载 ssh_credential
-type TargetAuth = sshlike.TargetAuth
-
-// AuthSourceCredential 表示按凭证 id 解析认证信息。
-const AuthSourceCredential = sshlike.AuthSourceCredential
-
-// TargetConfig 是 acme_deploy_target.config_json 在 SSH 场景下的结构。
-// 目前只放跳板机字段，单跳；后续如要扩 keepalive、压缩等连接级参数也放这里。
-type TargetConfig = sshlike.TargetConfig
 
 func NewDriver(credentials *acme.SSHCredentialStore, db *gorm.DB) *Driver {
 	return &Driver{credentials: credentials, db: db}
@@ -51,7 +38,9 @@ func (d *Driver) ValidateTarget(target model.ACMEDeployTarget) error {
 	if err := sshlike.ValidateTarget(*t, "SSH"); err != nil {
 		return err
 	}
-	return sshlike.ValidateBastion(d.db, *t, "当前机器")
+	loader := func(id int64) (*sshlike.Target, error) { return acme.LoadSSHBastion(d.db, id) }
+	finder := func(id int64) (string, bool, error) { return acme.FindSSHUpstream(d.db, id) }
+	return sshlike.ValidateBastion(loader, finder, *t, "当前机器")
 }
 
 func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, cfg model.ACMEDeployConfig) error {
@@ -134,7 +123,7 @@ func (o DeployOptions) validate() error {
 // 凭证模式下保留 AuthSource/CredentialID，inline 字段为空。
 // 真正建连前（Deploy/TestTarget）再调 resolveCredential 把凭证字段填进去。
 func targetFromDeployTarget(target model.ACMEDeployTarget) (*sshlike.Target, error) {
-	return sshlike.ParseTarget(target, sshlike.Labels{Auth: "SSH", Config: "SSH", Host: "SSH"})
+	return acme.ParseSSHTarget(target, acme.Labels{Auth: "SSH"})
 }
 
 // resolveCredential 在凭证模式下把 ssh_credential 的认证信息覆盖到 target 上。
@@ -158,7 +147,7 @@ func optionsFromGenericConfig(cfg model.ACMEDeployConfig, domain string) (Deploy
 func (d *Driver) connFor(target *sshlike.Target) (*sshx.Conn, error) {
 	return sshlike.ConnFor(target, sshlike.ConnOptions{
 		Credentials: d.credentials,
-		DB:          d.db,
+		LoadBastion: func(id int64) (*sshlike.Target, error) { return acme.LoadSSHBastion(d.db, id) },
 	})
 }
 

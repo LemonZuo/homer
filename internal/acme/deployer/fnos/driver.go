@@ -23,9 +23,9 @@ import (
 	"strings"
 
 	"github.com/LemonZuo/homer/internal/acme"
-	"github.com/LemonZuo/homer/internal/acme/deployer/sshlike"
 	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/sshlike"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
@@ -50,18 +50,6 @@ type Driver struct {
 	db          *gorm.DB
 }
 
-// TargetAuth 是 acme_deploy_target.auth_json 在 fnOS 场景下的结构。与 SSH 同构：
-//   - ""/"inline"：使用本结构的 Username + 密码/私钥
-//   - "credential"：忽略 inline 字段，运行时按 CredentialID 加载 ssh_credential
-type TargetAuth = sshlike.TargetAuth
-
-// TargetConfig 是 acme_deploy_target.config_json 在 fnOS 场景下的结构。
-// BastionTargetID 指向另一台 SSH/fnOS 类型的 ACMEDeployTarget，单跳。
-type TargetConfig = sshlike.TargetConfig
-
-// AuthSourceCredential 表示按凭证 id 解析认证信息（与 SSH driver 保持一致的常量字面值）。
-const AuthSourceCredential = sshlike.AuthSourceCredential
-
 // DeployConfig 是 acme_deploy_config.config_json 在 fnOS 场景下的结构。
 type DeployConfig struct {
 	DomainOverride string `json:"domain_override,omitempty"`
@@ -82,7 +70,9 @@ func (d *Driver) ValidateTarget(target model.ACMEDeployTarget) error {
 	if err := sshlike.ValidateTarget(*t, "fnOS"); err != nil {
 		return err
 	}
-	return sshlike.ValidateBastion(d.db, *t, "当前实例")
+	loader := func(id int64) (*sshlike.Target, error) { return acme.LoadSSHBastion(d.db, id) }
+	finder := func(id int64) (string, bool, error) { return acme.FindSSHUpstream(d.db, id) }
+	return sshlike.ValidateBastion(loader, finder, *t, "当前实例")
 }
 
 func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, _ model.ACMEDeployConfig) error {
@@ -213,7 +203,7 @@ func runDeployScript(client *ssh.Client, logf func(string, ...any), args deployS
 func (d *Driver) connFor(t *sshlike.Target) (*sshx.Conn, error) {
 	return sshlike.ConnFor(t, sshlike.ConnOptions{
 		Credentials:        d.credentials,
-		DB:                 d.db,
+		LoadBastion:        func(id int64) (*sshlike.Target, error) { return acme.LoadSSHBastion(d.db, id) },
 		RejectBastionChain: true,
 	})
 }
@@ -355,7 +345,7 @@ func sqlEscape(s string) string {
 }
 
 func targetFromDeployTarget(target model.ACMEDeployTarget) (*sshlike.Target, error) {
-	return sshlike.ParseTarget(target, sshlike.Labels{Auth: "fnOS", Config: "fnOS", Host: "fnOS"})
+	return acme.ParseSSHTarget(target, acme.Labels{Auth: "fnOS"})
 }
 
 func deployConfigFromGeneric(cfg model.ACMEDeployConfig) (DeployConfig, error) {

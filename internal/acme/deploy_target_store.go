@@ -111,7 +111,7 @@ func (s *DeployTargetStore) findBastionRef(id int64) (string, bool, error) {
 		if err := JSONUnmarshal([]byte(EmptyJSON(r.ConfigJSON)), &cfg); err != nil {
 			continue
 		}
-		v, _ := cfg["bastion_target_id"].(float64)
+		v, _ := cfg["bastion_id"].(float64)
 		if int64(v) == id {
 			return r.Name, true, nil
 		}
