@@ -54,6 +54,13 @@ type Config struct {
 	UPSCleanupCron   string
 	UPSRetentionDays int
 	UPSSSHTimeoutSec int
+
+	// ESXi 监控。机器从 esxi_host(enabled='1')取,凭证从 esxi_ssh_credential 库选。
+	// 单机一轮要跑多次 esxcli/vsish/vim-cmd,EsxiSSHTimeoutSec 给得宽一点。
+	EsxiSampleCron    string
+	EsxiCleanupCron   string
+	EsxiRetentionDays int
+	EsxiSSHTimeoutSec int
 }
 
 func Load() *Config {
@@ -93,6 +100,11 @@ func Load() *Config {
 		UPSCleanupCron:   env("UPS_CLEANUP_CRON", "0 0 4 * * *"),
 		UPSRetentionDays: envInt("UPS_RETENTION_DAYS", 7),
 		UPSSSHTimeoutSec: envInt("UPS_SSH_TIMEOUT_SEC", 5),
+
+		EsxiSampleCron:    env("ESXI_SAMPLE_CRON", "*/30 * * * * *"),
+		EsxiCleanupCron:   env("ESXI_CLEANUP_CRON", "0 0 4 * * *"),
+		EsxiRetentionDays: envInt("ESXI_RETENTION_DAYS", 7),
+		EsxiSSHTimeoutSec: envInt("ESXI_SSH_TIMEOUT_SEC", 30),
 	}
 }
 

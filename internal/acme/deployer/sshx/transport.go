@@ -20,17 +20,26 @@ type Conn struct {
 	Host    string
 	Port    int
 	User    string
-	Auth    ssh.AuthMethod
+	Auth    []ssh.AuthMethod
 	Bastion *Conn
 }
 
 func (c *Conn) addr() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 
-// AuthMethod 按 authType（password | key）构造 ssh.AuthMethod。
-func AuthMethod(authType, password, privateKey, passphrase string) (ssh.AuthMethod, error) {
+// AuthMethod 按 authType（password | key）构造 SSH 认证方法集。
+// password 模式同时返回 password 与 keyboard-interactive 两种，兼容 ESXi
+// 等只接受 keyboard-interactive 的 sshd。
+func AuthMethod(authType, password, privateKey, passphrase string) ([]ssh.AuthMethod, error) {
 	switch authType {
 	case "password":
-		return ssh.Password(password), nil
+		ki := ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+			answers := make([]string, len(questions))
+			for i := range questions {
+				answers[i] = password
+			}
+			return answers, nil
+		})
+		return []ssh.AuthMethod{ssh.Password(password), ki}, nil
 	case "key":
 		var signer ssh.Signer
 		var err error
@@ -43,7 +52,7 @@ func AuthMethod(authType, password, privateKey, passphrase string) (ssh.AuthMeth
 		if err != nil {
 			return nil, fmt.Errorf("解析 SSH 私钥失败：%w", err)
 		}
-		return ssh.PublicKeys(signer), nil
+		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
 	default:
 		return nil, fmt.Errorf("未知 SSH 认证方式：%s", authType)
 	}
@@ -53,7 +62,7 @@ func AuthMethod(authType, password, privateKey, passphrase string) (ssh.AuthMeth
 func Dial(logf func(string, ...any), conn *Conn) (*ssh.Client, func(), error) {
 	cfg := &ssh.ClientConfig{
 		User:            conn.User,
-		Auth:            []ssh.AuthMethod{conn.Auth},
+		Auth:            conn.Auth,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         15 * time.Second,
 	}
@@ -73,7 +82,7 @@ func Dial(logf func(string, ...any), conn *Conn) (*ssh.Client, func(), error) {
 	b := conn.Bastion
 	bCfg := &ssh.ClientConfig{
 		User:            b.User,
-		Auth:            []ssh.AuthMethod{b.Auth},
+		Auth:            b.Auth,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         15 * time.Second,
 	}

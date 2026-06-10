@@ -12,6 +12,7 @@ const Sms = lazy(() => import('./components/Sms'))
 const Scheduler = lazy(() => import('./components/Scheduler'))
 const Notify = lazy(() => import('./components/Notify'))
 const Ups = lazy(() => import('./components/Ups'))
+const Esxi = lazy(() => import('./components/Esxi'))
 
 function Empty() {
   return (
@@ -40,6 +41,7 @@ const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
   scheduler: () => <Scheduler />,
   notify: () => <Notify />,
   ups: () => <Ups />,
+  esxi: () => <Esxi />,
 }
 
 function CustomPage() {

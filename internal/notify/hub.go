@@ -19,6 +19,7 @@ const (
 	ModuleBypass    = "bypass"
 	ModuleSchedAlrt = "scheduler_alert"
 	ModuleUPS       = "ups"
+	ModuleESXi      = "esxi"
 )
 
 // Modules 暴露给前端的模块清单（key + 中文名）。
@@ -31,6 +32,7 @@ var Modules = []struct {
 	{ModuleBypass, "Bypass 分流转发"},
 	{ModuleSchedAlrt, "任务失败告警"},
 	{ModuleUPS, "UPS 状态告警"},
+	{ModuleESXi, "ESXi 状态告警"},
 }
 
 // ChannelTypes 各通道类型的字段 schema，供前端动态表单。

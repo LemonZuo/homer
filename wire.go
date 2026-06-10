@@ -18,6 +18,7 @@ import (
 	"github.com/LemonZuo/homer/internal/certstore"
 	"github.com/LemonZuo/homer/internal/config"
 	"github.com/LemonZuo/homer/internal/db"
+	"github.com/LemonZuo/homer/internal/esximon"
 	"github.com/LemonZuo/homer/internal/event"
 	"github.com/LemonZuo/homer/internal/handler"
 	acmehandler "github.com/LemonZuo/homer/internal/handler/acme"
@@ -56,6 +57,10 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 		&model.UPSState{},
 		&model.UPSHost{},
 		&model.UPSSSHCredential{},
+		&model.EsxiHost{},
+		&model.EsxiSSHCredential{},
+		&model.EsxiSample{},
+		&model.EsxiState{},
 	); err != nil {
 		return nil, nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -72,8 +77,9 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	certstoreSvc := certstore.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
 	acmeSvc := buildACMEService(gormDB, cfg)
 	upsSvc, upsSampler, upsHosts, upsCreds := buildUPSService(gormDB, cfg, hub)
+	esxiSvc, esxiSampler, esxiHosts, esxiCreds := buildEsxiService(gormDB, cfg)
 
-	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, upsSvc, hub)
+	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, upsSvc, esxiSvc, hub)
 
 	cdnopsHandler := handler.NewCDNOpsHandler(cdnopsSvc)
 	certstoreHandler := handler.NewCertStoreHandler(certstoreSvc, cdnopsSvc)
@@ -83,8 +89,9 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	schedulerHandler := handler.NewSchedulerHandler(sched)
 	notifyHandler := handler.NewNotifyHandler(notifyStore)
 	upsHandler := upsmon.NewHandler(upsSvc, upsSampler, upsHosts, upsCreds)
+	esxiHandler := esximon.NewHandler(esxiSvc, esxiSampler, esxiHosts, esxiCreds)
 
-	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnopsHandler, certstoreHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, upsHandler, frontend)
+	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnopsHandler, certstoreHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, upsHandler, esxiHandler, frontend)
 	r.GET("/healthz", handler.Health(gormDB, sched))
 
 	return r, sched.Stop, nil
@@ -130,9 +137,20 @@ func buildUPSService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*ups
 	return svc, sampler, hosts, creds
 }
 
+// buildEsxiService 组装 ESXi 监控:独立的 esxi_host / esxi_ssh_credential 表,与 UPS / ACME 解耦。
+// 首期不接 notify Hub(告警延后处理),只跑采样+落库+SSE 推送+曲线查询。
+func buildEsxiService(gormDB *gorm.DB, cfg *config.Config) (*esximon.Service, *esximon.Sampler, *esximon.HostStore, *esximon.CredentialStore) {
+	hosts := esximon.NewHostStore(gormDB)
+	creds := esximon.NewCredentialStore(gormDB, hosts)
+	sampler := esximon.NewSampler(gormDB, hosts, creds, time.Duration(cfg.EsxiSSHTimeoutSec)*time.Second)
+	store := esximon.NewStore(gormDB)
+	svc := esximon.NewService(gormDB, sampler, store, hosts, time.Duration(cfg.EsxiRetentionDays)*24*time.Hour)
+	return svc, sampler, hosts, creds
+}
+
 // startScheduler 注册后台任务、挂上 jobmonitor（持久化 + 失败告警）并启动，
 // 返回 Scheduler 供调用方 defer Stop。
-func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, upsSvc *upsmon.Service, hub *notify.Hub) *scheduler.Scheduler {
+func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, upsSvc *upsmon.Service, esxiSvc *esximon.Service, hub *notify.Hub) *scheduler.Scheduler {
 	sched := scheduler.New()
 
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() error {
@@ -181,6 +199,14 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 
 	if err := sched.Register("ups-cleanup", cfg.UPSCleanupCron, upsSvc.RunCleanup); err != nil {
 		logx.Fatal("register ups-cleanup task", "err", err)
+	}
+
+	if err := sched.Register("esxi-sample", cfg.EsxiSampleCron, esxiSvc.RunSample); err != nil {
+		logx.Fatal("register esxi-sample task", "err", err)
+	}
+
+	if err := sched.Register("esxi-cleanup", cfg.EsxiCleanupCron, esxiSvc.RunCleanup); err != nil {
+		logx.Fatal("register esxi-cleanup task", "err", err)
 	}
 
 	// 观察者：落库 + 连续失败达阈值经 Hub 告警。须在 Start 前注入并预热。
