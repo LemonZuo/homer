@@ -742,11 +742,6 @@ function VMsCard({ vms }: { vms: VM[] }) {
                   <div className="truncate text-[12px] font-medium text-foreground" title={v.name}>
                     {v.name}
                   </div>
-                  {v.guest_os && (
-                    <div className="truncate text-[10.5px] text-muted-foreground" title={v.guest_os}>
-                      {v.guest_os}
-                    </div>
-                  )}
                 </div>
                 <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium', p.cls)}>
                   <span className="inline-flex items-center gap-1">
