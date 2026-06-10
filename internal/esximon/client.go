@@ -75,14 +75,18 @@ type MCEHealth struct {
 	UncorrectedTotal int64  `json:"uncorrected_total"`
 }
 
-// DiskTemperature 单块盘温度。
+// DiskTemperature 单块盘温度 + 容量/用量。
 type DiskTemperature struct {
-	Device     string `json:"device"`
-	Model      string `json:"model"`
-	Type       string `json:"type"`        // SATA-SSD / SATA-HDD / NVMe / unknown
-	TempC      int    `json:"temp_c"`      // -1 表示无数据
-	ThresholdC int    `json:"threshold_c"` // -1 表示无数据
-	Status     string `json:"status"`      // ok / warning / critical / unknown
+	Device        string   `json:"device"`
+	Model         string   `json:"model"`
+	Type          string   `json:"type"`           // SATA-SSD / SATA-HDD / NVMe / unknown
+	CapacityBytes int64    `json:"capacity_bytes"` // 物理设备容量,0 表示无数据
+	UsedBytes     int64    `json:"used_bytes"`     // 单 extent VMFS datastore 已用量,-1 表示无法唯一关联
+	FreeBytes     int64    `json:"free_bytes"`     // 单 extent VMFS datastore 可用量,-1 表示无法唯一关联
+	Datastores    []string `json:"datastores,omitempty"`
+	TempC         int      `json:"temp_c"`      // -1 表示无数据
+	ThresholdC    int      `json:"threshold_c"` // -1 表示无数据
+	Status        string   `json:"status"`      // ok / warning / critical / unknown
 }
 
 // USBController USB 控制器(实测 TS80X 只有一个 xHCI)。
@@ -606,18 +610,46 @@ func parseTrailingInt64(line string) int64 {
 
 // --- 采集 + 解析:磁盘 ---
 
-var deviceIDRe = regexp.MustCompile(`(?m)^(t10\.\S+|naa\.\S+|mpx\.\S+)`)
+var deviceIDRe = regexp.MustCompile(`(?m)^(t10\.\S+|naa\.\S+|mpx\.\S+|eui\.\S+)`)
+
+type diskDeviceInfo struct {
+	Model         string
+	Type          string
+	CapacityBytes int64
+}
+
+type storageFilesystem struct {
+	Name      string
+	UUID      string
+	Type      string
+	SizeBytes int64
+	FreeBytes int64
+}
+
+type vmfsExtent struct {
+	VolumeName string
+	UUID       string
+	Device     string
+	Partition  int
+}
+
+type diskUsage struct {
+	Known      bool
+	UsedBytes  int64
+	FreeBytes  int64
+	Datastores []string
+}
 
 func collectDisks(client *ssh.Client) []DiskTemperature {
 	// list 命令本身在多盘机器上偶发 5-10s(要走 SCSI inquiry),给 15s 留余量。
-	listOut, err := runEsxi(client, "esxcli storage core device list")
+	listOut, err := runEsxiTimeout(client, "esxcli storage core device list", 15*time.Second)
 	if err != nil {
 		logx.Warn("esxi collectDisks: list failed", "err", err.Error())
 		return nil
 	}
 	rawIDs := deviceIDRe.FindAllString(listOut, -1)
 	if len(rawIDs) == 0 {
-		// list 跑通但 regex 没匹配 —— 通常是设备前缀不在 t10./naa./mpx. 里(比如新版 ESXi 上的 eui.)。
+		// list 跑通但 regex 没匹配 —— 通常是设备前缀不在已知的 t10./naa./mpx./eui. 里。
 		// 截短一下输出方便看,512 字节就够看到几行了。
 		head := listOut
 		if len(head) > 512 {
@@ -626,7 +658,8 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 		logx.Warn("esxi collectDisks: list parsed 0 devices", "bytes", len(listOut), "head", head)
 		return nil
 	}
-	devModel, devType := parseDeviceModels(listOut)
+	devInfo := parseDeviceInventory(listOut)
+	usageByDevice := collectDiskUsage(client)
 
 	// 去重保序
 	seen := map[string]struct{}{}
@@ -668,16 +701,43 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 	for _, id := range ids {
 		smart := smartByID[id]
 		t, thr := parseSMARTTemp(smart)
+		info := devInfo[id]
+		usage := usageByDevice[id]
+		usedBytes := int64(-1)
+		freeBytes := int64(-1)
+		if usage.Known {
+			usedBytes = usage.UsedBytes
+			freeBytes = usage.FreeBytes
+		}
 		out = append(out, DiskTemperature{
-			Device:     id,
-			Model:      devModel[id],
-			Type:       devType[id],
-			TempC:      t,
-			ThresholdC: thr,
-			Status:     classifyDisk(devType[id], t),
+			Device:        id,
+			Model:         info.Model,
+			Type:          info.Type,
+			CapacityBytes: info.CapacityBytes,
+			UsedBytes:     usedBytes,
+			FreeBytes:     freeBytes,
+			Datastores:    usage.Datastores,
+			TempC:         t,
+			ThresholdC:    thr,
+			Status:        classifyDisk(info.Type, t),
 		})
 	}
 	return out
+}
+
+func collectDiskUsage(client *ssh.Client) map[string]diskUsage {
+	fsOut, fsErr := runEsxi(client, "esxcli storage filesystem list")
+	extentOut, extentErr := runEsxi(client, "esxcli storage vmfs extent list")
+	if fsErr != nil || extentErr != nil {
+		if fsErr != nil {
+			logx.Warn("esxi collectDisks: filesystem list failed", "err", fsErr.Error())
+		}
+		if extentErr != nil {
+			logx.Warn("esxi collectDisks: vmfs extent list failed", "err", extentErr.Error())
+		}
+		return nil
+	}
+	return mapDiskUsage(parseStorageFilesystems(fsOut), parseVMFSExtents(extentOut))
 }
 
 // splitSMARTOutput 按 `===DEV===<id>` 标记切合批后的 SMART 输出,返回 id→该盘原始 SMART 文本。
@@ -708,19 +768,21 @@ func splitSMARTOutput(out string) map[string]string {
 	return res
 }
 
-// parseDeviceModels 扫 `esxcli storage core device list` 输出,
-// 把每个设备的 Model / Type 映射出来(同一段以设备 id 起首,后续若干行缩进键值)。
-func parseDeviceModels(out string) (map[string]string, map[string]string) {
-	models := map[string]string{}
-	types := map[string]string{}
+// parseDeviceInventory 扫 `esxcli storage core device list` 输出,
+// 把每个设备的 Model / Type / Size 映射出来(同一段以设备 id 起首,后续若干行缩进键值)。
+func parseDeviceInventory(out string) map[string]diskDeviceInfo {
+	devices := map[string]diskDeviceInfo{}
 	var current string
 	for _, line := range strings.Split(out, "\n") {
 		trim := strings.TrimSpace(line)
 		if trim == "" {
 			continue
 		}
-		if strings.HasPrefix(trim, "t10.") || strings.HasPrefix(trim, "naa.") || strings.HasPrefix(trim, "mpx.") {
+		if isStorageDeviceID(trim) {
 			current = strings.Fields(trim)[0]
+			if _, ok := devices[current]; !ok {
+				devices[current] = diskDeviceInfo{}
+			}
 			continue
 		}
 		if current == "" {
@@ -732,18 +794,187 @@ func parseDeviceModels(out string) (map[string]string, map[string]string) {
 		}
 		key := strings.ToLower(strings.TrimSpace(trim[:idx]))
 		val := strings.TrimSpace(trim[idx+1:])
+		info := devices[current]
 		switch key {
 		case "model":
 			if val != "" {
-				models[current] = val
+				info.Model = val
 			}
 		case "device type":
 			if val != "" {
-				types[current] = val
+				info.Type = val
 			}
+		case "size":
+			info.CapacityBytes = parseESXiDeviceSize(val)
+		}
+		devices[current] = info
+	}
+	return devices
+}
+
+func isStorageDeviceID(s string) bool {
+	return strings.HasPrefix(s, "t10.") ||
+		strings.HasPrefix(s, "naa.") ||
+		strings.HasPrefix(s, "mpx.") ||
+		strings.HasPrefix(s, "eui.")
+}
+
+// parseESXiDeviceSize 解 `esxcli storage core device list` 的 Size 字段。
+// 该字段裸数字单位是 MiB;如果输出带 GB/Bytes 等单位,交给 parseBytes。
+func parseESXiDeviceSize(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	low := strings.ToLower(s)
+	if strings.Contains(low, "b") {
+		return parseBytes(s)
+	}
+	num := extractLeadingFloat(s)
+	if num == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(num, 64)
+	if err != nil {
+		return 0
+	}
+	return int64(f * 1024 * 1024)
+}
+
+// parseStorageFilesystems 解 `esxcli storage filesystem list`。
+// 只保留已挂载 VMFS datastore;Size/Free 在该命令里是 bytes。
+func parseStorageFilesystems(out string) []storageFilesystem {
+	var list []storageFilesystem
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 7 {
+			continue
+		}
+		if fields[0] == "Mount" || strings.HasPrefix(fields[0], "---") {
+			continue
+		}
+		freeBytes := parseBytes(fields[len(fields)-1])
+		sizeBytes := parseBytes(fields[len(fields)-2])
+		fsType := fields[len(fields)-3]
+		mounted := fields[len(fields)-4]
+		uuid := fields[len(fields)-5]
+		if !strings.EqualFold(mounted, "true") || !strings.HasPrefix(strings.ToLower(fsType), "vmfs") {
+			continue
+		}
+		name := strings.Join(fields[1:len(fields)-5], " ")
+		if name == "" || uuid == "" || sizeBytes <= 0 {
+			continue
+		}
+		list = append(list, storageFilesystem{
+			Name:      name,
+			UUID:      uuid,
+			Type:      fsType,
+			SizeBytes: sizeBytes,
+			FreeBytes: freeBytes,
+		})
+	}
+	return list
+}
+
+// parseVMFSExtents 解 `esxcli storage vmfs extent list`,用于把 datastore 关联回 device。
+func parseVMFSExtents(out string) []vmfsExtent {
+	var list []vmfsExtent
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 5 {
+			continue
+		}
+		if fields[0] == "Volume" || strings.HasPrefix(fields[0], "---") {
+			continue
+		}
+		partition := parseIntDefault(fields[len(fields)-1], -1)
+		device := fields[len(fields)-2]
+		uuid := fields[len(fields)-4]
+		name := strings.Join(fields[:len(fields)-4], " ")
+		if name == "" || uuid == "" || device == "" {
+			continue
+		}
+		list = append(list, vmfsExtent{
+			VolumeName: name,
+			UUID:       uuid,
+			Device:     device,
+			Partition:  partition,
+		})
+	}
+	return list
+}
+
+func mapDiskUsage(filesystems []storageFilesystem, extents []vmfsExtent) map[string]diskUsage {
+	fsByUUID := map[string]storageFilesystem{}
+	fsByName := map[string]storageFilesystem{}
+	for _, fs := range filesystems {
+		fsByUUID[strings.ToLower(fs.UUID)] = fs
+		fsByName[fs.Name] = fs
+	}
+
+	type datastoreExtent struct {
+		fs      storageFilesystem
+		devices map[string]struct{}
+	}
+	byDatastore := map[string]datastoreExtent{}
+	for _, ext := range extents {
+		fs, ok := fsByUUID[strings.ToLower(ext.UUID)]
+		if !ok {
+			fs, ok = fsByName[ext.VolumeName]
+		}
+		if !ok {
+			continue
+		}
+		key := strings.ToLower(fs.UUID)
+		if key == "" {
+			key = "name:" + fs.Name
+		}
+		item := byDatastore[key]
+		if item.devices == nil {
+			item.fs = fs
+			item.devices = map[string]struct{}{}
+		}
+		item.devices[ext.Device] = struct{}{}
+		byDatastore[key] = item
+	}
+
+	usageByDevice := map[string]diskUsage{}
+	for _, item := range byDatastore {
+		usedBytes := item.fs.SizeBytes - item.fs.FreeBytes
+		if usedBytes < 0 {
+			usedBytes = 0
+		}
+		if len(item.devices) != 1 {
+			// 多 extent datastore 不能可靠拆分到单盘,只记录关联名称,不写用量。
+			for dev := range item.devices {
+				u := usageByDevice[dev]
+				u.Datastores = appendUniqueString(u.Datastores, item.fs.Name)
+				usageByDevice[dev] = u
+			}
+			continue
+		}
+		for dev := range item.devices {
+			u := usageByDevice[dev]
+			u.Known = true
+			u.UsedBytes += usedBytes
+			u.FreeBytes += item.fs.FreeBytes
+			u.Datastores = appendUniqueString(u.Datastores, item.fs.Name)
+			usageByDevice[dev] = u
 		}
 	}
-	return models, types
+	return usageByDevice
+}
+
+func appendUniqueString(list []string, item string) []string {
+	if item == "" {
+		return list
+	}
+	for _, v := range list {
+		if v == item {
+			return list
+		}
+	}
+	return append(list, item)
 }
 
 // parseSMARTTemp 从 `esxcli storage core device smart get` 输出里找 "Drive Temperature" 行。

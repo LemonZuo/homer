@@ -81,6 +81,10 @@ interface DiskTemperature {
   device: string
   model: string
   type: string
+  capacity_bytes?: number
+  used_bytes?: number
+  free_bytes?: number
+  datastores?: string[]
   temp_c: number
   threshold_c: number
   status: string
@@ -224,6 +228,12 @@ function fmtBytes(n: number): string {
     i++
   }
   return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function fmtBytesWithZero(n: number): string {
+  if (!isFinite(n) || n < 0) return '—'
+  if (n === 0) return '0 B'
+  return fmtBytes(n)
 }
 
 function fmtKB(n: number): string {
@@ -469,6 +479,21 @@ function diskStatusPill(status: string) {
   }
 }
 
+function diskUsageInfo(d: DiskTemperature) {
+  const capacity = d.capacity_bytes ?? 0
+  const used = d.used_bytes ?? -1
+  const free = d.free_bytes ?? -1
+  const usageKnown = used >= 0 && (used > 0 || free > 0)
+  const total = capacity > 0 ? capacity : usageKnown ? used + Math.max(0, free) : 0
+  const pct = usageKnown && total > 0 ? Math.max(0, Math.min(100, (used / total) * 100)) : null
+  const label = usageKnown && total > 0
+    ? `${fmtBytesWithZero(used)} / ${fmtBytes(total)}`
+    : capacity > 0
+      ? `总 ${fmtBytes(capacity)}`
+      : '容量 —'
+  return { pct, label, capacity, used, free }
+}
+
 function DisksCard({ disks }: { disks: DiskTemperature[] }) {
   return (
     <Card className="px-3 py-3">
@@ -483,29 +508,63 @@ function DisksCard({ disks }: { disks: DiskTemperature[] }) {
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
           {disks.map((d) => {
             const p = diskStatusPill(d.status)
+            const usage = diskUsageInfo(d)
+            const datastores = d.datastores ?? []
             return (
               <div
                 key={d.device}
-                className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5"
+                className="rounded-md border border-border/60 bg-muted/30 px-2 py-1.5"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-[12px] font-medium text-foreground" title={d.model || d.device}>
-                      {d.model || '(无型号)'}
-                    </span>
-                    {d.type && (
-                      <span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
-                        {d.type}
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-[12px] font-medium text-foreground" title={d.model || d.device}>
+                        {d.model || '(无型号)'}
                       </span>
+                      {d.type && (
+                        <span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          {d.type}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-[13px] font-semibold tabular-nums text-foreground">
+                    {d.temp_c >= 0 ? `${d.temp_c}°C` : '—'}
+                  </span>
+                  <span className={cn('shrink-0 rounded-full border px-1.5 py-0.5 text-[10.5px] font-medium', p.cls)}>
+                    {p.label}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                    {usage.pct !== null && (
+                      <div
+                        className="h-full rounded-full bg-sky-500 dark:bg-sky-400"
+                        style={{ width: `${usage.pct}%` }}
+                      />
                     )}
                   </div>
+                  <span
+                    className="shrink-0 text-[10.5px] tabular-nums text-muted-foreground"
+                    title={
+                      usage.pct !== null
+                        ? `已用 ${fmtBytesWithZero(usage.used)} / 总 ${fmtBytes(usage.capacity > 0 ? usage.capacity : usage.used + Math.max(0, usage.free))}`
+                        : usage.capacity > 0
+                          ? `总 ${fmtBytes(usage.capacity)}`
+                          : undefined
+                    }
+                  >
+                    {usage.label}
+                  </span>
                 </div>
-                <span className="shrink-0 text-[13px] font-semibold tabular-nums text-foreground">
-                  {d.temp_c >= 0 ? `${d.temp_c}°C` : '—'}
-                </span>
-                <span className={cn('shrink-0 rounded-full border px-1.5 py-0.5 text-[10.5px] font-medium', p.cls)}>
-                  {p.label}
-                </span>
+                {datastores.length > 0 && (
+                  <div
+                    className="mt-1 truncate text-[10.5px] text-muted-foreground"
+                    title={datastores.join(', ')}
+                  >
+                    {datastores.join(', ')}
+                  </div>
+                )}
               </div>
             )
           })}
