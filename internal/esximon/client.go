@@ -112,6 +112,8 @@ type USBVMOwned struct {
 	Label   string `json:"label"`
 	Summary string `json:"summary"`
 	Path    string `json:"path"`
+	VID     string `json:"vid,omitempty"`
+	PID     string `json:"pid,omitempty"`
 }
 
 // USBState USB 完整状态。
@@ -1075,6 +1077,9 @@ func collectUSB(client *ssh.Client, vms []VMShallow) USBState {
 		logx.Warn("esxi usb passthrough list failed", "err", err.Error())
 	}
 	u.VMOwned = collectUSBVMOwned(client, vms)
+	if len(u.VMOwned) > 0 && len(u.AvailableForPassthrough) > 0 {
+		u.AvailableForPassthrough = filterVMOwnedUSB(u.AvailableForPassthrough, u.VMOwned)
+	}
 	return u
 }
 
@@ -1216,10 +1221,7 @@ func extractVirtualUSB(vmID int, vmName, out string) []USBVMOwned {
 			break
 		}
 		start := idx + i
-		// 截到下一个段标志或结尾(取一个安全的近似:看下一处 ')' 同级)
-		end := start + len(marker)
-		// 简化:再向后 30 行
-		end = advanceLines(out, end, 30)
+		end := advanceBalancedBlock(out, start)
 		seg := out[start:end]
 		list = append(list, scanVirtualUSBSegment(vmID, vmName, seg))
 		idx = end
@@ -1228,7 +1230,7 @@ func extractVirtualUSB(vmID int, vmName, out string) []USBVMOwned {
 	for _, l := range list {
 		if l.HasPath {
 			owned = append(owned, USBVMOwned{
-				VMID: vmID, VMName: vmName, Label: l.Label, Summary: l.Summary, Path: l.Path,
+				VMID: vmID, VMName: vmName, Label: l.Label, Summary: l.Summary, Path: l.Path, VID: l.VID, PID: l.PID,
 			})
 		}
 	}
@@ -1239,19 +1241,31 @@ type USBUVMScan struct {
 	Label   string
 	Summary string
 	Path    string
+	VID     string
+	PID     string
 	HasPath bool
 }
 
-func advanceLines(s string, from, nLines int) int {
+func advanceBalancedBlock(s string, from int) int {
 	if from >= len(s) {
 		return len(s)
 	}
-	count := 0
+	depth := 0
+	seenOpen := false
 	for i := from; i < len(s); i++ {
-		if s[i] == '\n' {
-			count++
-			if count >= nLines {
-				return i
+		switch s[i] {
+		case '{':
+			depth++
+			seenOpen = true
+		case '}':
+			if depth > 0 {
+				depth--
+			}
+			if seenOpen && depth == 0 {
+				for i+1 < len(s) && (s[i+1] == ',' || s[i+1] == '\r' || s[i+1] == '\n') {
+					i++
+				}
+				return i + 1
 			}
 		}
 	}
@@ -1281,9 +1295,48 @@ func scanVirtualUSBSegment(_ int, _, seg string) USBUVMScan {
 					r.HasPath = true
 				}
 			}
+		case strings.HasPrefix(line, "vendor"):
+			r.VID = parseDecimalUSBID(line)
+		case strings.HasPrefix(line, "product"):
+			r.PID = parseDecimalUSBID(line)
 		}
 	}
 	return r
+}
+
+func parseDecimalUSBID(line string) string {
+	idx := strings.Index(line, "=")
+	if idx < 0 {
+		return ""
+	}
+	val := strings.Trim(strings.TrimSpace(line[idx+1:]), ",")
+	n, err := strconv.Atoi(val)
+	if err != nil || n < 0 {
+		return ""
+	}
+	return fmt.Sprintf("%04x", n)
+}
+
+func filterVMOwnedUSB(avail []USBPassthroughDevice, owned []USBVMOwned) []USBPassthroughDevice {
+	ownedIDs := map[string]struct{}{}
+	for _, d := range owned {
+		if d.VID == "" || d.PID == "" {
+			continue
+		}
+		ownedIDs[strings.ToLower(d.VID)+":"+strings.ToLower(d.PID)] = struct{}{}
+	}
+	if len(ownedIDs) == 0 {
+		return avail
+	}
+	out := make([]USBPassthroughDevice, 0, len(avail))
+	for _, d := range avail {
+		key := strings.ToLower(d.VID) + ":" + strings.ToLower(d.PID)
+		if _, ok := ownedIDs[key]; ok {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // --- 采集 + 解析:VM ---
