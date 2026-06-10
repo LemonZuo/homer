@@ -85,6 +85,7 @@ type EsxiState struct {
 	PlatformJSON  string     `gorm:"column:platform_json;type:text" json:"platform_json"`
 	CPUStaticJSON string     `gorm:"column:cpu_static_json;type:text" json:"cpu_static_json"`
 	MemoryJSON    string     `gorm:"column:memory_json;type:text" json:"memory_json"`
+	RuntimeJSON   string     `gorm:"column:runtime_json;type:text" json:"runtime_json"`
 	CPUTempJSON   string     `gorm:"column:cpu_temp_json;type:text" json:"cpu_temp_json"`
 	MCEJSON       string     `gorm:"column:mce_json;type:text" json:"mce_json"`
 	DiskJSON      string     `gorm:"column:disk_json;type:text" json:"disk_json"`

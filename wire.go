@@ -77,7 +77,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	certstoreSvc := certstore.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
 	acmeSvc := buildACMEService(gormDB, cfg)
 	upsSvc, upsSampler, upsHosts, upsCreds := buildUPSService(gormDB, cfg, hub)
-	esxiSvc, esxiSampler, esxiHosts, esxiCreds := buildEsxiService(gormDB, cfg)
+	esxiSvc, esxiSampler, esxiHosts, esxiCreds := buildEsxiService(gormDB, cfg, hub)
 
 	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, upsSvc, esxiSvc, hub)
 
@@ -138,13 +138,19 @@ func buildUPSService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*ups
 }
 
 // buildEsxiService 组装 ESXi 监控:独立的 esxi_host / esxi_ssh_credential 表,与 UPS / ACME 解耦。
-// 首期不接 notify Hub(告警延后处理),只跑采样+落库+SSE 推送+曲线查询。
-func buildEsxiService(gormDB *gorm.DB, cfg *config.Config) (*esximon.Service, *esximon.Sampler, *esximon.HostStore, *esximon.CredentialStore) {
+func buildEsxiService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*esximon.Service, *esximon.Sampler, *esximon.HostStore, *esximon.CredentialStore) {
 	hosts := esximon.NewHostStore(gormDB)
 	creds := esximon.NewCredentialStore(gormDB, hosts)
 	sampler := esximon.NewSampler(gormDB, hosts, creds, time.Duration(cfg.EsxiSSHTimeoutSec)*time.Second)
 	store := esximon.NewStore(gormDB)
-	svc := esximon.NewService(gormDB, sampler, store, hosts, time.Duration(cfg.EsxiRetentionDays)*24*time.Hour)
+	alertCfg := esximon.AlertConfig{
+		CPUTempC:           cfg.EsxiAlertCPUTempC,
+		CPUUsagePercent:    cfg.EsxiAlertCPUUsagePercent,
+		MemoryUsagePercent: cfg.EsxiAlertMemoryUsagePercent,
+		DiskTempC:          cfg.EsxiAlertDiskTempC,
+		DiskUsagePercent:   cfg.EsxiAlertDiskUsagePercent,
+	}
+	svc := esximon.NewService(gormDB, sampler, store, hosts, hub.For(notify.ModuleESXi), alertCfg, time.Duration(cfg.EsxiRetentionDays)*24*time.Hour)
 	return svc, sampler, hosts, creds
 }
 

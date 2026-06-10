@@ -242,7 +242,7 @@ CREATE TABLE `event_reminder` (
 --   email:   {"api_key","from","to"}（Resend）
 --   webhook: {"url"}
 -- 凭证当前以明文形式存库（P0 加密待办）。
--- module 取值：birthday | event | bypass | scheduler_alert | ups，由代码常量约束。
+-- module 取值：birthday | event | bypass | scheduler_alert | ups | esxi，由代码常量约束。
 
 DROP TABLE IF EXISTS `notify_channel`;
 CREATE TABLE `notify_channel` (
@@ -260,7 +260,7 @@ CREATE TABLE `notify_channel` (
 DROP TABLE IF EXISTS `notify_binding`;
 CREATE TABLE `notify_binding` (
   `id`         BIGINT      NOT NULL AUTO_INCREMENT,
-  `module`     VARCHAR(32) NOT NULL                COMMENT 'birthday | event | bypass | scheduler_alert | ups',
+  `module`     VARCHAR(32) NOT NULL                COMMENT 'birthday | event | bypass | scheduler_alert | ups | esxi',
   `channel_id` BIGINT      NOT NULL                COMMENT 'notify_channel.id',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_notify_bind` (`module`, `channel_id`)
@@ -453,6 +453,7 @@ CREATE TABLE `esxi_state` (
   `platform_json`    TEXT         NULL                    COMMENT 'JSON：主机标识 + ESXi 版本',
   `cpu_static_json`  TEXT         NULL                    COMMENT 'JSON：CPU 静态信息（brand/family/cores/freq/...）',
   `memory_json`      TEXT         NULL                    COMMENT 'JSON：内存信息（total/reliable/numa）',
+  `runtime_json`     TEXT         NULL                    COMMENT 'JSON：CPU/内存运行时使用率',
   `cpu_temp_json`    TEXT         NULL                    COMMENT 'JSON：{ tjmax_c, cores:[{id,temp_c,headroom_c}], max_c, avg_c }',
   `mce_json`         TEXT         NULL                    COMMENT 'JSON：{ state, corrected_total, corrected_ewma, uncorrected_total, period_seconds }',
   `disk_json`        TEXT         NULL                    COMMENT 'JSON：[{device, model, type, temp_c, threshold_c, status}]',

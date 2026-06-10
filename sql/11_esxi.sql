@@ -5,6 +5,12 @@
 --   4. esxi_state         —— 每台机器最新一次完整快照(变长结构用 JSON 列)
 --
 -- host_kind 列冗余固定为 'esxi',与 UPS 一样保留命名以便日后扩展。
+--
+-- 重建调试用(生产迁移不要启用,否则会清空 ESXi 配置与历史数据):
+-- DROP TABLE IF EXISTS `esxi_state`;
+-- DROP TABLE IF EXISTS `esxi_sample`;
+-- DROP TABLE IF EXISTS `esxi_host`;
+-- DROP TABLE IF EXISTS `esxi_ssh_credential`;
 
 CREATE TABLE IF NOT EXISTS `esxi_ssh_credential` (
   `id`          BIGINT       NOT NULL AUTO_INCREMENT,
@@ -63,6 +69,7 @@ CREATE TABLE IF NOT EXISTS `esxi_state` (
   `platform_json`    TEXT         NULL                    COMMENT 'JSON: 主机标识 + ESXi 版本',
   `cpu_static_json`  TEXT         NULL                    COMMENT 'JSON: CPU 静态信息(brand/family/cores/freq/...)',
   `memory_json`      TEXT         NULL                    COMMENT 'JSON: 内存信息(total/reliable/numa)',
+  `runtime_json`     TEXT         NULL                    COMMENT 'JSON: CPU/内存运行时使用率',
   `cpu_temp_json`    TEXT         NULL                    COMMENT 'JSON: { tjmax_c, cores:[{id,temp_c,headroom_c}], max_c, avg_c }',
   `mce_json`         TEXT         NULL                    COMMENT 'JSON: { state, corrected_total, corrected_ewma, uncorrected_total, period_seconds }',
   `disk_json`        TEXT         NULL                    COMMENT 'JSON: [{device, model, type, temp_c, threshold_c, status}]',

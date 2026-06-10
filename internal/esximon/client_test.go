@@ -83,6 +83,27 @@ span         653ccc     1              naa.disk4    1
 	}
 }
 
+func TestParseRuntimeUsage(t *testing.T) {
+	out := `
+      quickStats = (vim.host.Summary.QuickStats) {
+         overallCpuUsage = 875,
+         overallMemoryUsage = 32768,
+      },
+      hardware = (vim.host.Summary.HardwareSummary) {
+         cpuMhz = 3500,
+         numCpuCores = 4,
+         memorySize = 137438953472,
+      },
+`
+	got := parseRuntimeUsage(out, CPUStatic{}, MemoryInfo{})
+	if got.CPUUsedMHz != 875 || got.CPUCapacityMHz != 14000 || got.CPUUsagePercent != 6 {
+		t.Fatalf("cpu runtime = %#v", got)
+	}
+	if got.MemoryUsedBytes != 32768*1024*1024 || got.MemoryTotalBytes != 137438953472 || got.MemoryUsagePercent != 25 {
+		t.Fatalf("memory runtime = %#v", got)
+	}
+}
+
 func TestExtractVirtualUSBMultipleDevices(t *testing.T) {
 	out := `
       (vim.vm.device.VirtualUSBXHCIController) {

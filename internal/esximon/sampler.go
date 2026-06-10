@@ -145,6 +145,11 @@ func mergeHostMetrics(base, next HostMetrics) HostMetrics {
 	} else {
 		base.Memory = mergeMemory(base.Memory, next.Memory)
 	}
+	if !runtimeUsable(base.Runtime) && runtimeUsable(next.Runtime) {
+		base.Runtime = next.Runtime
+	} else {
+		base.Runtime = mergeRuntime(base.Runtime, next.Runtime)
+	}
 	if !cpuTempComplete(base) && cpuTempComplete(next) {
 		base.CPUTemp = next.CPUTemp
 	}
@@ -239,6 +244,25 @@ func mergeMemory(base, next MemoryInfo) MemoryInfo {
 	}
 	if base.FreeBytes <= 0 {
 		base.FreeBytes = next.FreeBytes
+	}
+	return base
+}
+
+func runtimeUsable(u RuntimeUsage) bool {
+	return (u.CPUUsagePercent >= 0 && u.CPUCapacityMHz > 0) ||
+		(u.MemoryUsagePercent >= 0 && u.MemoryTotalBytes > 0)
+}
+
+func mergeRuntime(base, next RuntimeUsage) RuntimeUsage {
+	if base.CPUUsagePercent < 0 {
+		base.CPUUsedMHz = next.CPUUsedMHz
+		base.CPUCapacityMHz = next.CPUCapacityMHz
+		base.CPUUsagePercent = next.CPUUsagePercent
+	}
+	if base.MemoryUsagePercent < 0 {
+		base.MemoryUsedBytes = next.MemoryUsedBytes
+		base.MemoryTotalBytes = next.MemoryTotalBytes
+		base.MemoryUsagePercent = next.MemoryUsagePercent
 	}
 	return base
 }

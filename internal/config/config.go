@@ -57,10 +57,15 @@ type Config struct {
 
 	// ESXi 监控。机器从 esxi_host(enabled='1')取,凭证从 esxi_ssh_credential 库选。
 	// 单机一轮要跑多次 esxcli/vsish/vim-cmd,EsxiSSHTimeoutSec 给得宽一点。
-	EsxiSampleCron    string
-	EsxiCleanupCron   string
-	EsxiRetentionDays int
-	EsxiSSHTimeoutSec int
+	EsxiSampleCron              string
+	EsxiCleanupCron             string
+	EsxiRetentionDays           int
+	EsxiSSHTimeoutSec           int
+	EsxiAlertCPUTempC           int
+	EsxiAlertCPUUsagePercent    int
+	EsxiAlertMemoryUsagePercent int
+	EsxiAlertDiskTempC          int
+	EsxiAlertDiskUsagePercent   int
 }
 
 func Load() *Config {
@@ -101,10 +106,15 @@ func Load() *Config {
 		UPSRetentionDays: envInt("UPS_RETENTION_DAYS", 7),
 		UPSSSHTimeoutSec: envInt("UPS_SSH_TIMEOUT_SEC", 5),
 
-		EsxiSampleCron:    env("ESXI_SAMPLE_CRON", "*/30 * * * * *"),
-		EsxiCleanupCron:   env("ESXI_CLEANUP_CRON", "0 0 4 * * *"),
-		EsxiRetentionDays: envInt("ESXI_RETENTION_DAYS", 7),
-		EsxiSSHTimeoutSec: envInt("ESXI_SSH_TIMEOUT_SEC", 120),
+		EsxiSampleCron:              env("ESXI_SAMPLE_CRON", "*/30 * * * * *"),
+		EsxiCleanupCron:             env("ESXI_CLEANUP_CRON", "0 0 4 * * *"),
+		EsxiRetentionDays:           envInt("ESXI_RETENTION_DAYS", 7),
+		EsxiSSHTimeoutSec:           envInt("ESXI_SSH_TIMEOUT_SEC", 120),
+		EsxiAlertCPUTempC:           envInt("ESXI_ALERT_CPU_TEMP_C", 85),
+		EsxiAlertCPUUsagePercent:    envInt("ESXI_ALERT_CPU_USAGE_PERCENT", 90),
+		EsxiAlertMemoryUsagePercent: envInt("ESXI_ALERT_MEMORY_USAGE_PERCENT", 90),
+		EsxiAlertDiskTempC:          envInt("ESXI_ALERT_DISK_TEMP_C", 55),
+		EsxiAlertDiskUsagePercent:   envInt("ESXI_ALERT_DISK_USAGE_PERCENT", 90),
 	}
 }
 

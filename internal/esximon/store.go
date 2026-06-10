@@ -35,7 +35,7 @@ func (s *Store) UpsertState(states []model.EsxiState) error {
 		Columns: []clause.Column{{Name: "host_kind"}, {Name: "host_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"host_name", "reachable", "last_error",
-			"platform_json", "cpu_static_json", "memory_json",
+			"platform_json", "cpu_static_json", "memory_json", "runtime_json",
 			"cpu_temp_json", "mce_json", "disk_json", "usb_json", "vm_json",
 			"sampled_at", "updated_at",
 		}),

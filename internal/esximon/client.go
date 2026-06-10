@@ -51,6 +51,17 @@ type MemoryInfo struct {
 	FreeBytes  int64 `json:"mem_free_bytes"`
 }
 
+// RuntimeUsage 主机运行时资源使用率。CPU 用量来自 hostsummary 的 MHz,
+// 内存用量来自 hostsummary 的 MiB;缺数据用 -1。
+type RuntimeUsage struct {
+	CPUUsedMHz         int   `json:"cpu_used_mhz"`
+	CPUCapacityMHz     int   `json:"cpu_capacity_mhz"`
+	CPUUsagePercent    int   `json:"cpu_usage_percent"`
+	MemoryUsedBytes    int64 `json:"memory_used_bytes"`
+	MemoryTotalBytes   int64 `json:"memory_total_bytes"`
+	MemoryUsagePercent int   `json:"memory_usage_percent"`
+}
+
 // CPUCore 每核温度。
 type CPUCore struct {
 	ID        int `json:"id"`
@@ -143,6 +154,7 @@ type HostMetrics struct {
 	Platform PlatformInfo      `json:"platform"`
 	CPU      CPUStatic         `json:"cpu_static"`
 	Memory   MemoryInfo        `json:"memory"`
+	Runtime  RuntimeUsage      `json:"runtime_usage"`
 	CPUTemp  CPUTemperature    `json:"cpu_temperature"`
 	MCE      MCEHealth         `json:"mce_health"`
 	Disks    []DiskTemperature `json:"disk_temperature"`
@@ -161,6 +173,7 @@ const esxiPathPrefix = "export PATH=/bin:/sbin:/usr/lib/vmware/bin:/usr/lib/vmwa
 func CollectAll(client *ssh.Client) HostMetrics {
 	snap := HostMetrics{
 		CPUTemp: CPUTemperature{TjMaxC: -1, MaxC: -1, AvgC: -1},
+		Runtime: RuntimeUsage{CPUUsagePercent: -1, MemoryUsagePercent: -1},
 		MCE:     MCEHealth{State: ""},
 		CPU:     CPUStatic{TjMaxC: -1},
 	}
@@ -234,6 +247,14 @@ func CollectAll(client *ssh.Client) HostMetrics {
 		fillMemoryFromVsish(&snap.Memory, out)
 	} else {
 		logx.Warn("esxi memory comprehensive failed", "err", err.Error())
+	}
+	if out, err := runEsxiRetry(client, "host summary runtime", "vim-cmd hostsvc/hostsummary", 12*time.Second, 2, func(out string) bool {
+		u := parseRuntimeUsage(out, snap.CPU, snap.Memory)
+		return u.CPUUsagePercent >= 0 || u.MemoryUsagePercent >= 0
+	}); err == nil {
+		snap.Runtime = parseRuntimeUsage(out, snap.CPU, snap.Memory)
+	} else {
+		logx.Warn("esxi runtime usage failed", "err", err.Error())
 	}
 
 	// CPU 温度:遍历 0..15 核,失败即停。
@@ -561,6 +582,66 @@ func fillMemoryFromVsish(m *MemoryInfo, out string) {
 			}
 		}
 	}
+}
+
+// parseRuntimeUsage 解 `vim-cmd hostsvc/hostsummary` 中 quickStats/hardware 的运行时用量:
+// overallCpuUsage(MHz), overallMemoryUsage(MiB), cpuMhz, numCpuCores, memorySize(bytes)。
+func parseRuntimeUsage(out string, cpu CPUStatic, mem MemoryInfo) RuntimeUsage {
+	u := RuntimeUsage{CPUUsagePercent: -1, MemoryUsagePercent: -1}
+	cpuUsedMHz := -1
+	memUsedMiB := int64(-1)
+	cpuMHz := 0
+	cpuCores := 0
+	memTotalBytes := int64(0)
+
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, ","))
+		idx := strings.Index(line, "=")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		val = strings.TrimSuffix(val, ",")
+		switch key {
+		case "overallCpuUsage":
+			cpuUsedMHz = parseIntDefault(val, -1)
+		case "overallMemoryUsage":
+			memUsedMiB = parseInt64Default(val, -1)
+		case "cpuMhz":
+			cpuMHz = parseIntDefault(val, 0)
+		case "numCpuCores":
+			cpuCores = parseIntDefault(val, 0)
+		case "memorySize":
+			memTotalBytes = parseInt64Default(val, 0)
+		}
+	}
+
+	if cpuMHz <= 0 {
+		cpuMHz = cpu.FreqMHz
+	}
+	if cpuCores <= 0 {
+		cpuCores = cpu.Cores
+	}
+	if cpuUsedMHz >= 0 {
+		u.CPUUsedMHz = cpuUsedMHz
+		if cpuMHz > 0 && cpuCores > 0 {
+			u.CPUCapacityMHz = cpuMHz * cpuCores
+			u.CPUUsagePercent = percentInt(int64(cpuUsedMHz), int64(u.CPUCapacityMHz))
+		}
+	}
+
+	if memTotalBytes <= 0 {
+		memTotalBytes = mem.TotalBytes
+	}
+	if memUsedMiB >= 0 {
+		u.MemoryUsedBytes = memUsedMiB * 1024 * 1024
+		if memTotalBytes > 0 {
+			u.MemoryTotalBytes = memTotalBytes
+			u.MemoryUsagePercent = percentInt(u.MemoryUsedBytes, memTotalBytes)
+		}
+	}
+	return u
 }
 
 // --- 采集 + 解析:CPU 温度 ---
@@ -1698,6 +1779,34 @@ func parseIntDefault(s string, def int) int {
 		return n
 	}
 	return def
+}
+
+func parseInt64Default(s string, def int64) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return def
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n
+	}
+	end := 0
+	for end < len(s) && (s[end] >= '0' && s[end] <= '9') {
+		end++
+	}
+	if end == 0 {
+		return def
+	}
+	if n, err := strconv.ParseInt(s[:end], 10, 64); err == nil {
+		return n
+	}
+	return def
+}
+
+func percentInt(used, total int64) int {
+	if used < 0 || total <= 0 {
+		return -1
+	}
+	return int((used*100 + total/2) / total)
 }
 
 // parseUint64Auto 支持 "0x..." 与十进制。

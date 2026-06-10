@@ -56,6 +56,15 @@ interface MemoryInfo {
   mem_free_bytes: number
 }
 
+interface RuntimeUsage {
+  cpu_used_mhz: number
+  cpu_capacity_mhz: number
+  cpu_usage_percent: number
+  memory_used_bytes: number
+  memory_total_bytes: number
+  memory_usage_percent: number
+}
+
 interface CPUCore {
   id: number
   temp_c: number
@@ -137,6 +146,7 @@ interface Snapshot {
   platform?: PlatformInfo
   cpu_static?: CPUStatic
   memory?: MemoryInfo
+  runtime_usage?: RuntimeUsage
   cpu_temperature?: CPUTemperature
   mce_health?: MCEHealth
   disk_temperature?: DiskTemperature[]

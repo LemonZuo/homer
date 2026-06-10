@@ -9,21 +9,23 @@ import (
 
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/notify"
 	"gorm.io/gorm"
 )
 
 // Service 串起一轮"扫描 → 采集 → 持久化 → SSE 广播"。
-// 首期不接 notify Hub —— 数据告警逻辑后续再加(与用户确认的范围一致)。
 type Service struct {
 	db        *gorm.DB
 	sampler   *Sampler
 	store     *Store
 	hosts     *HostStore
+	alertOut  notify.Notifier
+	alertCfg  AlertConfig
 	sse       *sseHub
 	retention time.Duration
 }
 
-func NewService(db *gorm.DB, sampler *Sampler, store *Store, hosts *HostStore, retention time.Duration) *Service {
+func NewService(db *gorm.DB, sampler *Sampler, store *Store, hosts *HostStore, alertOut notify.Notifier, alertCfg AlertConfig, retention time.Duration) *Service {
 	if retention <= 0 {
 		retention = 7 * 24 * time.Hour
 	}
@@ -32,6 +34,8 @@ func NewService(db *gorm.DB, sampler *Sampler, store *Store, hosts *HostStore, r
 		sampler:   sampler,
 		store:     store,
 		hosts:     hosts,
+		alertOut:  alertOut,
+		alertCfg:  alertCfg.withDefaults(),
 		sse:       newSSEHub(),
 		retention: retention,
 	}
@@ -61,6 +65,11 @@ func (s *Service) RunSample() error {
 	now := time.Now()
 	var samples []model.EsxiSample
 	var states []model.EsxiState
+	type alertSeed struct {
+		prev *model.EsxiState
+		cur  HostResult
+	}
+	var alerts []alertSeed
 	reachableHosts := 0
 	for _, r := range results {
 		if r.OK {
@@ -82,6 +91,7 @@ func (s *Service) RunSample() error {
 		if sampleOK {
 			samples = append(samples, buildSample(r, now))
 		}
+		alerts = append(alerts, alertSeed{prev: prev, cur: r})
 	}
 
 	if err := s.store.SaveSamples(samples); err != nil {
@@ -89,6 +99,10 @@ func (s *Service) RunSample() error {
 	}
 	if err := s.store.UpsertState(states); err != nil {
 		return fmt.Errorf("更新 esxi_state 失败:%w", err)
+	}
+
+	for _, a := range alerts {
+		s.processThresholdAlerts(a.prev, a.cur)
 	}
 
 	logx.Info("esxi sample done",
@@ -133,6 +147,7 @@ type Snapshot struct {
 	Platform  *PlatformInfo     `json:"platform,omitempty"`
 	CPU       *CPUStatic        `json:"cpu_static,omitempty"`
 	Memory    *MemoryInfo       `json:"memory,omitempty"`
+	Runtime   *RuntimeUsage     `json:"runtime_usage,omitempty"`
 	CPUTemp   *CPUTemperature   `json:"cpu_temperature,omitempty"`
 	MCE       *MCEHealth        `json:"mce_health,omitempty"`
 	Disks     []DiskTemperature `json:"disk_temperature,omitempty"`
@@ -201,6 +216,12 @@ func hydrate(sn *Snapshot, st model.EsxiState) {
 		var v MemoryInfo
 		if json.Unmarshal([]byte(st.MemoryJSON), &v) == nil {
 			sn.Memory = &v
+		}
+	}
+	if st.RuntimeJSON != "" {
+		var v RuntimeUsage
+		if json.Unmarshal([]byte(st.RuntimeJSON), &v) == nil {
+			sn.Runtime = &v
 		}
 	}
 	if st.CPUTempJSON != "" {
@@ -437,6 +458,7 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 			st.PlatformJSON = prev.PlatformJSON
 			st.CPUStaticJSON = prev.CPUStaticJSON
 			st.MemoryJSON = prev.MemoryJSON
+			st.RuntimeJSON = prev.RuntimeJSON
 			st.CPUTempJSON = prev.CPUTempJSON
 			st.MCEJSON = prev.MCEJSON
 			st.DiskJSON = prev.DiskJSON
@@ -457,6 +479,7 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 	st.PlatformJSON = stickyJSON(m.Platform, m.Platform.Vendor != "" || m.Platform.UUID != "" || m.Platform.Product != "", prevJSON(prev, func(p *model.EsxiState) string { return p.PlatformJSON }))
 	st.CPUStaticJSON = stickyJSON(m.CPU, m.CPU.Brand != "" || m.CPU.Cores > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.CPUStaticJSON }))
 	st.MemoryJSON = stickyJSON(m.Memory, m.Memory.TotalBytes > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.MemoryJSON }))
+	st.RuntimeJSON = stickyJSON(m.Runtime, runtimeUsable(m.Runtime), prevJSON(prev, func(p *model.EsxiState) string { return p.RuntimeJSON }))
 	st.CPUTempJSON = stickyJSON(m.CPUTemp, cpuTempComplete(m), prevJSON(prev, func(p *model.EsxiState) string { return p.CPUTempJSON }))
 	st.MCEJSON = stickyJSON(m.MCE, m.MCE.State != "", prevJSON(prev, func(p *model.EsxiState) string { return p.MCEJSON }))
 	st.DiskJSON = stickyJSON(m.Disks, diskTempsComplete(m.Disks), prevJSON(prev, func(p *model.EsxiState) string { return p.DiskJSON }))
