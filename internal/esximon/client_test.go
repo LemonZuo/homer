@@ -218,3 +218,138 @@ Powered off
 		t.Fatalf("known count = %d", knownPowerCount(got))
 	}
 }
+
+// fixture 直接复制自 192.168.31.138 上 esxcli storage core device smart get 的真实输出,
+// 覆盖三种盘:SATA SSD(Samsung 870 EVO) / SATA HDD(WDC) / NVMe(Samsung 990 PRO)。
+func TestParseSMARTAttrs(t *testing.T) {
+	sataSSD := `Parameter                  Value  Threshold  Worst  Raw
+-------------------------  -----  ---------  -----  ---
+Health Status              OK     N/A        N/A    N/A
+Media Wearout Indicator    99     0          99     24
+Write Error Count          100    10         100    0
+Power-on Hours             93     0          93     209
+Power Cycle Count          99     0          99     160
+Reallocated Sector Count   100    10         100    0
+Drive Temperature          64     0          49     36
+Write Sectors TOT Count    99     0          99     81
+Initial Bad Block Count    100    10         100    0
+Program Fail Count         100    10         100    0
+Erase Fail Count           100    10         100    0
+Uncorrectable Error Count  100    0          100    0
+`
+	sataHDD := `Parameter                          Value  Threshold  Worst  Raw
+---------------------------------  -----  ---------  -----  ---
+Health Status                      OK     N/A        N/A    N/A
+Read Error Count                   0      16         N/A    0
+Power-on Hours                     96     0          96     34
+Power Cycle Count                  192    0          N/A    192
+Reallocated Sector Count           0      5          N/A    0
+Drive Temperature                  49     0          N/A    49
+Sector Reallocation Event Count    0      0          N/A    0
+Pending Sector Reallocation Count  0      0          N/A    0
+Uncorrectable Sector Count         0      0          N/A    0
+`
+	nvme := `Parameter                 Value  Threshold  Worst  Raw
+------------------------  -----  ---------  -----  ---
+Health Status             OK     N/A        N/A    N/A
+Power-on Hours            15296  N/A        N/A    N/A
+Power Cycle Count         125    N/A        N/A    N/A
+Reallocated Sector Count  0      90         N/A    N/A
+Drive Temperature         47     82         N/A    N/A
+`
+
+	t.Run("sata_ssd", func(t *testing.T) {
+		a := parseSMARTAttrs(sataSSD)
+		if a.HealthStatus != "OK" {
+			t.Fatalf("health=%q", a.HealthStatus)
+		}
+		if a.PowerOnHours != 209 {
+			t.Fatalf("power_on=%d", a.PowerOnHours)
+		}
+		if a.PowerCycleCount != 160 {
+			t.Fatalf("power_cycle=%d", a.PowerCycleCount)
+		}
+		if a.ReallocatedSectors != 0 {
+			t.Fatalf("realloc=%d", a.ReallocatedSectors)
+		}
+		if a.UncorrectableErrors != 0 {
+			t.Fatalf("uncorr=%d", a.UncorrectableErrors)
+		}
+		if a.MediaWearoutValue != 99 {
+			t.Fatalf("wearout=%d (want 99 normalized)", a.MediaWearoutValue)
+		}
+		if a.TempC != 36 {
+			t.Fatalf("temp=%d", a.TempC)
+		}
+		// HDD 独有字段在 SSD 上应为 -1
+		if a.ReadErrorCount != -1 {
+			t.Fatalf("read_err=%d (want -1)", a.ReadErrorCount)
+		}
+		if a.PendingSectorReallocation != -1 {
+			t.Fatalf("pending=%d (want -1)", a.PendingSectorReallocation)
+		}
+	})
+
+	t.Run("sata_hdd", func(t *testing.T) {
+		a := parseSMARTAttrs(sataHDD)
+		if a.HealthStatus != "OK" {
+			t.Fatalf("health=%q", a.HealthStatus)
+		}
+		if a.PowerOnHours != 34 {
+			t.Fatalf("power_on=%d", a.PowerOnHours)
+		}
+		if a.PowerCycleCount != 192 {
+			t.Fatalf("power_cycle=%d", a.PowerCycleCount)
+		}
+		if a.ReallocatedSectors != 0 {
+			t.Fatalf("realloc=%d", a.ReallocatedSectors)
+		}
+		if a.UncorrectableErrors != 0 { // 来自 "Uncorrectable Sector Count"
+			t.Fatalf("uncorr=%d", a.UncorrectableErrors)
+		}
+		if a.ReadErrorCount != 0 {
+			t.Fatalf("read_err=%d", a.ReadErrorCount)
+		}
+		if a.PendingSectorReallocation != 0 {
+			t.Fatalf("pending=%d", a.PendingSectorReallocation)
+		}
+		if a.TempC != 49 {
+			t.Fatalf("temp=%d", a.TempC)
+		}
+		// SSD 独有
+		if a.MediaWearoutValue != -1 {
+			t.Fatalf("wearout=%d (want -1)", a.MediaWearoutValue)
+		}
+	})
+
+	t.Run("nvme_raw_fallback_to_value", func(t *testing.T) {
+		a := parseSMARTAttrs(nvme)
+		if a.HealthStatus != "OK" {
+			t.Fatalf("health=%q", a.HealthStatus)
+		}
+		// Raw=N/A,必须回退到 Value
+		if a.PowerOnHours != 15296 {
+			t.Fatalf("power_on=%d (raw N/A 必须回退 Value=15296)", a.PowerOnHours)
+		}
+		if a.PowerCycleCount != 125 {
+			t.Fatalf("power_cycle=%d", a.PowerCycleCount)
+		}
+		if a.TempC != 47 {
+			t.Fatalf("temp=%d", a.TempC)
+		}
+		// NVMe 没暴露的字段应为 -1
+		if a.UncorrectableErrors != -1 {
+			t.Fatalf("uncorr=%d (want -1)", a.UncorrectableErrors)
+		}
+		if a.MediaWearoutValue != -1 {
+			t.Fatalf("wearout=%d (want -1)", a.MediaWearoutValue)
+		}
+	})
+
+	t.Run("empty_input", func(t *testing.T) {
+		a := parseSMARTAttrs("")
+		if a.TempC != -1 || a.PowerOnHours != -1 || a.HealthStatus != "" {
+			t.Fatalf("empty input not all defaults: %+v", a)
+		}
+	})
+}

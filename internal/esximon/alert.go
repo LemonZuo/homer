@@ -217,7 +217,7 @@ func memoryUsagePercent(m HostMetrics) int {
 	return -1
 }
 
-func diskUsagePercent(d DiskTemperature) int {
+func diskUsagePercent(d DiskHealth) int {
 	if d.UsedBytes < 0 {
 		return -1
 	}
@@ -228,7 +228,7 @@ func diskUsagePercent(d DiskTemperature) int {
 	return percentInt(d.UsedBytes, total)
 }
 
-func diskAlertName(d DiskTemperature) string {
+func diskAlertName(d DiskHealth) string {
 	switch {
 	case d.Model != "":
 		return d.Model

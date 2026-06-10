@@ -86,8 +86,9 @@ type MCEHealth struct {
 	UncorrectedTotal int64  `json:"uncorrected_total"`
 }
 
-// DiskTemperature 单块盘温度 + 容量/用量。
-type DiskTemperature struct {
+// DiskHealth 单块盘温度 + 容量/用量 + SMART 属性。
+// 字段命名沿用历史(原本只有温度),后续如需重命名再说。
+type DiskHealth struct {
 	Device        string   `json:"device"`
 	Model         string   `json:"model"`
 	Type          string   `json:"type"`           // SATA-SSD / SATA-HDD / NVMe / unknown
@@ -98,6 +99,17 @@ type DiskTemperature struct {
 	TempC         int      `json:"temp_c"`      // -1 表示无数据
 	ThresholdC    int      `json:"threshold_c"` // -1 表示无数据
 	Status        string   `json:"status"`      // ok / warning / critical / unknown
+
+	// SMART 属性。统一规则:优先取 Raw 列,Raw=N/A 时回退 Value 列(NVMe 都走 Value)。
+	// 未拿到/不适用统一兜底:string→"",int64→-1,int→-1。
+	HealthStatus              string `json:"smart_health"`                 // OK / 厂商私有
+	PowerOnHours              int64  `json:"smart_power_on_hours"`         // 通电小时
+	PowerCycleCount           int64  `json:"smart_power_cycle_count"`      // 开机次数
+	ReallocatedSectors        int64  `json:"smart_reallocated_sectors"`    // 重映射扇区数
+	UncorrectableErrors       int64  `json:"smart_uncorrectable_errors"`   // SSD/HDD 二选一名,合并入此字段
+	MediaWearoutValue         int    `json:"smart_media_wearout"`          // SSD 独有,normalized 100=新,0=磨损完
+	ReadErrorCount            int64  `json:"smart_read_error_count"`       // HDD 独有
+	PendingSectorReallocation int64  `json:"smart_pending_sector_realloc"` // HDD 独有
 }
 
 // USBController USB 控制器(实测 TS80X 只有一个 xHCI)。
@@ -151,15 +163,15 @@ type VM struct {
 // 任何一段子采集失败(esxcli/vsish 单点错误)都不会让整轮挂掉。调用方会对关键
 // 指标做完整性判定:完整才写 esxi_sample,不完整则保留 esxi_state 的上一轮有效值。
 type HostMetrics struct {
-	Platform PlatformInfo      `json:"platform"`
-	CPU      CPUStatic         `json:"cpu_static"`
-	Memory   MemoryInfo        `json:"memory"`
-	Runtime  RuntimeUsage      `json:"runtime_usage"`
-	CPUTemp  CPUTemperature    `json:"cpu_temperature"`
-	MCE      MCEHealth         `json:"mce_health"`
-	Disks    []DiskTemperature `json:"disk_temperature"`
-	USB      USBState          `json:"usb"`
-	VMs      []VM              `json:"vms"`
+	Platform PlatformInfo   `json:"platform"`
+	CPU      CPUStatic      `json:"cpu_static"`
+	Memory   MemoryInfo     `json:"memory"`
+	Runtime  RuntimeUsage   `json:"runtime_usage"`
+	CPUTemp  CPUTemperature `json:"cpu_temperature"`
+	MCE      MCEHealth      `json:"mce_health"`
+	Disks    []DiskHealth   `json:"disk_health"`
+	USB      USBState       `json:"usb"`
+	VMs      []VM           `json:"vms"`
 }
 
 // --- 主入口:在已建立的 ssh.Client 上跑一整轮 ---
@@ -810,7 +822,7 @@ type diskUsage struct {
 	Datastores []string
 }
 
-func collectDisks(client *ssh.Client) []DiskTemperature {
+func collectDisks(client *ssh.Client) []DiskHealth {
 	// list 命令本身在多盘机器上偶发 5-10s(要走 SCSI inquiry),给 15s 留余量。
 	listOut, err := runEsxiRetry(client, "disk device list", "esxcli storage core device list", 15*time.Second, 2, func(out string) bool {
 		return len(deviceIDRe.FindAllString(out, -1)) > 0
@@ -879,10 +891,10 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 	retryMissingSMART(client, ids, smartByID)
 	logx.Debug("esxi collectDisks", "n_dev", len(ids), "smart_bytes", len(smartAll), "smart_segments", len(smartByID))
 
-	var out []DiskTemperature
+	var out []DiskHealth
 	for _, id := range ids {
 		smart := smartByID[id]
-		t, thr := parseSMARTTemp(smart)
+		attrs := parseSMARTAttrs(smart)
 		info := devInfo[id]
 		usage := usageByDevice[id]
 		usedBytes := int64(-1)
@@ -891,17 +903,25 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 			usedBytes = usage.UsedBytes
 			freeBytes = usage.FreeBytes
 		}
-		out = append(out, DiskTemperature{
-			Device:        id,
-			Model:         info.Model,
-			Type:          info.Type,
-			CapacityBytes: info.CapacityBytes,
-			UsedBytes:     usedBytes,
-			FreeBytes:     freeBytes,
-			Datastores:    usage.Datastores,
-			TempC:         t,
-			ThresholdC:    thr,
-			Status:        classifyDisk(info.Type, t),
+		out = append(out, DiskHealth{
+			Device:                    id,
+			Model:                     info.Model,
+			Type:                      info.Type,
+			CapacityBytes:             info.CapacityBytes,
+			UsedBytes:                 usedBytes,
+			FreeBytes:                 freeBytes,
+			Datastores:                usage.Datastores,
+			TempC:                     attrs.TempC,
+			ThresholdC:                attrs.ThresholdC,
+			Status:                    classifyDisk(info.Type, attrs.TempC),
+			HealthStatus:              attrs.HealthStatus,
+			PowerOnHours:              attrs.PowerOnHours,
+			PowerCycleCount:           attrs.PowerCycleCount,
+			ReallocatedSectors:        attrs.ReallocatedSectors,
+			UncorrectableErrors:       attrs.UncorrectableErrors,
+			MediaWearoutValue:         attrs.MediaWearoutValue,
+			ReadErrorCount:            attrs.ReadErrorCount,
+			PendingSectorReallocation: attrs.PendingSectorReallocation,
 		})
 	}
 	return out
@@ -921,14 +941,12 @@ func isDiskDevice(info diskDeviceInfo) bool {
 
 func retryMissingSMART(client *ssh.Client, ids []string, smartByID map[string]string) {
 	for _, id := range ids {
-		t, _ := parseSMARTTemp(smartByID[id])
-		if t >= 0 {
+		if parseSMARTAttrs(smartByID[id]).TempC >= 0 {
 			continue
 		}
 		cmd := "esxcli storage core device smart get -d " + sshx.ShellQuote(id)
 		out, err := runEsxiRetry(client, "disk smart "+id, cmd, 10*time.Second, 2, func(out string) bool {
-			t, _ := parseSMARTTemp(out)
-			return t >= 0
+			return parseSMARTAttrs(out).TempC >= 0
 		})
 		if err != nil {
 			logx.Warn("esxi collectDisks: smart retry failed", "device", id, "err", err.Error())
@@ -1194,38 +1212,107 @@ func appendUniqueString(list []string, item string) []string {
 	return append(list, item)
 }
 
-// parseSMARTTemp 从 `esxcli storage core device smart get` 输出里找 "Drive Temperature" 行。
-// 实测两种厂家列布局差异很大(见 prompt 6_ESXI_SSH_MONITORING.md 16.4 + 16 节实测):
+// parseSMARTAttrs 把 `esxcli storage core device smart get` 的输出解析成统一属性。
 //
-//	ATA SSD (Samsung 870):  Drive Temperature 66 0  49  34   → Raw=34°C 是真温度
-//	ATA HDD (WDC 16T):      Drive Temperature 48 0  N/A 45   → Raw=45°C 是真温度
-//	NVMe (Samsung 990 PRO): Drive Temperature 46 82 N/A N/A  → Raw=N/A,Value=46°C 才是真温度
+// 列布局实测三家差异(prompt 6_ESXI_SSH_MONITORING.md 16.4 + 16 节):
 //
-// 也就是说:Raw 列优先(ATA 盘),Raw=N/A 时回退 Value(NVMe 盘)。
-// Threshold 列仅 NVMe 才有数字(82),ATA 上也常见 0/N/A,这里"无意义"时返回 -1。
-func parseSMARTTemp(out string) (int, int) {
+//	ATA SSD (Samsung 870):  Drive Temperature 66 0  49  34   → Raw=34°C 是真值
+//	ATA HDD (WDC):          Drive Temperature 48 0  N/A 45   → Raw=45°C 是真值
+//	NVMe (Samsung 990 PRO): Drive Temperature 46 82 N/A N/A  → Raw=N/A,Value=46 才是真值
+//
+// 取值统一:Raw 优先,Raw=N/A 时回退 Value(吃下 NVMe);否则返回 -1。
+// 行结构:`<参数名 token1..tokenN> <Value> <Threshold> <Worst> <Raw>`,末尾固定 4 列。
+// 参数名可能是 1~多 token,例如 "Pending Sector Reallocation Count"(4 个 token)。
+func parseSMARTAttrs(out string) SMARTAttrs {
+	attrs := newSMARTAttrs()
 	for _, line := range strings.Split(out, "\n") {
 		trim := strings.TrimSpace(line)
-		if !strings.HasPrefix(trim, "Drive Temperature") {
+		if trim == "" {
 			continue
 		}
 		fields := strings.Fields(trim)
-		// fields: ["Drive","Temperature",Value,Threshold,Worst,Raw]
-		if len(fields) < 4 {
+		// 最少要有 1 个名字 token + 4 个数据列 = 5 列。
+		if len(fields) < 5 {
 			continue
 		}
-		// 温度:优先 Raw(fields[5]) 取真值,N/A 时回退 Value(fields[2])。
-		temp := -1
-		if len(fields) >= 6 {
-			temp = parseIntDefault(fields[5], -1)
+		// 跳过表头和分隔线。
+		if fields[0] == "Parameter" || strings.HasPrefix(fields[0], "---") {
+			continue
 		}
-		if temp < 0 {
-			temp = parseIntDefault(fields[2], -1)
+		nameTokens := fields[:len(fields)-4]
+		name := strings.Join(nameTokens, " ")
+		valueCol := fields[len(fields)-4]
+		thresholdCol := fields[len(fields)-3]
+		rawCol := fields[len(fields)-1]
+
+		switch name {
+		case "Health Status":
+			if valueCol != "" && valueCol != "N/A" {
+				attrs.HealthStatus = valueCol
+			}
+		case "Power-on Hours":
+			attrs.PowerOnHours = smartInt64Pick(rawCol, valueCol)
+		case "Power Cycle Count":
+			attrs.PowerCycleCount = smartInt64Pick(rawCol, valueCol)
+		case "Reallocated Sector Count":
+			attrs.ReallocatedSectors = smartInt64Pick(rawCol, valueCol)
+		case "Uncorrectable Error Count", "Uncorrectable Sector Count":
+			attrs.UncorrectableErrors = smartInt64Pick(rawCol, valueCol)
+		case "Media Wearout Indicator":
+			// SSD 独有。Value 是 normalized(100=新,0=磨损完),跨厂商可比较;Raw 各家含义不同,不存。
+			attrs.MediaWearoutValue = parseIntDefault(valueCol, -1)
+		case "Read Error Count":
+			attrs.ReadErrorCount = smartInt64Pick(rawCol, valueCol)
+		case "Pending Sector Reallocation Count":
+			attrs.PendingSectorReallocation = smartInt64Pick(rawCol, valueCol)
+		case "Drive Temperature":
+			attrs.TempC = smartIntPick(rawCol, valueCol)
+			attrs.ThresholdC = parseIntDefault(thresholdCol, -1)
 		}
-		thr := parseIntDefault(fields[3], -1)
-		return temp, thr
 	}
-	return -1, -1
+	return attrs
+}
+
+// SMARTAttrs 是 parseSMARTAttrs 的中间产物,collectDisks 取需要的字段写到 DiskHealth。
+type SMARTAttrs struct {
+	HealthStatus              string
+	PowerOnHours              int64
+	PowerCycleCount           int64
+	ReallocatedSectors        int64
+	UncorrectableErrors       int64
+	MediaWearoutValue         int
+	ReadErrorCount            int64
+	PendingSectorReallocation int64
+	TempC                     int
+	ThresholdC                int
+}
+
+func newSMARTAttrs() SMARTAttrs {
+	return SMARTAttrs{
+		PowerOnHours:              -1,
+		PowerCycleCount:           -1,
+		ReallocatedSectors:        -1,
+		UncorrectableErrors:       -1,
+		MediaWearoutValue:         -1,
+		ReadErrorCount:            -1,
+		PendingSectorReallocation: -1,
+		TempC:                     -1,
+		ThresholdC:                -1,
+	}
+}
+
+func smartInt64Pick(raw, value string) int64 {
+	if v := parseInt64Default(raw, -1); v >= 0 {
+		return v
+	}
+	return parseInt64Default(value, -1)
+}
+
+func smartIntPick(raw, value string) int {
+	if v := parseIntDefault(raw, -1); v >= 0 {
+		return v
+	}
+	return parseIntDefault(value, -1)
 }
 
 // classifyDisk 给磁盘按温度评 ok/warning/critical(基于 prompt 表格)。

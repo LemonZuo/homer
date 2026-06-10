@@ -86,7 +86,7 @@ interface MCEHealth {
   uncorrected_total: number
 }
 
-interface DiskTemperature {
+interface DiskHealth {
   device: string
   model: string
   type: string
@@ -97,6 +97,14 @@ interface DiskTemperature {
   temp_c: number
   threshold_c: number
   status: string
+  smart_health?: string
+  smart_power_on_hours?: number
+  smart_power_cycle_count?: number
+  smart_reallocated_sectors?: number
+  smart_uncorrectable_errors?: number
+  smart_media_wearout?: number
+  smart_read_error_count?: number
+  smart_pending_sector_realloc?: number
 }
 
 interface USBController {
@@ -149,7 +157,7 @@ interface Snapshot {
   runtime_usage?: RuntimeUsage
   cpu_temperature?: CPUTemperature
   mce_health?: MCEHealth
-  disk_temperature?: DiskTemperature[]
+  disk_health?: DiskHealth[]
   usb?: USBState
   vms?: VM[]
 }
@@ -489,7 +497,7 @@ function diskStatusPill(status: string) {
   }
 }
 
-function diskUsageInfo(d: DiskTemperature) {
+function diskUsageInfo(d: DiskHealth) {
   const capacity = d.capacity_bytes ?? 0
   const used = d.used_bytes ?? -1
   const free = d.free_bytes ?? -1
@@ -504,7 +512,7 @@ function diskUsageInfo(d: DiskTemperature) {
   return { pct, label, capacity, used, free }
 }
 
-function DisksCard({ disks }: { disks: DiskTemperature[] }) {
+function DisksCard({ disks }: { disks: DiskHealth[] }) {
   return (
     <Card className="px-3 py-3">
       <SectionHead
@@ -567,6 +575,54 @@ function DisksCard({ disks }: { disks: DiskTemperature[] }) {
                     {usage.label}
                   </span>
                 </div>
+                {(() => {
+                  const hours = d.smart_power_on_hours ?? -1
+                  const cycles = d.smart_power_cycle_count ?? -1
+                  const wear = d.smart_media_wearout ?? -1
+                  const realloc = d.smart_reallocated_sectors ?? 0
+                  const pending = d.smart_pending_sector_realloc ?? 0
+                  const uncorr = d.smart_uncorrectable_errors ?? 0
+                  const readErr = d.smart_read_error_count ?? 0
+                  const health = (d.smart_health ?? '').trim()
+
+                  const facts: string[] = []
+                  if (hours >= 0) {
+                    facts.push(hours >= 8760 ? `通电 ${(hours / 8760).toFixed(1)}y` : `通电 ${hours}h`)
+                  }
+                  if (cycles >= 0) facts.push(`开机 ${cycles} 次`)
+
+                  type Pill = { label: string; tone: 'red' | 'amber' | 'green' }
+                  const pills: Pill[] = []
+                  if (wear >= 0) {
+                    const tone: Pill['tone'] = wear >= 80 ? 'green' : wear >= 60 ? 'amber' : 'red'
+                    pills.push({ label: `健康 ${wear}%`, tone })
+                  }
+                  if (realloc > 0) pills.push({ label: `重映射 ${realloc}`, tone: realloc >= 5 ? 'red' : 'amber' })
+                  if (pending > 0) pills.push({ label: `待重映射 ${pending}`, tone: 'red' })
+                  if (uncorr > 0) pills.push({ label: `不可纠正 ${uncorr}`, tone: 'red' })
+                  if (readErr > 0) pills.push({ label: `读错误 ${readErr}`, tone: 'amber' })
+                  if (health && health !== 'OK') pills.push({ label: `SMART: ${health}`, tone: 'red' })
+
+                  if (facts.length === 0 && pills.length === 0) return null
+                  const pillCls: Record<Pill['tone'], string> = {
+                    red: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300',
+                    amber: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                    green: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+                  }
+                  return (
+                    <div className="mt-1 flex flex-wrap items-center gap-1 text-[10.5px] text-muted-foreground">
+                      {facts.length > 0 && <span className="tabular-nums">{facts.join(' · ')}</span>}
+                      {pills.map((p, i) => (
+                        <span
+                          key={i}
+                          className={cn('rounded-full border px-1.5 py-0.5 font-medium tabular-nums', pillCls[p.tone])}
+                        >
+                          {p.label}
+                        </span>
+                      ))}
+                    </div>
+                  )
+                })()}
                 {datastores.length > 0 && (
                   <div
                     className="mt-1 truncate text-[10.5px] text-muted-foreground"
@@ -797,7 +853,7 @@ function HistorySection({
 }: {
   hostKind: string
   hostID: number
-  disks?: DiskTemperature[]
+  disks?: DiskHealth[]
 }) {
   const [range, setRange] = useState('24h')
   const [metric, setMetric] = useState<MetricKey>('cpu_cores')
@@ -879,7 +935,7 @@ function EsxiSeriesChart({
   series: SeriesPoint[] | null
   loading: boolean
   metric: MetricKey
-  disks?: DiskTemperature[]
+  disks?: DiskHealth[]
 }) {
   if (loading) {
     return (
@@ -967,7 +1023,7 @@ function buildCoreLines(series: SeriesPoint[], ts: number[]): LineSeries[] {
   }))
 }
 
-function buildDiskLines(series: SeriesPoint[], ts: number[], disks?: DiskTemperature[]): LineSeries[] {
+function buildDiskLines(series: SeriesPoint[], ts: number[], disks?: DiskHealth[]): LineSeries[] {
   const devSet = new Set<string>()
   for (const p of series) {
     for (const d of p.disks ?? []) devSet.add(d.device)
@@ -1511,7 +1567,7 @@ function HostBlock({ host }: { host: Snapshot }) {
         {/* 卡片网格:永远渲染所有模块,缺数据的格子显示占位,避免子模块整块消失。
             完全没有任何模块数据(首次采样前)时退化成一个大的提示框。 */}
         {(host.platform || host.cpu_static || host.memory || host.cpu_temperature || host.mce_health ||
-          (host.disk_temperature && host.disk_temperature.length > 0) || host.usb || host.vms) ? (
+          (host.disk_health && host.disk_health.length > 0) || host.usb || host.vms) ? (
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             {host.platform
               ? <PlatformCard p={host.platform} m={host.memory} />
@@ -1526,8 +1582,8 @@ function HostBlock({ host }: { host: Snapshot }) {
               ? <CPUTempCard t={host.cpu_temperature} />
               : <EmptyCard icon={<Activity className="h-3.5 w-3.5" />} title="CPU 温度" />}
             <div className="md:col-span-2">
-              {host.disk_temperature && host.disk_temperature.length > 0
-                ? <DisksCard disks={host.disk_temperature} />
+              {host.disk_health && host.disk_health.length > 0
+                ? <DisksCard disks={host.disk_health} />
                 : <EmptyCard icon={<HardDrive className="h-3.5 w-3.5" />} title="磁盘" />}
             </div>
             <div className="md:col-span-2">
@@ -1560,7 +1616,7 @@ function HostBlock({ host }: { host: Snapshot }) {
         </button>
         {expanded && (
           <div className="mt-3">
-            <HistorySection hostKind={host.host_kind} hostID={host.host_id} disks={host.disk_temperature} />
+            <HistorySection hostKind={host.host_kind} hostID={host.host_id} disks={host.disk_health} />
           </div>
         )}
       </div>

@@ -160,7 +160,7 @@ func mergeHostMetrics(base, next HostMetrics) HostMetrics {
 	if !diskTempsComplete(base.Disks) && diskTempsComplete(next.Disks) {
 		base.Disks = next.Disks
 	} else {
-		base.Disks = mergeDiskTemperatures(base.Disks, next.Disks)
+		base.Disks = mergeDiskHealthList(base.Disks, next.Disks)
 	}
 	base.USB = mergeUSBState(base.USB, next.USB)
 	if !vmStatesComplete(base.VMs) && vmStatesComplete(next.VMs) {
@@ -268,18 +268,18 @@ func mergeRuntime(base, next RuntimeUsage) RuntimeUsage {
 	return base
 }
 
-func mergeDiskTemperatures(base, next []DiskTemperature) []DiskTemperature {
+func mergeDiskHealthList(base, next []DiskHealth) []DiskHealth {
 	if len(base) == 0 {
 		return next
 	}
-	byDevice := map[string]DiskTemperature{}
+	byDevice := map[string]DiskHealth{}
 	for _, d := range next {
 		byDevice[d.Device] = d
 	}
-	out := make([]DiskTemperature, 0, len(base))
+	out := make([]DiskHealth, 0, len(base))
 	for _, d := range base {
 		if nd, ok := byDevice[d.Device]; ok {
-			d = mergeDiskTemperature(d, nd)
+			d = mergeDiskHealth(d, nd)
 		}
 		out = append(out, d)
 	}
@@ -295,7 +295,7 @@ func mergeDiskTemperatures(base, next []DiskTemperature) []DiskTemperature {
 	return out
 }
 
-func mergeDiskTemperature(base, next DiskTemperature) DiskTemperature {
+func mergeDiskHealth(base, next DiskHealth) DiskHealth {
 	if base.Model == "" {
 		base.Model = next.Model
 	}

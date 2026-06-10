@@ -22,7 +22,7 @@ func TestThresholdAlertItems(t *testing.T) {
 			MemoryTotalBytes:   1000,
 			MemoryUsagePercent: 92,
 		},
-		Disks: []DiskTemperature{
+		Disks: []DiskHealth{
 			{Device: "naa.hot", Model: "hot disk", TempC: 56, UsedBytes: 950, CapacityBytes: 1000},
 			{Device: "naa.ok", Model: "ok disk", TempC: 40, UsedBytes: 100, CapacityBytes: 1000},
 		},

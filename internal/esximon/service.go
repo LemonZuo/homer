@@ -137,22 +137,22 @@ func (s *Service) TriggerSample() error { return s.RunSample() }
 // Snapshot 每台机器一行,前端拿来渲染卡片。
 // 各 JSON 块以"结构化对象"形式直接返回(不是字符串),便于前端 TS 类型化。
 type Snapshot struct {
-	HostKind  string            `json:"host_kind"`
-	HostID    int64             `json:"host_id"`
-	HostName  string            `json:"host_name"`
-	Endpoint  string            `json:"endpoint"`
-	Reachable bool              `json:"reachable"`
-	Error     string            `json:"error,omitempty"`
-	SampledAt *time.Time        `json:"sampled_at,omitempty"`
-	Platform  *PlatformInfo     `json:"platform,omitempty"`
-	CPU       *CPUStatic        `json:"cpu_static,omitempty"`
-	Memory    *MemoryInfo       `json:"memory,omitempty"`
-	Runtime   *RuntimeUsage     `json:"runtime_usage,omitempty"`
-	CPUTemp   *CPUTemperature   `json:"cpu_temperature,omitempty"`
-	MCE       *MCEHealth        `json:"mce_health,omitempty"`
-	Disks     []DiskTemperature `json:"disk_temperature,omitempty"`
-	USB       *USBState         `json:"usb,omitempty"`
-	VMs       []VM              `json:"vms,omitempty"`
+	HostKind  string          `json:"host_kind"`
+	HostID    int64           `json:"host_id"`
+	HostName  string          `json:"host_name"`
+	Endpoint  string          `json:"endpoint"`
+	Reachable bool            `json:"reachable"`
+	Error     string          `json:"error,omitempty"`
+	SampledAt *time.Time      `json:"sampled_at,omitempty"`
+	Platform  *PlatformInfo   `json:"platform,omitempty"`
+	CPU       *CPUStatic      `json:"cpu_static,omitempty"`
+	Memory    *MemoryInfo     `json:"memory,omitempty"`
+	Runtime   *RuntimeUsage   `json:"runtime_usage,omitempty"`
+	CPUTemp   *CPUTemperature `json:"cpu_temperature,omitempty"`
+	MCE       *MCEHealth      `json:"mce_health,omitempty"`
+	Disks     []DiskHealth    `json:"disk_health,omitempty"`
+	USB       *USBState       `json:"usb,omitempty"`
+	VMs       []VM            `json:"vms,omitempty"`
 }
 
 // BuildSnapshot 基于 esxi_host(主) + esxi_state(JSON 列) 组装快照。
@@ -237,7 +237,7 @@ func hydrate(sn *Snapshot, st model.EsxiState) {
 		}
 	}
 	if st.DiskJSON != "" {
-		var v []DiskTemperature
+		var v []DiskHealth
 		if json.Unmarshal([]byte(st.DiskJSON), &v) == nil {
 			sn.Disks = v
 		}
@@ -283,7 +283,7 @@ func pickBucket(window time.Duration) int {
 // --- 工具:把 sampler 结果转 sample / state ---
 
 // CoreTempPoint / DiskTempPoint 是 esxi_sample 里两个 JSON 列的最小形态。
-// 故意比 client.go 的 CPUCore / DiskTemperature 精简,只留历史曲线需要的字段,
+// 故意比 client.go 的 CPUCore / DiskHealth 精简,只留历史曲线需要的字段,
 // 减小落库体积(单次采样可能 8 核 4 盘,字段越精炼 disk 累积越友好)。
 type CoreTempPoint struct {
 	ID    int `json:"id"`
@@ -358,7 +358,7 @@ func makeSampleCPU(t CPUTemperature) sampleCPUResult {
 	return sampleCPUResult{MaxC: maxC, AvgC: avg, TjMaxC: t.TjMaxC, JSON: mustJSON(points)}
 }
 
-func makeSampleDisks(disks []DiskTemperature) sampleDiskResult {
+func makeSampleDisks(disks []DiskHealth) sampleDiskResult {
 	maxC := -1
 	points := make([]DiskTempPoint, 0, len(disks))
 	for _, d := range disks {
@@ -392,7 +392,7 @@ func sampleMissingMetrics(m HostMetrics) []string {
 		missing = append(missing, "cpu_temperature")
 	}
 	if !diskTempsComplete(m.Disks) {
-		missing = append(missing, "disk_temperature")
+		missing = append(missing, "disk_health")
 	}
 	if m.MCE.State == "" {
 		missing = append(missing, "mce_health")
@@ -410,7 +410,7 @@ func cpuTempComplete(m HostMetrics) bool {
 	return m.CPU.Cores <= 0 || len(m.CPUTemp.Cores) >= m.CPU.Cores
 }
 
-func diskTempsComplete(disks []DiskTemperature) bool {
+func diskTempsComplete(disks []DiskHealth) bool {
 	if len(disks) == 0 {
 		return false
 	}

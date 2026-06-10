@@ -81,12 +81,12 @@ func TestSampleMissingMetricsRequiresCompleteCurrentData(t *testing.T) {
 	m := HostMetrics{
 		CPU:     CPUStatic{Cores: 2},
 		CPUTemp: CPUTemperature{TjMaxC: 100, MaxC: -1, AvgC: -1},
-		Disks:   []DiskTemperature{{Device: "disk-a", TempC: -1}},
+		Disks:   []DiskHealth{{Device: "disk-a", TempC: -1}},
 		VMs:     []VM{{ID: 1, Name: "a", State: "powered_on"}, {ID: 2, Name: "b", State: "unknown"}},
 	}
 
 	got := sampleMissingMetrics(m)
-	want := []string{"cpu_temperature", "disk_temperature", "mce_health", "vm_power_state"}
+	want := []string{"cpu_temperature", "disk_health", "mce_health", "vm_power_state"}
 	if len(got) != len(want) {
 		t.Fatalf("missing len = %d, %#v", len(got), got)
 	}
@@ -104,7 +104,7 @@ func TestBuildStateIncompleteKeepsPreviousSnapshot(t *testing.T) {
 		MaxC:   51,
 		AvgC:   50,
 	}
-	prevDisks := []DiskTemperature{
+	prevDisks := []DiskHealth{
 		{Device: "disk-a", TempC: 35},
 		{Device: "cdrom", TempC: -1},
 		{Device: "disk-b", TempC: 48},
@@ -129,7 +129,7 @@ func TestBuildStateIncompleteKeepsPreviousSnapshot(t *testing.T) {
 		OK:       true,
 		Metrics: HostMetrics{
 			CPUTemp: CPUTemperature{TjMaxC: 100, MaxC: -1, AvgC: -1},
-			Disks:   []DiskTemperature{{Device: "disk-a", TempC: -1}},
+			Disks:   []DiskHealth{{Device: "disk-a", TempC: -1}},
 			VMs:     []VM{{ID: 1, Name: "a", State: "unknown"}, {ID: 2, Name: "b", State: "unknown"}},
 			MCE:     MCEHealth{},
 		},
@@ -158,7 +158,7 @@ func TestBuildSampleUsesCurrentCompleteMetrics(t *testing.T) {
 				MaxC:   52,
 				AvgC:   51,
 			},
-			Disks: []DiskTemperature{
+			Disks: []DiskHealth{
 				{Device: "disk-a", TempC: 35},
 				{Device: "disk-b", TempC: 48},
 			},
@@ -197,7 +197,7 @@ func TestMergeHostMetricsCompletesPartialAttempts(t *testing.T) {
 	base := HostMetrics{
 		CPU:     CPUStatic{Cores: 2},
 		CPUTemp: CPUTemperature{TjMaxC: 100, Cores: []CPUCore{{ID: 0, TempC: 50}, {ID: 1, TempC: 51}}, MaxC: 51, AvgC: 50},
-		Disks: []DiskTemperature{
+		Disks: []DiskHealth{
 			{Device: "disk-a", TempC: -1, UsedBytes: -1, FreeBytes: -1, ThresholdC: -1, Status: "unknown"},
 			{Device: "disk-b", TempC: 42, UsedBytes: -1, FreeBytes: -1, ThresholdC: -1, Status: "ok"},
 		},
@@ -205,7 +205,7 @@ func TestMergeHostMetricsCompletesPartialAttempts(t *testing.T) {
 	}
 	next := HostMetrics{
 		CPU: CPUStatic{Cores: 2},
-		Disks: []DiskTemperature{
+		Disks: []DiskHealth{
 			{Device: "disk-a", TempC: 35, UsedBytes: 10, FreeBytes: 20, ThresholdC: 70, Status: "ok"},
 			{Device: "disk-b", TempC: 42, UsedBytes: 30, FreeBytes: 40, ThresholdC: 70, Status: "ok"},
 		},
@@ -231,7 +231,7 @@ func TestBuildSampleUsesCurrentValidZeroVMOn(t *testing.T) {
 		Metrics: HostMetrics{
 			CPU:     CPUStatic{Cores: 1},
 			CPUTemp: CPUTemperature{TjMaxC: 100, Cores: []CPUCore{{ID: 0, TempC: 50}}, MaxC: 50, AvgC: 50},
-			Disks:   []DiskTemperature{{Device: "disk-a", TempC: 35}},
+			Disks:   []DiskHealth{{Device: "disk-a", TempC: 35}},
 			MCE:     MCEHealth{State: "Green"},
 			VMs: []VM{
 				{ID: 1, Name: "a", State: "powered_off"},
