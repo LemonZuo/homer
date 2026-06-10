@@ -221,7 +221,13 @@ func runEsxi(client *ssh.Client, cmd string) (string, error) {
 // 不应该让 sshx.Run 因为退出码非零而把已收集的 stdout 全部丢弃 —— stdout 里
 // `===DEV===` 分段大概率已经写入大半,调用方按 stdout 是否空判定才是真的失败信号。
 func runEsxiTimeout(client *ssh.Client, cmd string, timeout time.Duration) (string, error) {
-	full := esxiPathPrefix + "{ " + cmd + "; true; } 2>/dev/null"
+	// 调用方拼合批命令时常在末尾留 `; `(方便循环里追加),
+	// 但如果 cmd 末尾正好是 `;`,再附加 `; true` 会生成 `;;` —— POSIX/BusyBox sh
+	// 对 `;;` 在非 case 上下文直接报语法错误,整段 group 不执行,stdout 为空,
+	// 远端进程以 status 2 退出 —— 这正是之前看到 `smart batch failed err=Process exited with status 2`
+	// 但 stdout 全空、partial 兜底打不上的根因。
+	trimmed := strings.TrimRight(cmd, " \t\n;")
+	full := esxiPathPrefix + "{ " + trimmed + "; true; } 2>/dev/null"
 	type result struct {
 		out string
 		err error
@@ -527,8 +533,13 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 	}
 	smartAll, err := runEsxiTimeout(client, b.String(), 25*time.Second)
 	if err != nil {
-		logx.Warn("esxi collectDisks: smart batch failed", "err", err.Error(), "n_dev", len(ids))
-		return nil
+		// 即便 ssh.Run 返回非零(NVMe 等盘的 smart get 偶尔以 status 2 退出),
+		// stdout 里大概率已经吐出了大半 `===DEV===` 段,优先按 stdout 是否含分段判定。
+		if !strings.Contains(smartAll, "===DEV===") {
+			logx.Warn("esxi collectDisks: smart batch failed", "err", err.Error(), "n_dev", len(ids))
+			return nil
+		}
+		logx.Warn("esxi collectDisks: smart batch partial", "err", err.Error(), "n_dev", len(ids), "bytes", len(smartAll))
 	}
 	smartByID := splitSMARTOutput(smartAll)
 	logx.Debug("esxi collectDisks", "n_dev", len(ids), "smart_bytes", len(smartAll), "smart_segments", len(smartByID))
@@ -616,8 +627,14 @@ func parseDeviceModels(out string) (map[string]string, map[string]string) {
 }
 
 // parseSMARTTemp 从 `esxcli storage core device smart get` 输出里找 "Drive Temperature" 行。
-// 列顺序:Parameter | Value | Threshold | Worst | Pass/Fail (具体宽度各版本不同)。
-// 这里按 awk 思路按列号取 $3=current/$5=threshold(prompt 里实测的列布局)。
+// 实测两种厂家列布局差异很大(见 prompt 6_ESXI_SSH_MONITORING.md 16.4 + 16 节实测):
+//
+//	ATA SSD (Samsung 870):  Drive Temperature 66 0  49  34   → Raw=34°C 是真温度
+//	ATA HDD (WDC 16T):      Drive Temperature 48 0  N/A 45   → Raw=45°C 是真温度
+//	NVMe (Samsung 990 PRO): Drive Temperature 46 82 N/A N/A  → Raw=N/A,Value=46°C 才是真温度
+//
+// 也就是说:Raw 列优先(ATA 盘),Raw=N/A 时回退 Value(NVMe 盘)。
+// Threshold 列仅 NVMe 才有数字(82),ATA 上也常见 0/N/A,这里"无意义"时返回 -1。
 func parseSMARTTemp(out string) (int, int) {
 	for _, line := range strings.Split(out, "\n") {
 		trim := strings.TrimSpace(line)
@@ -625,12 +642,20 @@ func parseSMARTTemp(out string) (int, int) {
 			continue
 		}
 		fields := strings.Fields(trim)
-		// fields: ["Drive", "Temperature", "<Value>", "<Threshold>", "<Worst>", ...]
-		if len(fields) >= 4 {
-			cur := parseIntDefault(fields[2], -1)
-			thr := parseIntDefault(fields[3], -1)
-			return cur, thr
+		// fields: ["Drive","Temperature",Value,Threshold,Worst,Raw]
+		if len(fields) < 4 {
+			continue
 		}
+		// 温度:优先 Raw(fields[5]) 取真值,N/A 时回退 Value(fields[2])。
+		temp := -1
+		if len(fields) >= 6 {
+			temp = parseIntDefault(fields[5], -1)
+		}
+		if temp < 0 {
+			temp = parseIntDefault(fields[2], -1)
+		}
+		thr := parseIntDefault(fields[3], -1)
+		return temp, thr
 	}
 	return -1, -1
 }
