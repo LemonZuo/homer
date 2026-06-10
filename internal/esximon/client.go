@@ -120,6 +120,10 @@ type USBState struct {
 	ArbitratorRunning       bool                   `json:"arbitrator_running"`
 	AvailableForPassthrough []USBPassthroughDevice `json:"available_for_passthrough"`
 	VMOwned                 []USBVMOwned           `json:"vm_owned"`
+
+	controllersKnown bool
+	arbitratorKnown  bool
+	passthroughKnown bool
 }
 
 // VM 单台虚拟机。
@@ -1051,12 +1055,24 @@ func collectUSB(client *ssh.Client, vms []VMShallow) USBState {
 	u := USBState{}
 	if out, err := runEsxi(client, "lspci | grep -i usb"); err == nil {
 		u.Controllers = parseUSBControllers(out)
+		u.controllersKnown = len(u.Controllers) > 0
+		if !u.controllersKnown {
+			logx.Warn("esxi usb controllers parsed 0", "bytes", len(out))
+		}
+	} else {
+		logx.Warn("esxi usb controllers fetch failed", "err", err.Error())
 	}
 	if out, err := runEsxi(client, "/etc/init.d/usbarbitrator status"); err == nil {
 		u.ArbitratorRunning = strings.Contains(strings.ToLower(out), "running")
+		u.arbitratorKnown = true
+	} else {
+		logx.Warn("esxi usb arbitrator status failed", "err", err.Error())
 	}
 	if out, err := runEsxi(client, "localcli hardware usb passthrough device list"); err == nil {
 		u.AvailableForPassthrough = parseUSBPassthrough(out)
+		u.passthroughKnown = true
+	} else {
+		logx.Warn("esxi usb passthrough list failed", "err", err.Error())
 	}
 	u.VMOwned = collectUSBVMOwned(client, vms)
 	return u

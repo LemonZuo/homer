@@ -363,7 +363,7 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time) model.EsxiSt
 	st.CPUTempJSON = stickyJSON(m.CPUTemp, m.CPUTemp.MaxC >= 0 && len(m.CPUTemp.Cores) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.CPUTempJSON }))
 	st.MCEJSON = stickyJSON(m.MCE, m.MCE.State != "", prevJSON(prev, func(p *model.EsxiState) string { return p.MCEJSON }))
 	st.DiskJSON = stickyJSON(m.Disks, len(m.Disks) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.DiskJSON }))
-	st.USBJSON = stickyJSON(m.USB, len(m.USB.Controllers) > 0 || m.USB.ArbitratorRunning || len(m.USB.AvailableForPassthrough) > 0 || len(m.USB.VMOwned) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.USBJSON }))
+	st.USBJSON = stickyUSBJSON(m.USB, prevJSON(prev, func(p *model.EsxiState) string { return p.USBJSON }))
 	st.VMJSON = stickyJSON(m.VMs, m.VMs != nil, prevJSON(prev, func(p *model.EsxiState) string { return p.VMJSON }))
 	return st
 }
@@ -377,6 +377,47 @@ func stickyJSON(v any, ok bool, prevJSON string) string {
 		return prevJSON
 	}
 	return mustJSON(v)
+}
+
+func stickyUSBJSON(cur USBState, prevJSON string) string {
+	prev, hasPrev := parsePrevUSB(prevJSON)
+	merged := cur
+	if hasPrev {
+		if !cur.controllersKnown && len(cur.Controllers) == 0 && len(prev.Controllers) > 0 {
+			merged.Controllers = prev.Controllers
+		}
+		if !cur.arbitratorKnown {
+			merged.ArbitratorRunning = prev.ArbitratorRunning
+		}
+		if !cur.passthroughKnown && len(cur.AvailableForPassthrough) == 0 && len(prev.AvailableForPassthrough) > 0 {
+			merged.AvailableForPassthrough = prev.AvailableForPassthrough
+		}
+	}
+	if usbHasData(merged) || cur.controllersKnown || cur.arbitratorKnown || cur.passthroughKnown {
+		return mustJSON(merged)
+	}
+	if prevJSON != "" {
+		return prevJSON
+	}
+	return mustJSON(merged)
+}
+
+func parsePrevUSB(s string) (USBState, bool) {
+	if s == "" {
+		return USBState{}, false
+	}
+	var prev USBState
+	if json.Unmarshal([]byte(s), &prev) != nil {
+		return USBState{}, false
+	}
+	return prev, true
+}
+
+func usbHasData(u USBState) bool {
+	return len(u.Controllers) > 0 ||
+		u.ArbitratorRunning ||
+		len(u.AvailableForPassthrough) > 0 ||
+		len(u.VMOwned) > 0
 }
 
 func prevJSON(prev *model.EsxiState, sel func(*model.EsxiState) string) string {
