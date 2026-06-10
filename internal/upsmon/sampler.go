@@ -9,7 +9,7 @@ import (
 	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
-	"github.com/LemonZuo/homer/internal/upsmon/sshhost"
+	"github.com/LemonZuo/homer/internal/sshlike"
 	"gorm.io/gorm"
 )
 
@@ -31,11 +31,11 @@ type HostResult struct {
 type Sampler struct {
 	db          *gorm.DB
 	hosts       *HostStore
-	credentials sshhost.CredentialResolver
+	credentials sshlike.CredentialResolver
 	timeout     time.Duration
 }
 
-func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshhost.CredentialResolver, sshTimeout time.Duration) *Sampler {
+func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshlike.CredentialResolver, sshTimeout time.Duration) *Sampler {
 	if sshTimeout <= 0 {
 		sshTimeout = 5 * time.Second
 	}
@@ -76,14 +76,15 @@ func (s *Sampler) probeOne(h model.UPSHost) HostResult {
 		StartAt:  time.Now(),
 	}
 
-	target, err := sshhost.ParseTarget(h)
+	target, err := ParseUPSTarget(h)
 	if err != nil {
 		res.Error = err.Error()
 		return res
 	}
-	conn, err := sshhost.ConnFor(target, sshhost.ConnOptions{
-		Credentials: s.credentials,
-		DB:          s.db,
+	conn, err := sshlike.ConnFor(target, sshlike.ConnOptions{
+		Credentials:        s.credentials,
+		LoadBastion:        func(id int64) (*sshlike.Target, error) { return LoadUPSBastion(s.db, id) },
+		RejectBastionChain: true,
 	})
 	if err != nil {
 		res.Error = err.Error()

@@ -7,7 +7,7 @@ import "time"
 const UPSHostKind = "ups"
 
 // UPSHost UPS 监控目标机器。自带 SSH 凭证维度,与 ACME 部署目标完全解耦。
-// auth_json/config_json 结构详见 sql 注释;driver 行为对齐 sshlike,但实现在 internal/upsmon/sshhost 子包。
+// auth_json/config_json 结构详见 sql 注释;连接语义复用 internal/sshlike,UPS 适配在 internal/upsmon/sshtarget.go。
 type UPSHost struct {
 	ID         int64     `gorm:"primaryKey;column:id" json:"id"`
 	Name       string    `gorm:"column:name;size:64;uniqueIndex" json:"name"`
