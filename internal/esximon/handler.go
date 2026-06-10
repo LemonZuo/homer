@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LemonZuo/homer/internal/esximon/sshhost"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/gin-gonic/gin"
 )
@@ -157,21 +156,21 @@ func (h *Handler) refresh(c *gin.Context) {
 // --- Host CRUD ---
 
 type hostDTO struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	Endpoint      string `json:"endpoint"`
-	AuthSource    string `json:"auth_source"`
-	CredentialID  int64  `json:"credential_id"`
-	Username      string `json:"username"`
-	AuthType      string `json:"auth_type"`
-	BastionHostID int64  `json:"bastion_host_id"`
-	Enabled       bool   `json:"enabled"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Endpoint     string `json:"endpoint"`
+	AuthSource   string `json:"auth_source"`
+	CredentialID int64  `json:"credential_id"`
+	Username     string `json:"username"`
+	AuthType     string `json:"auth_type"`
+	BastionID    int64  `json:"bastion_id"`
+	Enabled      bool   `json:"enabled"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 func toHostDTO(row model.EsxiHost) hostDTO {
-	t, _ := sshhost.ParseTarget(row)
+	t, _ := ParseEsxiTarget(row)
 	dto := hostDTO{
 		ID:        row.ID,
 		Name:      row.Name,
@@ -185,7 +184,7 @@ func toHostDTO(row model.EsxiHost) hostDTO {
 		dto.CredentialID = t.CredentialID
 		dto.Username = t.Username
 		dto.AuthType = t.AuthType
-		dto.BastionHostID = t.BastionHostID
+		dto.BastionID = t.BastionID
 	}
 	return dto
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/sshlike"
 	"gorm.io/gorm"
 )
 
@@ -13,7 +14,7 @@ import (
 var ErrCredentialNotFound = errors.New("ESXi SSH 登录凭证不存在")
 
 // CredentialStore esxi_ssh_credential 表的 CRUD。
-// 实现 sshhost.CredentialResolver(Get),供 sampler 在凭证模式下解析使用。
+// 实现 sshlike.CredentialResolver(Resolve),供 sampler 在凭证模式下解析使用。
 type CredentialStore struct {
 	db    *gorm.DB
 	hosts *HostStore
@@ -39,7 +40,7 @@ func (s *CredentialStore) List() ([]model.EsxiSSHCredential, error) {
 	return rows, nil
 }
 
-// Get 实现 sshhost.CredentialResolver。
+// Get 按 id 取一条。
 func (s *CredentialStore) Get(id int64) (*model.EsxiSSHCredential, error) {
 	if id <= 0 {
 		return nil, ErrCredentialNotFound
@@ -52,6 +53,21 @@ func (s *CredentialStore) Get(id int64) (*model.EsxiSSHCredential, error) {
 		return nil, err
 	}
 	return &row, nil
+}
+
+// Resolve 实现 sshlike.CredentialResolver,把 GORM 行扁平化成 sshlike.Credential。
+func (s *CredentialStore) Resolve(id int64) (sshlike.Credential, error) {
+	row, err := s.Get(id)
+	if err != nil {
+		return sshlike.Credential{}, err
+	}
+	return sshlike.Credential{
+		Username:   row.Username,
+		AuthType:   row.AuthType,
+		Password:   row.Password,
+		PrivateKey: row.PrivateKey,
+		Passphrase: row.Passphrase,
+	}, nil
 }
 
 // Upsert id=0 创建,否则更新。

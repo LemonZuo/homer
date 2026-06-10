@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/LemonZuo/homer/internal/esximon/sshhost"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/sshlike"
 	"gorm.io/gorm"
 )
 
 // ErrHostNotFound 主机 id 不存在。
 var ErrHostNotFound = errors.New("ESXi 主机不存在")
 
-// HostStore esxi_host 表的 CRUD。校验委托给 sshhost.ValidateTarget / ValidateBastion。
+// HostStore esxi_host 表的 CRUD。校验委托给 sshlike.ValidateTarget / ValidateBastion。
 type HostStore struct {
 	db *gorm.DB
 }
@@ -56,54 +56,56 @@ func (s *HostStore) Get(id int64) (*model.EsxiHost, error) {
 
 // HostInput 是前端 Upsert 请求的扁平形态,内部转回 auth_json/config_json。
 type HostInput struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	Endpoint      string `json:"endpoint"`
-	AuthSource    string `json:"auth_source"`
-	CredentialID  int64  `json:"credential_id"`
-	Username      string `json:"username"`
-	AuthType      string `json:"auth_type"`
-	Password      string `json:"password"`
-	PrivateKey    string `json:"private_key"`
-	Passphrase    string `json:"passphrase"`
-	BastionHostID int64  `json:"bastion_host_id"`
-	Enabled       *bool  `json:"enabled,omitempty"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Endpoint     string `json:"endpoint"`
+	AuthSource   string `json:"auth_source"`
+	CredentialID int64  `json:"credential_id"`
+	Username     string `json:"username"`
+	AuthType     string `json:"auth_type"`
+	Password     string `json:"password"`
+	PrivateKey   string `json:"private_key"`
+	Passphrase   string `json:"passphrase"`
+	BastionID    int64  `json:"bastion_id"`
+	Enabled      *bool  `json:"enabled,omitempty"`
 }
 
 // Upsert 创建或按 id 更新。
 func (s *HostStore) Upsert(in HostInput) (*model.EsxiHost, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Endpoint = strings.TrimSpace(in.Endpoint)
-	host, port, err := sshhost.SplitEndpoint(in.Endpoint)
+	host, port, err := sshlike.SplitEndpoint(in.Endpoint, "ESXi")
 	if err != nil {
 		return nil, err
 	}
-	t := sshhost.Target{
-		ID:            in.ID,
-		Name:          in.Name,
-		Host:          host,
-		Port:          port,
-		AuthSource:    in.AuthSource,
-		CredentialID:  in.CredentialID,
-		BastionHostID: in.BastionHostID,
-		Username:      in.Username,
-		AuthType:      in.AuthType,
-		Password:      in.Password,
-		PrivateKey:    in.PrivateKey,
-		Passphrase:    in.Passphrase,
+	t := sshlike.Target{
+		ID:           in.ID,
+		Name:         in.Name,
+		Host:         host,
+		Port:         port,
+		AuthSource:   in.AuthSource,
+		CredentialID: in.CredentialID,
+		BastionID:    in.BastionID,
+		Username:     in.Username,
+		AuthType:     in.AuthType,
+		Password:     in.Password,
+		PrivateKey:   in.PrivateKey,
+		Passphrase:   in.Passphrase,
 	}
-	sshhost.Normalize(&t)
-	if err := sshhost.ValidateTarget(t); err != nil {
+	sshlike.Normalize(&t)
+	if err := sshlike.ValidateTarget(t, "ESXi"); err != nil {
 		return nil, err
 	}
-	if err := sshhost.ValidateBastion(s.db, t); err != nil {
+	loader := func(id int64) (*sshlike.Target, error) { return LoadEsxiBastion(s.db, id) }
+	finder := func(id int64) (string, bool, error) { return FindEsxiUpstream(s.db, id) }
+	if err := sshlike.ValidateBastion(loader, finder, t, "本机"); err != nil {
 		return nil, err
 	}
-	authJSON, err := sshhost.MarshalAuthJSON(t)
+	authJSON, err := sshlike.MarshalAuthJSON(t)
 	if err != nil {
 		return nil, fmt.Errorf("序列化认证配置失败:%w", err)
 	}
-	cfgJSON, err := sshhost.MarshalConfigJSON(t)
+	cfgJSON, err := sshlike.MarshalConfigJSON(t)
 	if err != nil {
 		return nil, fmt.Errorf("序列化连接配置失败:%w", err)
 	}
@@ -162,7 +164,7 @@ func (s *HostStore) Delete(id int64) error {
 	if id <= 0 {
 		return errors.New("id 无效")
 	}
-	name, ok, err := sshhost.FindUpstreamRef(s.db, id)
+	name, ok, err := FindEsxiUpstream(s.db, id)
 	if err != nil {
 		return err
 	}
@@ -194,7 +196,7 @@ func (s *HostStore) CredentialUsage() (map[int64]int64, error) {
 		if json.Unmarshal([]byte(row.AuthJSON), &auth) != nil {
 			continue
 		}
-		if auth.AuthSource == sshhost.AuthSourceCredential && auth.CredentialID > 0 {
+		if auth.AuthSource == sshlike.AuthSourceCredential && auth.CredentialID > 0 {
 			counts[auth.CredentialID]++
 		}
 	}
@@ -216,7 +218,7 @@ func (s *HostStore) HostsByCredential(credID int64) ([]string, error) {
 		if json.Unmarshal([]byte(row.AuthJSON), &auth) != nil {
 			continue
 		}
-		if auth.AuthSource == sshhost.AuthSourceCredential && auth.CredentialID == credID {
+		if auth.AuthSource == sshlike.AuthSourceCredential && auth.CredentialID == credID {
 			names = append(names, row.Name)
 		}
 	}
