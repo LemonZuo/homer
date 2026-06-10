@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/sshx"
 	"golang.org/x/crypto/ssh"
 )
 

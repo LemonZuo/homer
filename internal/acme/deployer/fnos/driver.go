@@ -23,9 +23,9 @@ import (
 	"strings"
 
 	"github.com/LemonZuo/homer/internal/acme"
-	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
 	"github.com/LemonZuo/homer/internal/model"
 	"github.com/LemonZuo/homer/internal/sshlike"
+	"github.com/LemonZuo/homer/internal/sshx"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )

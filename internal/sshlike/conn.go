@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/LemonZuo/homer/internal/acme/deployer/sshx"
+	"github.com/LemonZuo/homer/internal/sshx"
 )
 
 // ConnOptions 注入 sshlike 不该自己持有的依赖:
