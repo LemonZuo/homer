@@ -163,3 +163,37 @@ func TestFilterVMOwnedUSB(t *testing.T) {
 		t.Fatalf("filtered = %#v", got)
 	}
 }
+
+func TestIsDiskDeviceExcludesOpticalDevices(t *testing.T) {
+	if isDiskDevice(diskDeviceInfo{Model: "DVD-RW DA8AESH", Type: "CD-ROM"}) {
+		t.Fatal("optical device should be excluded")
+	}
+	if !isDiskDevice(diskDeviceInfo{Model: "Samsung SSD 870 EVO 1TB", Type: "Direct-Access"}) {
+		t.Fatal("direct-access disk should be included")
+	}
+}
+
+func TestParseBatchVMPowerState(t *testing.T) {
+	out := `
+===VM===130
+Retrieved runtime info
+Powered on
+===VM===77
+Retrieved runtime info
+Powered off
+===VM===96
+`
+	got := parseBatchVMPowerState(out)
+	if got[130] != "powered_on" {
+		t.Fatalf("vm 130 state = %q", got[130])
+	}
+	if got[77] != "powered_off" {
+		t.Fatalf("vm 77 state = %q", got[77])
+	}
+	if got[96] != "unknown" {
+		t.Fatalf("vm 96 state = %q", got[96])
+	}
+	if knownPowerCount(got) != 2 {
+		t.Fatalf("known count = %d", knownPowerCount(got))
+	}
+}

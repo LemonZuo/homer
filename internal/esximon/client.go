@@ -137,8 +137,8 @@ type VM struct {
 }
 
 // HostMetrics 一台 ESXi 一轮的完整采集结果。
-// 任何一段子采集失败(esxcli/vsish 单点错误)都不会让整轮挂掉 —— 失败的部分留空,
-// 上层 service 写入 esxi_state 时 reachable=true 但相应 JSON 列为空字符串。
+// 任何一段子采集失败(esxcli/vsish 单点错误)都不会让整轮挂掉。调用方会对关键
+// 指标做完整性判定:完整才写 esxi_sample,不完整则保留 esxi_state 的上一轮有效值。
 type HostMetrics struct {
 	Platform PlatformInfo      `json:"platform"`
 	CPU      CPUStatic         `json:"cpu_static"`
@@ -165,48 +165,87 @@ func CollectAll(client *ssh.Client) HostMetrics {
 		CPU:     CPUStatic{TjMaxC: -1},
 	}
 
-	if out, err := runEsxi(client, "esxcli hardware platform get"); err == nil {
+	if out, err := runEsxiRetry(client, "platform", "esxcli hardware platform get", defaultCmdTimeout, 2, func(out string) bool {
+		p := parsePlatform(out)
+		return p.Vendor != "" || p.Product != "" || p.UUID != ""
+	}); err == nil {
 		snap.Platform = parsePlatform(out)
+	} else {
+		logx.Warn("esxi platform fetch failed", "err", err.Error())
 	}
-	if out, err := runEsxi(client, "vmware -v; esxcli system version get"); err == nil {
+	if out, err := runEsxiRetry(client, "version", "vmware -v; esxcli system version get", defaultCmdTimeout, 2, func(out string) bool {
+		return versionRe.MatchString(out)
+	}); err == nil {
 		parseVersionInto(&snap.Platform, out)
+	} else {
+		logx.Warn("esxi version fetch failed", "err", err.Error())
 	}
-	if out, err := runEsxi(client, "esxcli hardware cpu list"); err == nil {
+	if out, err := runEsxiRetry(client, "cpu list", "esxcli hardware cpu list", defaultCmdTimeout, 2, func(out string) bool {
+		c := parseCPUStatic(out)
+		return c.Brand != "" || c.Family > 0 || c.ModelID > 0
+	}); err == nil {
 		snap.CPU = parseCPUStatic(out)
+	} else {
+		logx.Warn("esxi cpu list failed", "err", err.Error())
 	}
 	// 补核心数(cpu list 没这字段)。
-	if out, err := runEsxi(client, "esxcli hardware cpu global get"); err == nil {
+	if out, err := runEsxiRetry(client, "cpu global", "esxcli hardware cpu global get", defaultCmdTimeout, 2, func(out string) bool {
+		kv := parseKV(out)
+		return parseIntDefault(kv["cpu_cores"], 0) > 0
+	}); err == nil {
 		fillCoresFromGlobal(&snap.CPU, out)
+	} else {
+		logx.Warn("esxi cpu global failed", "err", err.Error())
 	}
 	// smbiosDump 给真实 CPU 型号/当前频率/核心数,覆盖 esxcli 的 vendor 名。
 	// 远端 awk 裁出 Type 4 块(约 30 行) —— smbiosDump 全量约 700 行/35 KiB,
 	// 没必要全拉回来,且大输出在 SSH 窗口流控下偶发拖慢。
 	smbiosCmd := `smbiosDump 2>/dev/null | awk '/Processor Info \(Type 4\)/{p=NR+30} NR<=p'`
-	if out, err := runEsxiTimeout(client, smbiosCmd, 12*time.Second); err == nil {
+	if out, err := runEsxiRetry(client, "smbios cpu", smbiosCmd, 12*time.Second, 2, func(out string) bool {
+		return strings.Contains(out, "Processor Info") && strings.Contains(out, "Type 4")
+	}); err == nil {
 		logx.Debug("esxi smbios slice", "bytes", len(out))
 		fillFromSmbios(&snap.CPU, out)
 	} else {
 		logx.Warn("esxi smbios fetch failed", "err", err.Error())
 	}
-	if out, err := runEsxi(client, "vsish -e get /hardware/msr/pcpu/0/addr/0x1A2"); err == nil {
+	if out, err := runEsxiRetry(client, "cpu tjmax", "vsish -e get /hardware/msr/pcpu/0/addr/0x1A2", defaultCmdTimeout, 2, func(out string) bool {
+		return decodeTjMax(out) > 0
+	}); err == nil {
 		if tj := decodeTjMax(out); tj > 0 {
 			snap.CPU.TjMaxC = tj
 		}
+	} else {
+		logx.Warn("esxi cpu tjmax failed", "err", err.Error())
 	}
-	if out, err := runEsxi(client, "esxcli hardware memory get"); err == nil {
+	if out, err := runEsxiRetry(client, "memory", "esxcli hardware memory get", defaultCmdTimeout, 2, func(out string) bool {
+		return parseMemory(out).TotalBytes > 0
+	}); err == nil {
 		snap.Memory = parseMemory(out)
+	} else {
+		logx.Warn("esxi memory fetch failed", "err", err.Error())
 	}
 	// vsish 拿可用内存(esxcli 没这字段);同时兜底总内存。
-	if out, err := runEsxi(client, "vsish -e cat /memory/comprehensive"); err == nil {
+	if out, err := runEsxiRetry(client, "memory comprehensive", "vsish -e cat /memory/comprehensive", defaultCmdTimeout, 2, func(out string) bool {
+		var m MemoryInfo
+		fillMemoryFromVsish(&m, out)
+		return m.TotalBytes > 0 || m.FreeBytes > 0
+	}); err == nil {
 		fillMemoryFromVsish(&snap.Memory, out)
+	} else {
+		logx.Warn("esxi memory comprehensive failed", "err", err.Error())
 	}
 
 	// CPU 温度:遍历 0..15 核,失败即停。
-	snap.CPUTemp = collectCPUTemp(client, snap.CPU.TjMaxC)
+	snap.CPUTemp = collectCPUTemp(client, snap.CPU.TjMaxC, snap.CPU.Cores)
 
 	// MCE。
-	if out, err := runEsxi(client, "vsish -e cat /hardware/health/mce"); err == nil {
+	if out, err := runEsxiRetry(client, "mce health", "vsish -e cat /hardware/health/mce", defaultCmdTimeout, 2, func(out string) bool {
+		return parseMCE(out).State != ""
+	}); err == nil {
 		snap.MCE = parseMCE(out)
+	} else {
+		logx.Warn("esxi mce fetch failed", "err", err.Error())
 	}
 
 	// 磁盘 SMART(逐盘遍历)。
@@ -216,9 +255,16 @@ func CollectAll(client *ssh.Client) HostMetrics {
 	// 省一次 session 也避免两边对 VM 列表看法不一致。
 	var vmsShallow []VMShallow
 	var guestOS map[int]string
-	if out, err := runEsxi(client, "vim-cmd vmsvc/getallvms"); err == nil {
+	if out, err := runEsxiRetry(client, "vm list", "vim-cmd vmsvc/getallvms", 12*time.Second, 2, func(out string) bool {
+		return strings.Contains(out, "Vmid") || len(parseVMListShallow(out)) > 0
+	}); err == nil {
 		vmsShallow = parseVMListShallow(out)
+		if vmsShallow == nil {
+			vmsShallow = []VMShallow{}
+		}
 		guestOS = parseVMGuestOS(out)
+	} else {
+		logx.Warn("esxi vm list failed", "err", err.Error())
 	}
 
 	// USB:控制器 + arbitrator + 可直通 + VM 持有。
@@ -269,6 +315,31 @@ func runEsxiTimeout(client *ssh.Client, cmd string, timeout time.Duration) (stri
 	case <-time.After(timeout):
 		return "", fmt.Errorf("esxi command timeout after %s", timeout)
 	}
+}
+
+func runEsxiRetry(client *ssh.Client, name, cmd string, timeout time.Duration, attempts int, ok func(string) bool) (string, error) {
+	if attempts <= 0 {
+		attempts = 1
+	}
+	var lastOut string
+	var lastErr error
+	for i := 1; i <= attempts; i++ {
+		out, err := runEsxiTimeout(client, cmd, timeout)
+		lastOut = out
+		if err == nil && (ok == nil || ok(out)) {
+			return out, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("validator failed")
+		}
+		if i < attempts {
+			logx.Warn("esxi command retry", "name", name, "attempt", i, "err", lastErr.Error(), "bytes", len(out))
+			time.Sleep(time.Duration(i) * 150 * time.Millisecond)
+		}
+	}
+	return lastOut, fmt.Errorf("%s failed after %d attempts: %w", name, attempts, lastErr)
 }
 
 // --- 解析:平台 / 版本 ---
@@ -498,7 +569,7 @@ func fillMemoryFromVsish(m *MemoryInfo, out string) {
 // 远端用一段 shell 循环读取并按 `CORE=<n> TJ=<v> DRO=<v>` 一行一核打印,
 // 失败核打印空 TJ/DRO,本地遇空即停(与逐核串行的旧行为保持一致)。
 // 这样原本 N*2 次 ssh.NewSession 压缩到 1 次,典型 4 核机器省下 ~7 次 session 开销。
-func collectCPUTemp(client *ssh.Client, fallbackTjMax int) CPUTemperature {
+func collectCPUTemp(client *ssh.Client, fallbackTjMax, expectedCores int) CPUTemperature {
 	res := CPUTemperature{TjMaxC: fallbackTjMax, MaxC: -1, AvgC: -1}
 	script := `for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   tj=$(vsish -e get /hardware/msr/pcpu/$i/addr/0x1A2 2>/dev/null)
@@ -508,10 +579,22 @@ func collectCPUTemp(client *ssh.Client, fallbackTjMax int) CPUTemperature {
 done`
 	// 16 核 × 2 次 vsish,本地 shell 循环,典型 < 2s;给 15s 留余量,
 	// 防止默认 8s 在多核机器上偶发被截断。
-	out, err := runEsxiTimeout(client, script, 15*time.Second)
+	out, err := runEsxiRetry(client, "cpu temperature", script, 15*time.Second, 3, func(out string) bool {
+		got := len(parseCPUTempOutput(out, fallbackTjMax).Cores)
+		if expectedCores > 0 {
+			return got >= expectedCores
+		}
+		return got > 0
+	})
 	if err != nil {
+		logx.Warn("esxi cpu temperature failed", "err", err.Error())
 		return res
 	}
+	return parseCPUTempOutput(out, fallbackTjMax)
+}
+
+func parseCPUTempOutput(out string, fallbackTjMax int) CPUTemperature {
+	res := CPUTemperature{TjMaxC: fallbackTjMax, MaxC: -1, AvgC: -1}
 	var sum int
 	maxC := -1
 	for _, line := range strings.Split(out, "\n") {
@@ -648,7 +731,9 @@ type diskUsage struct {
 
 func collectDisks(client *ssh.Client) []DiskTemperature {
 	// list 命令本身在多盘机器上偶发 5-10s(要走 SCSI inquiry),给 15s 留余量。
-	listOut, err := runEsxiTimeout(client, "esxcli storage core device list", 15*time.Second)
+	listOut, err := runEsxiRetry(client, "disk device list", "esxcli storage core device list", 15*time.Second, 2, func(out string) bool {
+		return len(deviceIDRe.FindAllString(out, -1)) > 0
+	})
 	if err != nil {
 		logx.Warn("esxi collectDisks: list failed", "err", err.Error())
 		return nil
@@ -675,7 +760,14 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 			continue
 		}
 		seen[id] = struct{}{}
+		if !isDiskDevice(devInfo[id]) {
+			continue
+		}
 		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		logx.Warn("esxi collectDisks: no smart-capable disk devices", "n_raw", len(rawIDs))
+		return nil
 	}
 
 	// 把所有盘的 SMART 合并到一次 SSH session,用 `===DEV===<id>` 行做分段标志。
@@ -690,7 +782,9 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 		b.WriteString(sshx.ShellQuote(id))
 		b.WriteString("; ")
 	}
-	smartAll, err := runEsxiTimeout(client, b.String(), 25*time.Second)
+	smartAll, err := runEsxiRetry(client, "disk smart batch", b.String(), 30*time.Second, 2, func(out string) bool {
+		return strings.Count(out, "===DEV===") >= len(ids)
+	})
 	if err != nil {
 		// 即便 ssh.Run 返回非零(NVMe 等盘的 smart get 偶尔以 status 2 退出),
 		// stdout 里大概率已经吐出了大半 `===DEV===` 段,优先按 stdout 是否含分段判定。
@@ -701,6 +795,7 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 		logx.Warn("esxi collectDisks: smart batch partial", "err", err.Error(), "n_dev", len(ids), "bytes", len(smartAll))
 	}
 	smartByID := splitSMARTOutput(smartAll)
+	retryMissingSMART(client, ids, smartByID)
 	logx.Debug("esxi collectDisks", "n_dev", len(ids), "smart_bytes", len(smartAll), "smart_segments", len(smartByID))
 
 	var out []DiskTemperature
@@ -731,9 +826,44 @@ func collectDisks(client *ssh.Client) []DiskTemperature {
 	return out
 }
 
+func isDiskDevice(info diskDeviceInfo) bool {
+	model := strings.ToLower(info.Model)
+	devType := strings.ToLower(info.Type)
+	if strings.Contains(model, "dvd") || strings.Contains(model, "cd-rom") || strings.Contains(model, "cdrom") {
+		return false
+	}
+	if strings.Contains(devType, "cd-rom") || strings.Contains(devType, "cdrom") || strings.Contains(devType, "optical") {
+		return false
+	}
+	return true
+}
+
+func retryMissingSMART(client *ssh.Client, ids []string, smartByID map[string]string) {
+	for _, id := range ids {
+		t, _ := parseSMARTTemp(smartByID[id])
+		if t >= 0 {
+			continue
+		}
+		cmd := "esxcli storage core device smart get -d " + sshx.ShellQuote(id)
+		out, err := runEsxiRetry(client, "disk smart "+id, cmd, 10*time.Second, 2, func(out string) bool {
+			t, _ := parseSMARTTemp(out)
+			return t >= 0
+		})
+		if err != nil {
+			logx.Warn("esxi collectDisks: smart retry failed", "device", id, "err", err.Error())
+			continue
+		}
+		smartByID[id] = out
+	}
+}
+
 func collectDiskUsage(client *ssh.Client) map[string]diskUsage {
-	fsOut, fsErr := runEsxi(client, "esxcli storage filesystem list")
-	extentOut, extentErr := runEsxi(client, "esxcli storage vmfs extent list")
+	fsOut, fsErr := runEsxiRetry(client, "storage filesystem list", "esxcli storage filesystem list", defaultCmdTimeout, 2, func(out string) bool {
+		return len(parseStorageFilesystems(out)) > 0
+	})
+	extentOut, extentErr := runEsxiRetry(client, "storage vmfs extent list", "esxcli storage vmfs extent list", defaultCmdTimeout, 2, func(out string) bool {
+		return len(parseVMFSExtents(out)) > 0
+	})
 	if fsErr != nil || extentErr != nil {
 		if fsErr != nil {
 			logx.Warn("esxi collectDisks: filesystem list failed", "err", fsErr.Error())
@@ -1055,7 +1185,9 @@ func classifyDisk(devType string, temp int) string {
 // (避免在这里再跑一次 getallvms)。
 func collectUSB(client *ssh.Client, vms []VMShallow) USBState {
 	u := USBState{}
-	if out, err := runEsxi(client, "lspci | grep -i usb"); err == nil {
+	if out, err := runEsxiRetry(client, "usb controllers", "lspci | grep -i usb", defaultCmdTimeout, 2, func(out string) bool {
+		return len(parseUSBControllers(out)) > 0
+	}); err == nil {
 		u.Controllers = parseUSBControllers(out)
 		u.controllersKnown = len(u.Controllers) > 0
 		if !u.controllersKnown {
@@ -1064,13 +1196,18 @@ func collectUSB(client *ssh.Client, vms []VMShallow) USBState {
 	} else {
 		logx.Warn("esxi usb controllers fetch failed", "err", err.Error())
 	}
-	if out, err := runEsxi(client, "/etc/init.d/usbarbitrator status"); err == nil {
+	if out, err := runEsxiRetry(client, "usb arbitrator status", "/etc/init.d/usbarbitrator status", defaultCmdTimeout, 2, func(out string) bool {
+		low := strings.ToLower(out)
+		return strings.Contains(low, "running") || strings.Contains(low, "stopped")
+	}); err == nil {
 		u.ArbitratorRunning = strings.Contains(strings.ToLower(out), "running")
 		u.arbitratorKnown = true
 	} else {
 		logx.Warn("esxi usb arbitrator status failed", "err", err.Error())
 	}
-	if out, err := runEsxi(client, "localcli hardware usb passthrough device list"); err == nil {
+	if out, err := runEsxiRetry(client, "usb passthrough list", "localcli hardware usb passthrough device list", defaultCmdTimeout, 2, func(out string) bool {
+		return strings.Contains(out, "VendorId") && strings.Contains(out, "ProductId")
+	}); err == nil {
 		u.AvailableForPassthrough = parseUSBPassthrough(out)
 		u.passthroughKnown = true
 	} else {
@@ -1165,10 +1302,32 @@ func batchVMDevices(client *ssh.Client, vms []VMShallow) map[int]string {
 		b.WriteString(strconv.Itoa(v.ID))
 		b.WriteString("; ")
 	}
-	out, err := runEsxiTimeout(client, b.String(), 20*time.Second)
+	out, err := runEsxiRetry(client, "vm devices batch", b.String(), 35*time.Second, 2, func(out string) bool {
+		return len(parseBatchVMDevices(out)) >= len(vms)
+	})
 	if err != nil {
-		return res
+		logx.Warn("esxi vm devices batch failed", "err", err.Error(), "bytes", len(out))
 	}
+	res = parseBatchVMDevices(out)
+	for _, v := range vms {
+		if res[v.ID] != "" {
+			continue
+		}
+		cmd := "vim-cmd vmsvc/device.getdevices " + strconv.Itoa(v.ID)
+		devOut, err := runEsxiRetry(client, "vm devices "+strconv.Itoa(v.ID), cmd, 10*time.Second, 2, func(out string) bool {
+			return strings.Contains(out, "(vim.vm.device.")
+		})
+		if err != nil {
+			logx.Warn("esxi vm devices retry failed", "vm_id", v.ID, "vm", v.Name, "err", err.Error())
+			continue
+		}
+		res[v.ID] = devOut
+	}
+	return res
+}
+
+func parseBatchVMDevices(out string) map[int]string {
+	res := map[int]string{}
 	currentID := -1
 	var buf strings.Builder
 	flush := func() {
@@ -1391,12 +1550,34 @@ func batchVMPowerState(client *ssh.Client, vms []VMShallow) map[int]string {
 		b.WriteString(strconv.Itoa(v.ID))
 		b.WriteString("; ")
 	}
-	// 14 VM × 每次 ~1s = 14s,远超默认 8s,这里给 20s。
-	out, err := runEsxiTimeout(client, b.String(), 20*time.Second)
+	// 14 VM × 每次 ~1s = 14s,远超默认 8s,这里给 35s,并在批量不完整时逐 VM 补采。
+	out, err := runEsxiRetry(client, "vm power batch", b.String(), 35*time.Second, 2, func(out string) bool {
+		return knownPowerCount(parseBatchVMPowerState(out)) == len(vms)
+	})
 	if err != nil {
-		return res
+		logx.Warn("esxi vm power batch failed", "err", err.Error(), "bytes", len(out))
 	}
-	var currentID int = -1
+	res = parseBatchVMPowerState(out)
+	for _, v := range vms {
+		if st := res[v.ID]; st != "" && st != "unknown" {
+			continue
+		}
+		cmd := "vim-cmd vmsvc/power.getstate " + strconv.Itoa(v.ID)
+		powerOut, err := runEsxiRetry(client, "vm power "+strconv.Itoa(v.ID), cmd, 8*time.Second, 2, func(out string) bool {
+			return mapVMPowerState(out) != "unknown"
+		})
+		if err != nil {
+			logx.Warn("esxi vm power retry failed", "vm_id", v.ID, "vm", v.Name, "err", err.Error())
+			continue
+		}
+		res[v.ID] = mapVMPowerState(powerOut)
+	}
+	return res
+}
+
+func parseBatchVMPowerState(out string) map[int]string {
+	res := map[int]string{}
+	currentID := -1
 	var buf strings.Builder
 	flush := func() {
 		if currentID >= 0 {
@@ -1423,6 +1604,16 @@ func batchVMPowerState(client *ssh.Client, vms []VMShallow) map[int]string {
 	}
 	flush()
 	return res
+}
+
+func knownPowerCount(states map[int]string) int {
+	n := 0
+	for _, st := range states {
+		if st != "" && st != "unknown" {
+			n++
+		}
+	}
+	return n
 }
 
 func parseVMListShallow(out string) []VMShallow {

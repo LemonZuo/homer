@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/LemonZuo/homer/internal/logx"
@@ -65,13 +66,20 @@ func (s *Service) RunSample() error {
 		if r.OK {
 			reachableHosts++
 		}
+		missing := sampleMissingMetrics(r.Metrics)
+		sampleOK := r.OK && len(missing) == 0
+		if r.OK && !sampleOK {
+			r.Error = "采集不完整:" + strings.Join(missing, ",")
+			logx.Warn("esxi sample skipped: incomplete metrics",
+				"host", r.HostName, "host_id", r.HostID, "missing", strings.Join(missing, ","))
+		}
 		var prev *model.EsxiState
 		if p, ok := prevByHost[fmt.Sprintf("%s/%d", r.HostKind, r.HostID)]; ok {
 			prev = &p
 		}
-		st := buildState(r, prev, now)
+		st := buildState(r, prev, now, sampleOK)
 		states = append(states, st)
-		if r.OK {
+		if sampleOK {
 			samples = append(samples, buildSample(r, now))
 		}
 	}
@@ -268,66 +276,151 @@ type DiskTempPoint struct {
 
 func buildSample(r HostResult, now time.Time) model.EsxiSample {
 	m := r.Metrics
-	disksMax := -1
-	for _, d := range m.Disks {
-		if d.TempC > disksMax {
-			disksMax = d.TempC
-		}
-	}
-	vmTotal := -1
-	vmOn := -1
-	if m.VMs != nil {
-		vmTotal = len(m.VMs)
-		on := 0
-		for _, v := range m.VMs {
-			if v.State == "powered_on" {
-				on++
-			}
-		}
-		vmOn = on
-	}
-
-	corePoints := make([]CoreTempPoint, 0, len(m.CPUTemp.Cores))
-	for _, c := range m.CPUTemp.Cores {
-		corePoints = append(corePoints, CoreTempPoint{ID: c.ID, TempC: c.TempC})
-	}
-	diskPoints := make([]DiskTempPoint, 0, len(m.Disks))
-	for _, d := range m.Disks {
-		diskPoints = append(diskPoints, DiskTempPoint{Device: d.Device, TempC: d.TempC})
-	}
-	cpuTempJSON := ""
-	if len(corePoints) > 0 {
-		cpuTempJSON = mustJSON(corePoints)
-	}
-	diskTempJSON := ""
-	if len(diskPoints) > 0 {
-		diskTempJSON = mustJSON(diskPoints)
-	}
+	cpu := makeSampleCPU(m.CPUTemp)
+	disks := makeSampleDisks(m.Disks)
+	vms := makeSampleVMs(m.VMs)
 
 	return model.EsxiSample{
 		HostKind:            r.HostKind,
 		HostID:              r.HostID,
 		HostName:            r.HostName,
-		CPUMaxC:             m.CPUTemp.MaxC,
-		CPUAvgC:             m.CPUTemp.AvgC,
-		CPUTjMaxC:           m.CPUTemp.TjMaxC,
+		CPUMaxC:             cpu.MaxC,
+		CPUAvgC:             cpu.AvgC,
+		CPUTjMaxC:           cpu.TjMaxC,
 		MCEState:            m.MCE.State,
 		MCECorrectedTotal:   m.MCE.CorrectedTotal,
 		MCEUncorrectedTotal: m.MCE.UncorrectedTotal,
-		DiskMaxC:            disksMax,
-		VMTotal:             vmTotal,
-		VMPoweredOn:         vmOn,
-		CPUTempPerCoreJSON:  cpuTempJSON,
-		DiskTempPerDiskJSON: diskTempJSON,
+		DiskMaxC:            disks.MaxC,
+		VMTotal:             vms.Total,
+		VMPoweredOn:         vms.PoweredOn,
+		CPUTempPerCoreJSON:  cpu.JSON,
+		DiskTempPerDiskJSON: disks.JSON,
 		SampledAt:           now,
 	}
+}
+
+type sampleCPUResult struct {
+	MaxC   int
+	AvgC   int
+	TjMaxC int
+	JSON   string
+}
+
+type sampleDiskResult struct {
+	MaxC int
+	JSON string
+}
+
+type sampleVMResult struct {
+	Total     int
+	PoweredOn int
+}
+
+func makeSampleCPU(t CPUTemperature) sampleCPUResult {
+	points := make([]CoreTempPoint, 0, len(t.Cores))
+	sum := 0
+	maxC := -1
+	for _, c := range t.Cores {
+		points = append(points, CoreTempPoint{ID: c.ID, TempC: c.TempC})
+		sum += c.TempC
+		if c.TempC > maxC {
+			maxC = c.TempC
+		}
+	}
+	avg := t.AvgC
+	if avg < 0 && len(points) > 0 {
+		avg = sum / len(points)
+	}
+	if t.MaxC >= 0 {
+		maxC = t.MaxC
+	}
+	return sampleCPUResult{MaxC: maxC, AvgC: avg, TjMaxC: t.TjMaxC, JSON: mustJSON(points)}
+}
+
+func makeSampleDisks(disks []DiskTemperature) sampleDiskResult {
+	maxC := -1
+	points := make([]DiskTempPoint, 0, len(disks))
+	for _, d := range disks {
+		if d.TempC < 0 {
+			continue
+		}
+		points = append(points, DiskTempPoint{Device: d.Device, TempC: d.TempC})
+		if d.TempC > maxC {
+			maxC = d.TempC
+		}
+	}
+	if len(points) == 0 {
+		return sampleDiskResult{MaxC: -1}
+	}
+	return sampleDiskResult{MaxC: maxC, JSON: mustJSON(points)}
+}
+
+func makeSampleVMs(vms []VM) sampleVMResult {
+	on := 0
+	for _, v := range vms {
+		if v.State == "powered_on" {
+			on++
+		}
+	}
+	return sampleVMResult{Total: len(vms), PoweredOn: on}
+}
+
+func sampleMissingMetrics(m HostMetrics) []string {
+	missing := make([]string, 0, 4)
+	if !cpuTempComplete(m) {
+		missing = append(missing, "cpu_temperature")
+	}
+	if !diskTempsComplete(m.Disks) {
+		missing = append(missing, "disk_temperature")
+	}
+	if m.MCE.State == "" {
+		missing = append(missing, "mce_health")
+	}
+	if !vmStatesComplete(m.VMs) {
+		missing = append(missing, "vm_power_state")
+	}
+	return missing
+}
+
+func cpuTempComplete(m HostMetrics) bool {
+	if m.CPUTemp.MaxC < 0 || len(m.CPUTemp.Cores) == 0 {
+		return false
+	}
+	return m.CPU.Cores <= 0 || len(m.CPUTemp.Cores) >= m.CPU.Cores
+}
+
+func diskTempsComplete(disks []DiskTemperature) bool {
+	if len(disks) == 0 {
+		return false
+	}
+	for _, d := range disks {
+		if d.TempC < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func vmStatesComplete(vms []VM) bool {
+	if vms == nil {
+		return false
+	}
+	if len(vms) == 0 {
+		return true
+	}
+	for _, v := range vms {
+		if v.State == "" || v.State == "unknown" {
+			return false
+		}
+	}
+	return true
 }
 
 // buildState 把单台机器一轮采集结果转成 esxi_state 行。
 // 关键约定:当某个子项采集失败(整轮 SSH 挂 / 单个命令空返回)时,该 JSON 列不会被
 // "新的空值"覆盖,而是回退到 prev 的同名 JSON,让前端看到的快照保持上一次已知值。
-// 这样即使一轮里 disk SMART 或 USB 探测偶发失败,UI 不会"该模块突然消失"。
-func buildState(r HostResult, prev *model.EsxiState, now time.Time) model.EsxiState {
+// 不完整采集不会推进 SampledAt;它只表示最近一次写入 esxi_sample 的完整采样时间。
+func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComplete bool) model.EsxiState {
 	st := model.EsxiState{
 		HostKind:  r.HostKind,
 		HostID:    r.HostID,
@@ -352,19 +445,23 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time) model.EsxiSt
 		}
 		return st
 	}
-	t := now
-	st.SampledAt = &t
+	if sampleComplete {
+		t := now
+		st.SampledAt = &t
+	} else if prev != nil {
+		st.SampledAt = prev.SampledAt
+	}
 
 	m := r.Metrics
 	// 各子项判 "是否拿到有效数据";没拿到就 fallback prev 同名 JSON。
 	st.PlatformJSON = stickyJSON(m.Platform, m.Platform.Vendor != "" || m.Platform.UUID != "" || m.Platform.Product != "", prevJSON(prev, func(p *model.EsxiState) string { return p.PlatformJSON }))
 	st.CPUStaticJSON = stickyJSON(m.CPU, m.CPU.Brand != "" || m.CPU.Cores > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.CPUStaticJSON }))
 	st.MemoryJSON = stickyJSON(m.Memory, m.Memory.TotalBytes > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.MemoryJSON }))
-	st.CPUTempJSON = stickyJSON(m.CPUTemp, m.CPUTemp.MaxC >= 0 && len(m.CPUTemp.Cores) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.CPUTempJSON }))
+	st.CPUTempJSON = stickyJSON(m.CPUTemp, cpuTempComplete(m), prevJSON(prev, func(p *model.EsxiState) string { return p.CPUTempJSON }))
 	st.MCEJSON = stickyJSON(m.MCE, m.MCE.State != "", prevJSON(prev, func(p *model.EsxiState) string { return p.MCEJSON }))
-	st.DiskJSON = stickyJSON(m.Disks, len(m.Disks) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.DiskJSON }))
+	st.DiskJSON = stickyJSON(m.Disks, diskTempsComplete(m.Disks), prevJSON(prev, func(p *model.EsxiState) string { return p.DiskJSON }))
 	st.USBJSON = stickyUSBJSON(m.USB, prevJSON(prev, func(p *model.EsxiState) string { return p.USBJSON }))
-	st.VMJSON = stickyJSON(m.VMs, m.VMs != nil, prevJSON(prev, func(p *model.EsxiState) string { return p.VMJSON }))
+	st.VMJSON = stickyJSON(m.VMs, vmStatesComplete(m.VMs), prevJSON(prev, func(p *model.EsxiState) string { return p.VMJSON }))
 	return st
 }
 

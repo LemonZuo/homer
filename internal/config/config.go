@@ -104,7 +104,7 @@ func Load() *Config {
 		EsxiSampleCron:    env("ESXI_SAMPLE_CRON", "*/30 * * * * *"),
 		EsxiCleanupCron:   env("ESXI_CLEANUP_CRON", "0 0 4 * * *"),
 		EsxiRetentionDays: envInt("ESXI_RETENTION_DAYS", 7),
-		EsxiSSHTimeoutSec: envInt("ESXI_SSH_TIMEOUT_SEC", 30),
+		EsxiSSHTimeoutSec: envInt("ESXI_SSH_TIMEOUT_SEC", 120),
 	}
 }
 

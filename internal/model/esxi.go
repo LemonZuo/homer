@@ -45,8 +45,9 @@ const (
 	EsxiMCEStateRed    = "Red"
 )
 
-// EsxiSample 一次采样的标量趋势快照。固定 15s 一条,默认保留 7 天(cleanup job 清理)。
-// 缺数据统一用 -1 占位,与 UPS 表的哨兵约定一致;前端拿到 -1 直接当"无数据"处理。
+// EsxiSample 一次采样的标量趋势快照。默认保留 7 天(cleanup job 清理)。
+// 新采样会先做关键指标完整性校验,完整才写入;数值列仍保留 -1 作为旧行/非关键字段
+// 的无数据哨兵,前端拿到 -1 直接当"无数据"处理。
 type EsxiSample struct {
 	ID                  int64  `gorm:"primaryKey;column:id" json:"id"`
 	HostKind            string `gorm:"column:host_kind;size:16;index:idx_host_time,priority:1" json:"host_kind"`

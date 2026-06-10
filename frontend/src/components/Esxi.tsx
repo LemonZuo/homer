@@ -780,7 +780,15 @@ interface MiniPoint {
   v: number | null
 }
 
-function HistorySection({ hostKind, hostID }: { hostKind: string; hostID: number }) {
+function HistorySection({
+  hostKind,
+  hostID,
+  disks,
+}: {
+  hostKind: string
+  hostID: number
+  disks?: DiskTemperature[]
+}) {
   const [range, setRange] = useState('24h')
   const [metric, setMetric] = useState<MetricKey>('cpu_cores')
   const [series, setSeries] = useState<SeriesPoint[] | null>(null)
@@ -847,7 +855,7 @@ function HistorySection({ hostKind, hostID }: { hostKind: string; hostID: number
           ))}
         </div>
       </div>
-      <EsxiSeriesChart series={series} loading={loading} metric={metric} />
+      <EsxiSeriesChart series={series} loading={loading} metric={metric} disks={disks} />
     </div>
   )
 }
@@ -856,10 +864,12 @@ function EsxiSeriesChart({
   series,
   loading,
   metric,
+  disks,
 }: {
   series: SeriesPoint[] | null
   loading: boolean
   metric: MetricKey
+  disks?: DiskTemperature[]
 }) {
   if (loading) {
     return (
@@ -881,7 +891,7 @@ function EsxiSeriesChart({
   // 多线场景:每核 / 每盘各画一条线。
   if (metric === 'cpu_cores' || metric === 'disk_per_disk') {
     const lines =
-      metric === 'cpu_cores' ? buildCoreLines(series, ts) : buildDiskLines(series, ts)
+      metric === 'cpu_cores' ? buildCoreLines(series, ts) : buildDiskLines(series, ts, disks)
     if (lines.length === 0) {
       return (
         <div className="flex h-32 items-center justify-center text-[12px] text-muted-foreground">
@@ -947,15 +957,16 @@ function buildCoreLines(series: SeriesPoint[], ts: number[]): LineSeries[] {
   }))
 }
 
-function buildDiskLines(series: SeriesPoint[], ts: number[]): LineSeries[] {
+function buildDiskLines(series: SeriesPoint[], ts: number[], disks?: DiskTemperature[]): LineSeries[] {
   const devSet = new Set<string>()
   for (const p of series) {
     for (const d of p.disks ?? []) devSet.add(d.device)
   }
   const devs = [...devSet].sort()
+  const labelByDevice = new Map((disks ?? []).map((d) => [d.device, d.model || d.type || shortDeviceLabel(d.device)]))
   return devs.map((dev, idx) => ({
     id: `disk-${dev}`,
-    label: shortDeviceLabel(dev),
+    label: labelByDevice.get(dev) ?? shortDeviceLabel(dev),
     color: LINE_COLORS[idx % LINE_COLORS.length],
     points: series.map((p, i) => {
       const d = (p.disks ?? []).find((x) => x.device === dev)
@@ -1081,12 +1092,12 @@ function MultiLineChart({
         {lines.map((ln) => {
           const v = hoverIdx != null ? ln.points[hoverIdx]?.v : null
           return (
-            <span key={ln.id} className="inline-flex items-center gap-1 tabular-nums">
+            <span key={ln.id} className="inline-flex max-w-[210px] items-center gap-1 tabular-nums sm:max-w-[260px]">
               <span
-                className="inline-block h-2 w-2 rounded-full"
+                className="inline-block h-2 w-2 shrink-0 rounded-full"
                 style={{ background: ln.color }}
               />
-              <span className="text-muted-foreground">{ln.label}</span>
+              <span className="min-w-0 truncate text-muted-foreground" title={ln.label}>{ln.label}</span>
               {v != null && (
                 <span className="font-semibold text-foreground">
                   {format(v)}
@@ -1539,7 +1550,7 @@ function HostBlock({ host }: { host: Snapshot }) {
         </button>
         {expanded && (
           <div className="mt-3">
-            <HistorySection hostKind={host.host_kind} hostID={host.host_id} />
+            <HistorySection hostKind={host.host_kind} hostID={host.host_id} disks={host.disk_temperature} />
           </div>
         )}
       </div>
