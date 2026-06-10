@@ -8,7 +8,6 @@ import {
   ChevronUp,
   Server,
   Cpu,
-  MemoryStick,
   HardDrive,
   Usb,
   Box,
@@ -54,8 +53,7 @@ interface CPUStatic {
 
 interface MemoryInfo {
   mem_total_bytes: number
-  mem_reliable_bytes: number
-  mem_numa_nodes: number
+  mem_free_bytes: number
 }
 
 interface CPUCore {
@@ -304,7 +302,7 @@ function KV({ k, v, mono = false, title }: { k: string; v: React.ReactNode; mono
 
 // --- 子卡片 ---
 
-function PlatformCard({ p }: { p: PlatformInfo }) {
+function PlatformCard({ p, m }: { p: PlatformInfo; m?: MemoryInfo }) {
   return (
     <Card className="px-3 py-3">
       <SectionHead
@@ -332,14 +330,8 @@ function PlatformCard({ p }: { p: PlatformInfo }) {
             )
           }
         />
-        {p.uuid && (
-          <div className="col-span-2 min-w-0">
-            <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">UUID</div>
-            <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground" title={p.uuid}>
-              {p.uuid}
-            </div>
-          </div>
-        )}
+        <KV k="总内存" v={m && m.mem_total_bytes > 0 ? fmtBytes(m.mem_total_bytes) : '—'} />
+        <KV k="可用内存" v={m && m.mem_free_bytes > 0 ? fmtBytes(m.mem_free_bytes) : '—'} />
       </div>
     </Card>
   )
@@ -348,14 +340,21 @@ function PlatformCard({ p }: { p: PlatformInfo }) {
 function CPUStaticCard({ c }: { c: CPUStatic }) {
   return (
     <Card className="px-3 py-3">
-      <SectionHead icon={<Cpu className="h-3.5 w-3.5" />} title="CPU" />
+      <SectionHead
+        icon={<Cpu className="h-3.5 w-3.5" />}
+        title="CPU"
+        suffix={
+          c.brand ? (
+            <span
+              className="min-w-0 truncate text-[11.5px] font-medium text-muted-foreground"
+              title={c.brand}
+            >
+              {c.brand}
+            </span>
+          ) : undefined
+        }
+      />
       <div className="grid grid-cols-2 gap-2.5">
-        <div className="col-span-2 min-w-0">
-          <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">型号</div>
-          <div className="mt-0.5 truncate text-[13px] font-medium text-foreground" title={c.brand}>
-            {c.brand || '—'}
-          </div>
-        </div>
         <KV k="核数" v={c.cores > 0 ? c.cores : '—'} />
         <KV k="主频" v={fmtFreq(c.freq_mhz)} />
         <KV k="L2 缓存" v={fmtKB(c.l2_kb)} />
@@ -369,19 +368,6 @@ function CPUStaticCard({ c }: { c: CPUStatic }) {
           k="TjMax"
           v={c.tjmax_c > 0 ? `${c.tjmax_c}°C` : '—'}
         />
-      </div>
-    </Card>
-  )
-}
-
-function MemoryCard({ m }: { m: MemoryInfo }) {
-  return (
-    <Card className="px-3 py-3">
-      <SectionHead icon={<MemoryStick className="h-3.5 w-3.5" />} title="内存" />
-      <div className="grid grid-cols-2 gap-2.5">
-        <KV k="物理内存" v={fmtBytes(m.mem_total_bytes)} />
-        <KV k="可靠内存" v={fmtBytes(m.mem_reliable_bytes)} />
-        <KV k="NUMA 节点" v={m.mem_numa_nodes >= 0 ? m.mem_numa_nodes : '—'} />
       </div>
     </Card>
   )
@@ -1440,30 +1426,27 @@ function HostBlock({ host }: { host: Snapshot }) {
           (host.disk_temperature && host.disk_temperature.length > 0) || host.usb || host.vms) ? (
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             {host.platform
-              ? <PlatformCard p={host.platform} />
+              ? <PlatformCard p={host.platform} m={host.memory} />
               : <EmptyCard icon={<Server className="h-3.5 w-3.5" />} title="平台" />}
-            {host.cpu_static
-              ? <CPUStaticCard c={host.cpu_static} />
-              : <EmptyCard icon={<Cpu className="h-3.5 w-3.5" />} title="CPU" />}
-            <div className="md:col-span-2">
-              {host.cpu_temperature
-                ? <CPUTempCard t={host.cpu_temperature} />
-                : <EmptyCard icon={<Activity className="h-3.5 w-3.5" />} title="CPU 温度" />}
-            </div>
-            {host.memory
-              ? <MemoryCard m={host.memory} />
-              : <EmptyCard icon={<MemoryStick className="h-3.5 w-3.5" />} title="内存" />}
             {host.mce_health
               ? <MCECard m={host.mce_health} />
               : <EmptyCard icon={<ShieldCheck className="h-3.5 w-3.5" />} title="MCE" />}
+            {host.cpu_static
+              ? <CPUStaticCard c={host.cpu_static} />
+              : <EmptyCard icon={<Cpu className="h-3.5 w-3.5" />} title="CPU" />}
+            {host.cpu_temperature
+              ? <CPUTempCard t={host.cpu_temperature} />
+              : <EmptyCard icon={<Activity className="h-3.5 w-3.5" />} title="CPU 温度" />}
             <div className="md:col-span-2">
               {host.disk_temperature && host.disk_temperature.length > 0
                 ? <DisksCard disks={host.disk_temperature} />
                 : <EmptyCard icon={<HardDrive className="h-3.5 w-3.5" />} title="磁盘" />}
             </div>
-            {host.usb
-              ? <USBCard u={host.usb} />
-              : <EmptyCard icon={<Usb className="h-3.5 w-3.5" />} title="USB" />}
+            <div className="md:col-span-2">
+              {host.usb
+                ? <USBCard u={host.usb} />
+                : <EmptyCard icon={<Usb className="h-3.5 w-3.5" />} title="USB" />}
+            </div>
             {/* 虚拟机数量多时网格会被拉得不对称(USB 列被拉很长),让它独占一整行 */}
             <div className="md:col-span-2">
               {host.vms

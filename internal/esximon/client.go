@@ -45,11 +45,10 @@ type CPUStatic struct {
 	TjMaxC   int    `json:"tjmax_c"`
 }
 
-// MemoryInfo 内存。
+// MemoryInfo 内存。只保留总量和可用,合并进平台卡展示。
 type MemoryInfo struct {
-	TotalBytes    int64 `json:"mem_total_bytes"`
-	ReliableBytes int64 `json:"mem_reliable_bytes"`
-	NUMANodes     int   `json:"mem_numa_nodes"`
+	TotalBytes int64 `json:"mem_total_bytes"`
+	FreeBytes  int64 `json:"mem_free_bytes"`
 }
 
 // CPUCore 每核温度。
@@ -154,7 +153,6 @@ func CollectAll(client *ssh.Client) HostMetrics {
 		CPUTemp: CPUTemperature{TjMaxC: -1, MaxC: -1, AvgC: -1},
 		MCE:     MCEHealth{State: ""},
 		CPU:     CPUStatic{TjMaxC: -1},
-		Memory:  MemoryInfo{NUMANodes: -1},
 	}
 
 	if out, err := runEsxi(client, "esxcli hardware platform get"); err == nil {
@@ -166,6 +164,20 @@ func CollectAll(client *ssh.Client) HostMetrics {
 	if out, err := runEsxi(client, "esxcli hardware cpu list"); err == nil {
 		snap.CPU = parseCPUStatic(out)
 	}
+	// 补核心数(cpu list 没这字段)。
+	if out, err := runEsxi(client, "esxcli hardware cpu global get"); err == nil {
+		fillCoresFromGlobal(&snap.CPU, out)
+	}
+	// smbiosDump 给真实 CPU 型号/当前频率/核心数,覆盖 esxcli 的 vendor 名。
+	// 远端 awk 裁出 Type 4 块(约 30 行) —— smbiosDump 全量约 700 行/35 KiB,
+	// 没必要全拉回来,且大输出在 SSH 窗口流控下偶发拖慢。
+	smbiosCmd := `smbiosDump 2>/dev/null | awk '/Processor Info \(Type 4\)/{p=NR+30} NR<=p'`
+	if out, err := runEsxiTimeout(client, smbiosCmd, 12*time.Second); err == nil {
+		logx.Debug("esxi smbios slice", "bytes", len(out))
+		fillFromSmbios(&snap.CPU, out)
+	} else {
+		logx.Warn("esxi smbios fetch failed", "err", err.Error())
+	}
 	if out, err := runEsxi(client, "vsish -e get /hardware/msr/pcpu/0/addr/0x1A2"); err == nil {
 		if tj := decodeTjMax(out); tj > 0 {
 			snap.CPU.TjMaxC = tj
@@ -173,6 +185,10 @@ func CollectAll(client *ssh.Client) HostMetrics {
 	}
 	if out, err := runEsxi(client, "esxcli hardware memory get"); err == nil {
 		snap.Memory = parseMemory(out)
+	}
+	// vsish 拿可用内存(esxcli 没这字段);同时兜底总内存。
+	if out, err := runEsxi(client, "vsish -e cat /memory/comprehensive"); err == nil {
+		fillMemoryFromVsish(&snap.Memory, out)
 	}
 
 	// CPU 温度:遍历 0..15 核,失败即停。
@@ -303,6 +319,14 @@ func parseVersionInto(p *PlatformInfo, out string) {
 // --- 解析:CPU 静态 ---
 
 // esxcli hardware cpu list 输出形如多块、每块多行 "  Key: Value",取第一块即代表平台 CPU。
+//
+// 注意 ESXi 7.0 之前 `Brand` 字段返回的是 vendor("GenuineIntel"),不是 model 名。
+// CPU 真实型号、Current Speed、Core Count 由 fillFromSmbios 从 smbiosDump 覆盖。
+//
+// L2/L3 Cache Size 字段单位是 byte(实测 262144/8388608),
+// 不能用 parseSizeKB(那是按 KB/MB/GB 文本单位推断),也不能用 Contains 匹配,
+// 否则会被 `L2 Cache Line Size: 64` 或 `L2 Cache CPU Count: 1` 这类同前缀字段误覆盖
+// (parseKV 把多个 CPU 块合并后 map 遍历顺序不定,最后赋值的赢)。
 func parseCPUStatic(out string) CPUStatic {
 	c := CPUStatic{TjMaxC: -1}
 	kv := parseKV(out)
@@ -314,20 +338,92 @@ func parseCPUStatic(out string) CPUStatic {
 	c.Family = parseIntDefault(kv["family"], 0)
 	c.ModelID = parseIntDefault(kv["model"], 0)
 	c.Stepping = parseIntDefault(kv["stepping"], 0)
-	// "Number of CPU Cores" / "core_speed" 等键
-	for k, v := range kv {
-		switch {
-		case strings.Contains(k, "core_speed"):
-			c.FreqMHz = parseFreqMHz(v)
-		case strings.Contains(k, "l2_cache") || k == "l2_cache_size":
-			c.L2KB = parseSizeKB(v)
-		case strings.Contains(k, "l3_cache") || k == "l3_cache_size":
-			c.L3KB = parseSizeKB(v)
-		case k == "cpu_cores" || strings.HasPrefix(k, "number_of_cpu_cores"):
-			c.Cores = parseIntDefault(v, c.Cores)
+	if v, ok := kv["core_speed"]; ok {
+		c.FreqMHz = parseFreqMHz(v)
+	}
+	if v, ok := kv["l2_cache_size"]; ok {
+		if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+			c.L2KB = int(n / 1024)
 		}
 	}
+	if v, ok := kv["l3_cache_size"]; ok {
+		if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+			c.L3KB = int(n / 1024)
+		}
+	}
+	if v, ok := kv["number_of_cpu_cores"]; ok {
+		c.Cores = parseIntDefault(v, 0)
+	}
 	return c
+}
+
+// fillCoresFromGlobal 从 `esxcli hardware cpu global get` 补核心数。
+// 输出:CPU Packages: 1 / CPU Cores: 4 / CPU Threads: 4 / Hyperthreading ...
+func fillCoresFromGlobal(c *CPUStatic, out string) {
+	kv := parseKV(out)
+	if v, ok := kv["cpu_cores"]; ok {
+		if n := parseIntDefault(v, 0); n > 0 {
+			c.Cores = n
+		}
+	}
+}
+
+// fillFromSmbios 解 `smbiosDump` 输出里第一个 Processor Info (Type 4) 块,
+// 取真实 CPU 型号、当前频率、核心数。优先级高于 esxcli cpu list / global get。
+//
+// 块结构示例(2 空格缩进):
+//
+//	Processor Info (Type 4): #74
+//	  Socket: "U3E1"
+//	  ...
+//	  Version: "Intel(R) Xeon(R) E-2224G CPU @ 3.50GHz"
+//	  ...
+//	  Current Speed: 3500 MHz
+//	  Core Count: 4
+//
+// 第一个顶格行(下一个 Type X)即块结束。
+func fillFromSmbios(c *CPUStatic, out string) {
+	inBlock := false
+	matched := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "Processor Info") && strings.Contains(line, "Type 4") {
+			inBlock = true
+			matched = true
+			continue
+		}
+		if !inBlock {
+			continue
+		}
+		// 块内行必须以空格起首;空行/顶格行视为块结束。
+		if line == "" || !strings.HasPrefix(line, " ") {
+			return
+		}
+		trim := strings.TrimSpace(line)
+		idx := strings.Index(trim, ":")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(trim[:idx]))
+		val := strings.Trim(strings.TrimSpace(trim[idx+1:]), "\"")
+		switch key {
+		case "version":
+			if val != "" && !strings.EqualFold(val, "To Be Filled By O.E.M.") {
+				c.Brand = val
+				logx.Debug("esxi smbios brand", "brand", val)
+			}
+		case "current speed":
+			if mhz := parseFreqMHz(val); mhz > 0 {
+				c.FreqMHz = mhz
+			}
+		case "core count":
+			if n := parseIntDefault(val, 0); n > 0 {
+				c.Cores = n
+			}
+		}
+	}
+	if !matched {
+		logx.Warn("esxi smbios: Type 4 block not found", "bytes", len(out))
+	}
 }
 
 // decodeTjMax 解 MSR_TEMPERATURE_TARGET(0x1A2)bits 23:16。
@@ -348,18 +444,42 @@ func decodeTjMax(out string) int {
 
 func parseMemory(out string) MemoryInfo {
 	kv := parseKV(out)
-	m := MemoryInfo{NUMANodes: -1}
+	var m MemoryInfo
 	for k, v := range kv {
-		switch {
-		case strings.Contains(k, "physical_memory"):
+		if strings.Contains(k, "physical_memory") {
 			m.TotalBytes = parseBytes(v)
-		case strings.Contains(k, "reliable_memory"):
-			m.ReliableBytes = parseBytes(v)
-		case strings.Contains(k, "numa_node"):
-			m.NUMANodes = parseIntDefault(v, -1)
 		}
 	}
 	return m
+}
+
+// fillMemoryFromVsish 解 `vsish -e cat /memory/comprehensive`:
+//
+//	Comprehensive {
+//	   Physical memory estimate:134045160 KB
+//	   ...
+//	   Free:75142516 KB
+//	}
+//
+// 取 Free 作为可用内存;Physical 作为总内存兜底(esxcli 没拿到时)。
+func fillMemoryFromVsish(m *MemoryInfo, out string) {
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		idx := strings.Index(trim, ":")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(trim[:idx]))
+		val := strings.TrimSpace(trim[idx+1:])
+		switch key {
+		case "free":
+			m.FreeBytes = parseBytes(val)
+		case "physical memory estimate":
+			if m.TotalBytes <= 0 {
+				m.TotalBytes = parseBytes(val)
+			}
+		}
+	}
 }
 
 // --- 采集 + 解析:CPU 温度 ---
@@ -1118,6 +1238,11 @@ func parseFreqMHz(s string) int {
 	case strings.Contains(low, "hz") && !strings.Contains(low, "mhz") && !strings.Contains(low, "khz"):
 		return int(f / 1_000_000)
 	default:
+		// 没有显式单位:ESXi 的 `Core Speed` 字段实际是 Hz(几十亿那种大整数)。
+		// 合理 CPU 主频范围 < 100000 MHz,超过即视为 Hz。
+		if f > 100000 {
+			return int(f / 1_000_000)
+		}
 		return int(f)
 	}
 }
