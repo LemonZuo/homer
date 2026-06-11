@@ -39,23 +39,30 @@ type upscReading struct {
 const upscPathPrefix = "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; "
 
 // probeHost 在 client 上枚举本机所有 UPS 并读取状态。
-// 第二返回值 diag 在无 UPS 时给上层(test 接口)展示诊断信息,采样链路不消费。
-// 若主机未装 NUT 或没绑 UPS,返回 (nil, diag, nil) —— 让上层静默跳过。
+// 第三返回值 diag 在无 UPS 时给上层(test 接口)展示诊断信息,采样链路不消费。
+// 第二返回值 enumerated 表示本轮 `upsc -l` 是否成功拿到了"NUT 已知 UPS 名集合":
+//   - true:names 可信(即使为空也是"NUT 真的没挂 UPS"),上层可用它判断 UPS 失联
+//   - false:`upsc -l` 命令失败 / 输出空白(NUT 服务暂时不可用 / USB 整体抖动),
+//     上层应跳过本轮可用性判定,不要把 prev 里所有 UPS 都当作消失
+//
+// 若主机未装 NUT 或没绑 UPS,返回 (nil, true, diag, nil) —— 让上层静默跳过。
 // 真正的连接/命令错误才返回 error。
 //
 // 注意:upsc 2.8+ 启动时会往 stderr 打 "Init SSL without certificate database"
 // 这行 banner。一旦合并进 stdout,会被当成 6 个伪 UPS 名(Init/SSL/without/...
 // /database/真名),后续 upsc <伪名> 全部失败,真名的诊断信息也被覆盖掉。
 // 所以正常路径用 2>/dev/null 严格只取 stdout,诊断信息走单独的 session。
-func probeHost(client *ssh.Client) ([]upscReading, []string, string, error) {
+func probeHost(client *ssh.Client) ([]upscReading, []string, bool, string, error) {
 	out, err := sshx.Run(client, upscPathPrefix+"upsc -l 2>/dev/null", nil)
 	if err != nil {
 		// 命令本身失败(找不到 upsc / 非零退出),用一次带 stderr 的额外探测拿诊断信息。
-		return nil, nil, diagnose(client, ""), nil
+		// enumerated=false:此时无法判断 NUT 已知集合,告警侧应跳过本轮去抖累加。
+		return nil, nil, false, diagnose(client, ""), nil
 	}
 	names := splitUPSNames(out)
 	if len(names) == 0 {
-		return nil, nil, diagnose(client, ""), nil
+		// 命令成功但输出空白,在拔接 USB 时同样常见(NUT 整体抖动),按 enumerated=false 处理。
+		return nil, nil, false, diagnose(client, ""), nil
 	}
 	readings := make([]upscReading, 0, len(names))
 	var lastFailName string
@@ -71,9 +78,9 @@ func probeHost(client *ssh.Client) ([]upscReading, []string, string, error) {
 		readings = append(readings, reading)
 	}
 	if len(readings) == 0 {
-		return nil, names, diagnose(client, lastFailName), nil
+		return nil, names, true, diagnose(client, lastFailName), nil
 	}
-	return readings, names, "", nil
+	return readings, names, true, "", nil
 }
 
 // readOneUPS 跑 `upsc <name>`,空白 / 解析失败时短延迟后再试两次。

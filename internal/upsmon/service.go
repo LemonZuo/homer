@@ -30,11 +30,40 @@ type Service struct {
 	// 单机可达性状态机:host_id -> 上次是否可达。首次见到的 host 仅记录,不告警,
 	// 防止刚启动 / 刚加机器时刷一片"已离线/已恢复"。
 	hostReach map[int64]bool
-	// UPS 可用性状态机:host_id -> 上次该主机上观察到的 UPS 名集合。
+	// UPS 可用性状态机:host_id -> ups_name -> 跟踪状态(missCount + alertedDown)。
 	// 覆盖"SSH 通但 upsc 拿不到数据"(NUT 挂了 / USB 拔了 / driver not connected)
-	// 与多 UPS 场景下"拔一台 / 加一台"。只在 OK 主机上跟踪,主机离线时清掉记录,
-	// 主机恢复时进入"首次见到不告警"分支,避免重复打扰。
-	hostUPSNames map[int64]map[string]struct{}
+	// 与多 UPS 场景下"拔一台 / 加一台"。
+	// 判定信号用 h.UPSes 名集合(`upsc <name>` 成功拿到 reading 的子集)——`upsc -l`
+	// 只是 ups.conf 配置清单,USB 拔了 NUT 仍会列出,用它判定会漏报真失联。
+	// 双层去抖:
+	//  1. UPSEnumerated=false 时跳过本轮(`upsc -l` 整体失败 / 输出空白),避免 NUT
+	//     服务整体抖动把同机所有 UPS 一起拽进 missCount。
+	//  2. 单个 UPS 连续 upsOfflineThreshold 轮没出现在 readings 里才报失联,扛住
+	//     readOneUPS 三次重试也救不回来的 driver pollfreq 共振(通常 1-2 轮自愈)。
+	// 只在 OK 主机上跟踪,主机离线时清掉记录,主机恢复时进入"首次见到不告警"分支。
+	hostUPSNames map[int64]map[string]upsTrack
+	// NUT 服务级失联状态机:host_id -> 跟踪状态(unavailCount + alertedDown)。
+	// 触发场景:NUT 被 systemctl stop / upsd socket 错 / SSH 通但根本没装 upsc。
+	// 跟 UPS 失联告警互补:NUT 整轮失败时 handleUPSAvailabilityAlerts 跳过本轮,
+	// 单 UPS 永远不会被报失联;但用户应当被告知"主机的 NUT 服务整体不可用"。
+	// 主机离线时清记录(交给 handleHostReachAlerts 报),复用 upsTrack 结构语义。
+	hostNUTState map[int64]upsTrack
+}
+
+// 连续 upsOfflineThreshold 轮 readings 没出现某 UPS,才认为它真失联。
+// 30s cron + threshold=3 → 约 90s 去抖窗口。readOneUPS 内部已有 3 次重试扛单次
+// pollfreq 共振,所以连续 3 轮还失败意味着 driver 真死了(USB 拔了 / 配置移除)。
+const upsOfflineThreshold = 3
+
+// 连续 nutOfflineThreshold 轮 `upsc -l` 失败,才认为 NUT 服务整体挂掉。
+// 阈值跟 UPS 失联一致(3 轮 ≈ 90s),刚好吃下拔接 USB 时 NUT 整体抖 1-2 轮。
+const nutOfflineThreshold = 3
+
+// upsTrack 通用"计数 + 已告警"状态:用作单个 UPS 的失联去抖,也用作主机级 NUT 不可用去抖。
+// missCount 是连续触发次数,alertedDown 防止跨阈值后每轮都重复发同一条告警。
+type upsTrack struct {
+	missCount   int
+	alertedDown bool
 }
 
 func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, retention time.Duration) *Service {
@@ -52,7 +81,8 @@ func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, re
 		retention:    retention,
 		lastOK:       true, // 启动假设 OK,首轮失败才会发"开始失败"
 		hostReach:    map[int64]bool{},
-		hostUPSNames: map[int64]map[string]struct{}{},
+		hostUPSNames: map[int64]map[string]upsTrack{},
+		hostNUTState: map[int64]upsTrack{},
 	}
 }
 
@@ -184,6 +214,7 @@ func (s *Service) RunSample() error {
 		logx.Info("ups sample done", "hosts", len(hosts), "reachable", reachableHosts, "samples", len(samples))
 	}
 	s.handleHostReachAlerts(hosts)
+	s.handleNUTAlerts(hosts)
 	s.handleUPSAvailabilityAlerts(hosts)
 	s.handleReachAlert(sampleOK, len(hosts), firstErr)
 
@@ -249,11 +280,85 @@ func (s *Service) handleHostReachAlerts(hosts []HostResult) {
 	}
 }
 
+// handleNUTAlerts 处理"主机在线但 NUT 服务整体不响应"的转换告警。
+// 触发场景:NUT 被 stop / upsd socket 异常 / 远程主机根本没装 upsc 命令。
+// 信号:连续 nutOfflineThreshold 轮 UPSEnumerated=false。
+// 主机离线时清记录(主机层告警走 handleHostReachAlerts,这里不重叠);
+// 首次见到该主机就 NUT 不可用时,从 1 开始累计而不是直接告警,保持去抖一致性。
+func (s *Service) handleNUTAlerts(hosts []HostResult) {
+	type change struct {
+		host string
+		ok   bool // true = NUT 已恢复,false = NUT 不可用
+	}
+	var changes []change
+
+	s.reachMu.Lock()
+	seen := make(map[int64]struct{}, len(hosts))
+	for _, h := range hosts {
+		seen[h.HostID] = struct{}{}
+		if !h.OK {
+			delete(s.hostNUTState, h.HostID)
+			continue
+		}
+		prev, known := s.hostNUTState[h.HostID]
+		if h.UPSEnumerated {
+			// NUT 正常:之前如果报过不可用,现在报"已恢复",并重置计数。
+			if known && prev.alertedDown {
+				changes = append(changes, change{host: h.HostName, ok: true})
+			}
+			s.hostNUTState[h.HostID] = upsTrack{}
+			continue
+		}
+		// UPSEnumerated=false:累计 missCount。
+		if !known {
+			s.hostNUTState[h.HostID] = upsTrack{missCount: 1}
+			continue
+		}
+		prev.missCount++
+		if prev.missCount >= nutOfflineThreshold && !prev.alertedDown {
+			changes = append(changes, change{host: h.HostName, ok: false})
+			prev.alertedDown = true
+		}
+		s.hostNUTState[h.HostID] = prev
+	}
+	for id := range s.hostNUTState {
+		if _, ok := seen[id]; !ok {
+			delete(s.hostNUTState, id)
+		}
+	}
+	s.reachMu.Unlock()
+
+	if len(changes) == 0 {
+		return
+	}
+	if s.sampleOut == nil || !s.sampleOut.Enabled() {
+		return
+	}
+	for _, c := range changes {
+		var title, body string
+		if !c.ok {
+			title = "UPS 主机 NUT 不可用"
+			body = fmt.Sprintf("%s 的 NUT 服务无法响应", c.host)
+		} else {
+			title = "UPS 主机 NUT 已恢复"
+			body = fmt.Sprintf("%s 的 NUT 服务已恢复响应", c.host)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := s.sampleOut.Send(ctx, notify.Message{Title: title, Text: body}); err != nil {
+			logx.Error("nut alert send failed", "host", c.host, "ok", c.ok, "err", err)
+		} else {
+			logx.Warn("nut alert sent", "host", c.host, "ok", c.ok)
+		}
+		cancel()
+	}
+}
+
 // handleUPSAvailabilityAlerts 处理"主机在线但具体 UPS 失联 / 上线"的转换告警。
 // 触发场景:NUT 挂了 / USB 拔了 / driver not connected / 多 UPS 场景里拔接其中一台。
-// 集合判定用 h.UPSNames(upsc -l 的输出 = NUT 已知集合),不用 h.UPSes —— 后者
-// 是"本轮成功读出 reading 的子集",driver pollfreq 抖动会让 reading 时多时少,
-// 用它判断会和 30s cron 共振,反复横跳。
+// 集合判定用 h.UPSes 名集合("本轮 upsc <name> 成功"的子集),不用 h.UPSNames ——
+// 后者是 `upsc -l` 输出,本质是 ups.conf 配置清单,USB 拔了 NUT 仍会列出,用它
+// 判定会漏报"USB 实际离线但配置还在"的情况(用户拔 USB 测试的真实场景)。
+// 双层去抖见 upsOfflineThreshold 的注释。
 // 只在 h.OK=true 时跟踪;主机离线时清掉记录,主机恢复时进入"首次见到不告警"分支。
 func (s *Service) handleUPSAvailabilityAlerts(hosts []HostResult) {
 	type change struct {
@@ -271,25 +376,46 @@ func (s *Service) handleUPSAvailabilityAlerts(hosts []HostResult) {
 			delete(s.hostUPSNames, h.HostID)
 			continue
 		}
-		prev, known := s.hostUPSNames[h.HostID]
-		curr := make(map[string]struct{}, len(h.UPSNames))
-		for _, name := range h.UPSNames {
-			curr[name] = struct{}{}
-		}
-		s.hostUPSNames[h.HostID] = curr
-		if !known {
+		if !h.UPSEnumerated {
+			// `upsc -l` 整轮失败,本轮无法判定 NUT 是否在工作,跳过(保留 prev)。
+			// 避免 NUT 服务整体抖动时同机所有 UPS 一起被算成消失。
 			continue
 		}
-		for name := range prev {
-			if _, ok := curr[name]; !ok {
-				changes = append(changes, change{host: h.HostName, ups: name, has: false})
-			}
+		prev, known := s.hostUPSNames[h.HostID]
+		curr := make(map[string]struct{}, len(h.UPSes))
+		for _, r := range h.UPSes {
+			curr[r.Name] = struct{}{}
 		}
+		if !known {
+			next := make(map[string]upsTrack, len(curr))
+			for name := range curr {
+				next[name] = upsTrack{}
+			}
+			s.hostUPSNames[h.HostID] = next
+			continue
+		}
+		next := make(map[string]upsTrack, len(prev)+len(curr))
 		for name := range curr {
-			if _, ok := prev[name]; !ok {
+			t, was := prev[name]
+			if !was {
+				changes = append(changes, change{host: h.HostName, ups: name, has: true})
+			} else if t.alertedDown {
 				changes = append(changes, change{host: h.HostName, ups: name, has: true})
 			}
+			next[name] = upsTrack{}
 		}
+		for name, t := range prev {
+			if _, stillIn := curr[name]; stillIn {
+				continue
+			}
+			t.missCount++
+			if t.missCount >= upsOfflineThreshold && !t.alertedDown {
+				changes = append(changes, change{host: h.HostName, ups: name, has: false})
+				t.alertedDown = true
+			}
+			next[name] = t
+		}
+		s.hostUPSNames[h.HostID] = next
 	}
 	for id := range s.hostUPSNames {
 		if _, ok := seen[id]; !ok {
