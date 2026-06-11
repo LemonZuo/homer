@@ -168,6 +168,12 @@ func mergeHostMetrics(base, next HostMetrics) HostMetrics {
 	} else {
 		base.VMs = mergeVMStates(base.VMs, next.VMs)
 	}
+	if base.Boot.UptimeSeconds < 0 && next.Boot.UptimeSeconds >= 0 {
+		base.Boot = next.Boot
+	}
+	if len(base.NICs) == 0 && len(next.NICs) > 0 {
+		base.NICs = next.NICs
+	}
 	return base
 }
 

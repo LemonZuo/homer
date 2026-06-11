@@ -91,6 +91,8 @@ type EsxiState struct {
 	DiskJSON      string     `gorm:"column:disk_json;type:text" json:"disk_json"`
 	USBJSON       string     `gorm:"column:usb_json;type:text" json:"usb_json"`
 	VMJSON        string     `gorm:"column:vm_json;type:text" json:"vm_json"`
+	BootJSON      string     `gorm:"column:boot_json;type:text" json:"boot_json"`
+	NICJSON       string     `gorm:"column:nic_json;type:text" json:"nic_json"`
 	LastAlertAt   *time.Time `gorm:"column:last_alert_at" json:"last_alert_at"`
 	SampledAt     *time.Time `gorm:"column:sampled_at" json:"sampled_at"`
 	UpdatedAt     time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`

@@ -159,6 +159,55 @@ type VM struct {
 	State   string `json:"state"` // powered_on / powered_off / suspended / unknown
 }
 
+// HostBoot 主机启动信息。
+// UptimeSeconds = -1 表示采集失败。
+// LastCrashAt 为零值表示没找到 /var/core/vmkernel-zdump.* 文件。
+type HostBoot struct {
+	UptimeSeconds  int64     `json:"uptime_seconds"`
+	BootedAt       time.Time `json:"booted_at"`
+	CrashDumpCount int       `json:"crash_dump_count"`
+	LastCrashAt    time.Time `json:"last_crash_at,omitzero"`
+}
+
+// NIC 单张物理网卡:基本信息 + 链路状态 + 收发计数。
+// SpeedMbps = -1 / Duplex = "" 表示链路 Down 或数据缺失。
+// 计数字段为 -1 表示 stats 命令失败,0 表示真的没流量。
+type NIC struct {
+	Name        string `json:"name"`
+	Driver      string `json:"driver"`
+	MAC         string `json:"mac"`
+	MTU         int    `json:"mtu"`
+	Description string `json:"description"`
+	AdminStatus string `json:"admin_status"` // Up / Down
+	LinkStatus  string `json:"link_status"`  // Up / Down
+	SpeedMbps   int    `json:"speed_mbps"`
+	Duplex      string `json:"duplex"` // Full / Half / ""
+
+	RxBytes   int64 `json:"rx_bytes"`
+	TxBytes   int64 `json:"tx_bytes"`
+	RxErrors  int64 `json:"rx_errors"`
+	TxErrors  int64 `json:"tx_errors"`
+	RxDropped int64 `json:"rx_dropped"`
+	TxDropped int64 `json:"tx_dropped"`
+}
+
+func newHostBoot() HostBoot {
+	return HostBoot{UptimeSeconds: -1}
+}
+
+func newNIC() NIC {
+	return NIC{
+		MTU:       -1,
+		SpeedMbps: -1,
+		RxBytes:   -1,
+		TxBytes:   -1,
+		RxErrors:  -1,
+		TxErrors:  -1,
+		RxDropped: -1,
+		TxDropped: -1,
+	}
+}
+
 // HostMetrics 一台 ESXi 一轮的完整采集结果。
 // 任何一段子采集失败(esxcli/vsish 单点错误)都不会让整轮挂掉。调用方会对关键
 // 指标做完整性判定:完整才写 esxi_sample,不完整则保留 esxi_state 的上一轮有效值。
@@ -172,6 +221,8 @@ type HostMetrics struct {
 	Disks    []DiskHealth   `json:"disk_health"`
 	USB      USBState       `json:"usb"`
 	VMs      []VM           `json:"vms"`
+	Boot     HostBoot       `json:"boot"`
+	NICs     []NIC          `json:"nics"`
 }
 
 // --- 主入口:在已建立的 ssh.Client 上跑一整轮 ---
@@ -188,6 +239,7 @@ func CollectAll(client *ssh.Client) HostMetrics {
 		Runtime: RuntimeUsage{CPUUsagePercent: -1, MemoryUsagePercent: -1},
 		MCE:     MCEHealth{State: ""},
 		CPU:     CPUStatic{TjMaxC: -1},
+		Boot:    newHostBoot(),
 	}
 
 	if out, err := runEsxiRetry(client, "platform", "esxcli hardware platform get", defaultCmdTimeout, 2, func(out string) bool {
@@ -305,6 +357,12 @@ func CollectAll(client *ssh.Client) HostMetrics {
 
 	// VM 列表 + 电源态。
 	snap.VMs = collectVMs(client, vmsShallow, guestOS)
+
+	// 主机启动信息(uptime / boot epoch / crash dump)。
+	snap.Boot = collectHostBoot(client)
+
+	// 网卡列表 + 收发计数。
+	snap.NICs = collectNICs(client)
 
 	return snap
 }
@@ -2152,4 +2210,146 @@ func extractLeadingFloat(s string) string {
 		break
 	}
 	return s[:end]
+}
+
+// collectHostBoot 一气呵成抓 uptime + 当前 epoch + zdump 数,
+// 后端用 (now - uptime) 算 booted_at,避免依赖远端时区。
+// 输出格式(以行为单位的 KV)便于解析,无 zdump 时 LATEST 留空。
+func collectHostBoot(client *ssh.Client) HostBoot {
+	boot := newHostBoot()
+	cmd := strings.Join([]string{
+		`u=$(esxcli system stats uptime get 2>/dev/null)`,
+		`n=$(date +%s)`,
+		`c=$(ls /var/core/vmkernel-zdump.* 2>/dev/null | wc -l)`,
+		`m=$(ls /var/core/vmkernel-zdump.* 2>/dev/null | xargs -n1 stat -c '%Y' 2>/dev/null | sort -n | tail -1)`,
+		`printf 'UPTIME_US=%s\nNOW_EPOCH=%s\nZDUMP_COUNT=%s\nZDUMP_LATEST=%s\n' "$u" "$n" "$c" "$m"`,
+	}, "; ")
+	out, err := runEsxiRetry(client, "host boot", cmd, defaultCmdTimeout, 2, func(s string) bool {
+		return strings.Contains(s, "UPTIME_US=") && strings.Contains(s, "NOW_EPOCH=")
+	})
+	if err != nil {
+		logx.Warn("esxi host boot fetch failed", "err", err.Error())
+		return boot
+	}
+	return parseHostBoot(out)
+}
+
+// parseHostBoot 解析 collectHostBoot 的 KV 输出。
+// uptime 单位是微秒(esxcli system stats uptime get 实测),换算成秒。
+func parseHostBoot(out string) HostBoot {
+	boot := newHostBoot()
+	kv := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if i := strings.Index(line, "="); i > 0 {
+			kv[line[:i]] = line[i+1:]
+		}
+	}
+	uptimeUS, _ := strconv.ParseInt(kv["UPTIME_US"], 10, 64)
+	nowEpoch, _ := strconv.ParseInt(kv["NOW_EPOCH"], 10, 64)
+	if uptimeUS > 0 {
+		boot.UptimeSeconds = uptimeUS / 1_000_000
+		if nowEpoch > 0 {
+			boot.BootedAt = time.Unix(nowEpoch-boot.UptimeSeconds, 0).UTC()
+		}
+	}
+	if c, err := strconv.Atoi(kv["ZDUMP_COUNT"]); err == nil {
+		boot.CrashDumpCount = c
+	}
+	if m, _ := strconv.ParseInt(kv["ZDUMP_LATEST"], 10, 64); m > 0 {
+		boot.LastCrashAt = time.Unix(m, 0).UTC()
+	}
+	return boot
+}
+
+// collectNICs 抓物理网卡列表 + 每张卡的 stats。
+// list 给基本/链路信息一次拿全,stats 按设备名循环。
+// vmnic 数量个位数,串行调用足够,无需 batch。
+func collectNICs(client *ssh.Client) []NIC {
+	listOut, err := runEsxiRetry(client, "nic list", "esxcli network nic list", defaultCmdTimeout, 2, func(s string) bool {
+		return strings.Contains(s, "vmnic")
+	})
+	if err != nil {
+		logx.Warn("esxi nic list failed", "err", err.Error())
+		return nil
+	}
+	nics := parseNICList(listOut)
+	if len(nics) == 0 {
+		return nil
+	}
+	for i := range nics {
+		statsCmd := "esxcli network nic stats get -n " + sshx.ShellQuote(nics[i].Name)
+		out, err := runEsxiRetry(client, "nic stats "+nics[i].Name, statsCmd, defaultCmdTimeout, 2, func(s string) bool {
+			return strings.Contains(s, "Packets received") || strings.Contains(s, "Bytes received")
+		})
+		if err != nil {
+			logx.Warn("esxi nic stats failed", "nic", nics[i].Name, "err", err.Error())
+			continue
+		}
+		fillNICStats(&nics[i], out)
+	}
+	return nics
+}
+
+// parseNICList 解析 `esxcli network nic list`。
+// 表头固定 10 列,实测一行的描述字段(Description)可能含空格,要从末尾倒着切。
+// 列顺序:Name PCI Driver AdminStatus LinkStatus Speed Duplex MAC MTU Description...
+func parseNICList(out string) []NIC {
+	var nics []NIC
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "----") || strings.HasPrefix(trim, "Name ") {
+			continue
+		}
+		fields := strings.Fields(trim)
+		if len(fields) < 9 || !strings.HasPrefix(fields[0], "vmnic") {
+			continue
+		}
+		n := newNIC()
+		n.Name = fields[0]
+		n.Driver = fields[2]
+		n.AdminStatus = fields[3]
+		n.LinkStatus = fields[4]
+		n.SpeedMbps = parseIntDefault(fields[5], -1)
+		n.Duplex = fields[6]
+		n.MAC = fields[7]
+		n.MTU = parseIntDefault(fields[8], -1)
+		if len(fields) > 9 {
+			n.Description = strings.Join(fields[9:], " ")
+		}
+		nics = append(nics, n)
+	}
+	return nics
+}
+
+// fillNICStats 把 `esxcli network nic stats get -n vmnicX` 的输出注入 NIC。
+// 输出每行形如 "   Packets received: 638456",冒号分割。
+func fillNICStats(n *NIC, out string) {
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		colon := strings.Index(trim, ":")
+		if colon < 0 {
+			continue
+		}
+		key := strings.TrimSpace(trim[:colon])
+		val := strings.TrimSpace(trim[colon+1:])
+		v, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			continue
+		}
+		switch key {
+		case "Bytes received":
+			n.RxBytes = v
+		case "Bytes sent":
+			n.TxBytes = v
+		case "Receive packets dropped":
+			n.RxDropped = v
+		case "Transmit packets dropped":
+			n.TxDropped = v
+		case "Total receive errors":
+			n.RxErrors = v
+		case "Total transmit errors":
+			n.TxErrors = v
+		}
+	}
 }

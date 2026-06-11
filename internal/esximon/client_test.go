@@ -431,3 +431,97 @@ func TestParseATASMARTBuffer(t *testing.T) {
 		}
 	})
 }
+
+func TestParseHostBoot(t *testing.T) {
+	t.Run("with_zdump", func(t *testing.T) {
+		out := `UPTIME_US=123584921319
+NOW_EPOCH=1781145786
+ZDUMP_COUNT=2
+ZDUMP_LATEST=1781022240
+`
+		b := parseHostBoot(out)
+		if b.UptimeSeconds != 123584 {
+			t.Fatalf("uptime = %d (want 123584)", b.UptimeSeconds)
+		}
+		// 1781145786 - 123584 = 1781022202
+		if b.BootedAt.Unix() != 1781022202 {
+			t.Fatalf("booted_at unix = %d (want 1781022202)", b.BootedAt.Unix())
+		}
+		if b.CrashDumpCount != 2 {
+			t.Fatalf("crash count = %d (want 2)", b.CrashDumpCount)
+		}
+		if b.LastCrashAt.Unix() != 1781022240 {
+			t.Fatalf("last_crash_at unix = %d (want 1781022240)", b.LastCrashAt.Unix())
+		}
+	})
+
+	t.Run("no_zdump", func(t *testing.T) {
+		out := `UPTIME_US=42000000
+NOW_EPOCH=1781145786
+ZDUMP_COUNT=0
+ZDUMP_LATEST=
+`
+		b := parseHostBoot(out)
+		if b.UptimeSeconds != 42 {
+			t.Fatalf("uptime = %d (want 42)", b.UptimeSeconds)
+		}
+		if b.CrashDumpCount != 0 {
+			t.Fatalf("crash count = %d (want 0)", b.CrashDumpCount)
+		}
+		if !b.LastCrashAt.IsZero() {
+			t.Fatalf("last_crash_at should be zero, got %v", b.LastCrashAt)
+		}
+	})
+
+	t.Run("empty_output_keeps_defaults", func(t *testing.T) {
+		b := parseHostBoot("")
+		if b.UptimeSeconds != -1 {
+			t.Fatalf("expected uptime=-1 on empty, got %d", b.UptimeSeconds)
+		}
+	})
+}
+
+func TestParseNICList(t *testing.T) {
+	out := `Name    PCI Device    Driver         Admin Status  Link Status  Speed  Duplex  MAC Address         MTU  Description
+------  ------------  -------------  ------------  -----------  -----  ------  -----------------  ----  -----------
+vmnic0  0000:00:1f.6  ne1000         Up            Up            1000  Full    d8:bb:c1:c1:b6:49  1500  Intel Corporation Ethernet Connection (7) I219-LM
+vmnic1  0000:01:00.0  igc-community  Up            Up            2500  Full    1c:86:0b:2c:3f:1b  1500  Intel Corporation Ethernet Controller I226-V
+`
+	nics := parseNICList(out)
+	if len(nics) != 2 {
+		t.Fatalf("want 2 nics, got %d", len(nics))
+	}
+	if nics[0].Name != "vmnic0" || nics[0].Driver != "ne1000" || nics[0].SpeedMbps != 1000 || nics[0].MTU != 1500 {
+		t.Fatalf("nic0 = %+v", nics[0])
+	}
+	if nics[0].Description != "Intel Corporation Ethernet Connection (7) I219-LM" {
+		t.Fatalf("nic0 desc = %q", nics[0].Description)
+	}
+	if nics[1].SpeedMbps != 2500 || nics[1].MAC != "1c:86:0b:2c:3f:1b" {
+		t.Fatalf("nic1 = %+v", nics[1])
+	}
+}
+
+func TestFillNICStats(t *testing.T) {
+	out := `NIC statistics for vmnic0
+   Packets received: 638456
+   Packets sent: 516978
+   Bytes received: 614164771
+   Bytes sent: 64981576
+   Receive packets dropped: 0
+   Transmit packets dropped: 0
+   Total receive errors: 0
+   Total transmit errors: 0
+`
+	n := newNIC()
+	fillNICStats(&n, out)
+	if n.RxBytes != 614164771 || n.TxBytes != 64981576 {
+		t.Fatalf("bytes = %d / %d", n.RxBytes, n.TxBytes)
+	}
+	if n.RxErrors != 0 || n.TxErrors != 0 {
+		t.Fatalf("errors should be 0, got %d / %d", n.RxErrors, n.TxErrors)
+	}
+	if n.RxDropped != 0 || n.TxDropped != 0 {
+		t.Fatalf("dropped should be 0, got %d / %d", n.RxDropped, n.TxDropped)
+	}
+}

@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Activity,
+  Network,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -160,6 +161,33 @@ interface Snapshot {
   disk_health?: DiskHealth[]
   usb?: USBState
   vms?: VM[]
+  boot?: HostBoot
+  nics?: NIC[]
+}
+
+interface HostBoot {
+  uptime_seconds: number
+  booted_at: string
+  crash_dump_count: number
+  last_crash_at?: string
+}
+
+interface NIC {
+  name: string
+  driver: string
+  mac: string
+  mtu: number
+  description: string
+  admin_status: string
+  link_status: string
+  speed_mbps: number
+  duplex: string
+  rx_bytes: number
+  tx_bytes: number
+  rx_errors: number
+  tx_errors: number
+  rx_dropped: number
+  tx_dropped: number
 }
 
 interface CoreTempPoint {
@@ -330,7 +358,7 @@ function KV({ k, v, mono = false, title }: { k: string; v: React.ReactNode; mono
 
 // --- 子卡片 ---
 
-function PlatformCard({ p, m }: { p: PlatformInfo; m?: MemoryInfo }) {
+function PlatformCard({ p, m, boot }: { p: PlatformInfo; m?: MemoryInfo; boot?: HostBoot }) {
   return (
     <Card className="px-3 py-3">
       <SectionHead
@@ -360,6 +388,116 @@ function PlatformCard({ p, m }: { p: PlatformInfo; m?: MemoryInfo }) {
         />
         <KV k="总内存" v={m && m.mem_total_bytes > 0 ? fmtBytes(m.mem_total_bytes) : '—'} />
         <KV k="可用内存" v={m && m.mem_free_bytes > 0 ? fmtBytes(m.mem_free_bytes) : '—'} />
+      </div>
+      {boot && boot.uptime_seconds >= 0 ? <BootLine boot={boot} /> : null}
+    </Card>
+  )
+}
+
+function BootLine({ boot }: { boot: HostBoot }) {
+  const uptimeText = fmtUptime(boot.uptime_seconds)
+  const bootedText = fmtDateTime(boot.booted_at)
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2 text-[11.5px] text-muted-foreground">
+      <span>
+        运行 <span className="font-medium text-foreground">{uptimeText}</span>
+      </span>
+      {bootedText ? <span>启动于 {bootedText}</span> : null}
+      {boot.crash_dump_count > 0 ? (
+        <span className="rounded-md border border-rose-500/40 bg-rose-500/10 px-1.5 py-0.5 text-rose-700 dark:text-rose-300">
+          zdump {boot.crash_dump_count}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+function fmtUptime(sec: number): string {
+  if (sec < 0) return '—'
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+function fmtBitrate(mbps: number): string {
+  if (mbps < 0) return '—'
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(mbps % 1000 === 0 ? 0 : 1)} Gbps`
+  return `${mbps} Mbps`
+}
+
+function NICsCard({ nics }: { nics: NIC[] }) {
+  return (
+    <Card className="px-3 py-3">
+      <SectionHead
+        icon={<Network className="h-3.5 w-3.5" />}
+        title="网卡"
+        suffix={
+          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+            {nics.length} 张
+          </span>
+        }
+      />
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        {nics.map((n) => {
+          const linkUp = n.link_status === 'Up'
+          const adminUp = n.admin_status === 'Up'
+          const linkTone = linkUp
+            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            : 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+          type Pill = { label: string; tone: 'red' | 'amber' }
+          const pills: Pill[] = []
+          if (n.rx_errors > 0) pills.push({ label: `收错 ${n.rx_errors}`, tone: 'red' })
+          if (n.tx_errors > 0) pills.push({ label: `发错 ${n.tx_errors}`, tone: 'red' })
+          if (n.rx_dropped > 0) pills.push({ label: `收丢 ${n.rx_dropped}`, tone: 'amber' })
+          if (n.tx_dropped > 0) pills.push({ label: `发丢 ${n.tx_dropped}`, tone: 'amber' })
+          const pillCls: Record<Pill['tone'], string> = {
+            red: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300',
+            amber: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+          }
+          return (
+            <div key={n.name} className="rounded-md border border-border bg-muted/30 px-2.5 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[12px] font-medium text-foreground">{n.name}</span>
+                <span className={cn('rounded-md border px-1.5 py-0.5 text-[10.5px] font-medium', linkTone)}>
+                  {linkUp ? '链路 Up' : '链路 Down'}
+                </span>
+                {linkUp ? (
+                  <span className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
+                    {fmtBitrate(n.speed_mbps)}
+                    {n.duplex ? ` · ${n.duplex}` : ''}
+                  </span>
+                ) : null}
+                {!adminUp ? (
+                  <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10.5px] text-amber-700 dark:text-amber-300">
+                    Admin Down
+                  </span>
+                ) : null}
+                {pills.map((p) => (
+                  <span
+                    key={p.label}
+                    className={cn('rounded-md border px-1.5 py-0.5 text-[10.5px]', pillCls[p.tone])}
+                  >
+                    {p.label}
+                  </span>
+                ))}
+              </div>
+              {n.description ? (
+                <div className="mt-1 truncate text-[11px] text-muted-foreground" title={n.description}>
+                  {n.description}
+                </div>
+              ) : null}
+              <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                <span>MAC <span className="font-mono text-foreground">{n.mac || '—'}</span></span>
+                <span>驱动 <span className="text-foreground">{n.driver || '—'}</span></span>
+                <span>收 <span className="text-foreground">{n.rx_bytes >= 0 ? fmtBytes(n.rx_bytes) : '—'}</span></span>
+                <span>发 <span className="text-foreground">{n.tx_bytes >= 0 ? fmtBytes(n.tx_bytes) : '—'}</span></span>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </Card>
   )
@@ -1567,10 +1705,11 @@ function HostBlock({ host }: { host: Snapshot }) {
         {/* 卡片网格:永远渲染所有模块,缺数据的格子显示占位,避免子模块整块消失。
             完全没有任何模块数据(首次采样前)时退化成一个大的提示框。 */}
         {(host.platform || host.cpu_static || host.memory || host.cpu_temperature || host.mce_health ||
-          (host.disk_health && host.disk_health.length > 0) || host.usb || host.vms) ? (
+          (host.disk_health && host.disk_health.length > 0) || host.usb || host.vms ||
+          host.boot || (host.nics && host.nics.length > 0)) ? (
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             {host.platform
-              ? <PlatformCard p={host.platform} m={host.memory} />
+              ? <PlatformCard p={host.platform} m={host.memory} boot={host.boot} />
               : <EmptyCard icon={<Server className="h-3.5 w-3.5" />} title="平台" />}
             {host.mce_health
               ? <MCECard m={host.mce_health} />
@@ -1585,6 +1724,11 @@ function HostBlock({ host }: { host: Snapshot }) {
               {host.disk_health && host.disk_health.length > 0
                 ? <DisksCard disks={host.disk_health} />
                 : <EmptyCard icon={<HardDrive className="h-3.5 w-3.5" />} title="磁盘" />}
+            </div>
+            <div className="md:col-span-2">
+              {host.nics && host.nics.length > 0
+                ? <NICsCard nics={host.nics} />
+                : <EmptyCard icon={<Network className="h-3.5 w-3.5" />} title="网卡" />}
             </div>
             <div className="md:col-span-2">
               {host.usb

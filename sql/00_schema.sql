@@ -459,6 +459,8 @@ CREATE TABLE `esxi_state` (
   `disk_json`        TEXT         NULL                    COMMENT 'JSON：[{device, model, type, temp_c, threshold_c, status}]',
   `usb_json`         TEXT         NULL                    COMMENT 'JSON：{ controllers, arbitrator_running, available_for_passthrough, vm_owned }',
   `vm_json`          TEXT         NULL                    COMMENT 'JSON：[{id, name, guest_os, state}]',
+  `boot_json`        TEXT         NULL                    COMMENT 'JSON：{ uptime_seconds, booted_at, crash_dump_count, last_crash_at }',
+  `nic_json`         TEXT         NULL                    COMMENT 'JSON：[{name, driver, mac, link_status, speed_mbps, rx_bytes, tx_bytes, rx_errors, tx_errors, ...}]',
   `last_alert_at`    DATETIME(3)  DEFAULT NULL            COMMENT '最近一次告警时刻（去抖留痕）',
   `sampled_at`       DATETIME(3)  DEFAULT NULL            COMMENT '最近一次成功采样时刻',
   `updated_at`       DATETIME(3)  NOT NULL                COMMENT '本行最近一次写入时刻',

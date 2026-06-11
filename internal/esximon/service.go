@@ -153,6 +153,8 @@ type Snapshot struct {
 	Disks     []DiskHealth    `json:"disk_health,omitempty"`
 	USB       *USBState       `json:"usb,omitempty"`
 	VMs       []VM            `json:"vms,omitempty"`
+	Boot      *HostBoot       `json:"boot,omitempty"`
+	NICs      []NIC           `json:"nics,omitempty"`
 }
 
 // BuildSnapshot 基于 esxi_host(主) + esxi_state(JSON 列) 组装快照。
@@ -252,6 +254,18 @@ func hydrate(sn *Snapshot, st model.EsxiState) {
 		var v []VM
 		if json.Unmarshal([]byte(st.VMJSON), &v) == nil {
 			sn.VMs = v
+		}
+	}
+	if st.BootJSON != "" {
+		var v HostBoot
+		if json.Unmarshal([]byte(st.BootJSON), &v) == nil {
+			sn.Boot = &v
+		}
+	}
+	if st.NICJSON != "" {
+		var v []NIC
+		if json.Unmarshal([]byte(st.NICJSON), &v) == nil {
+			sn.NICs = v
 		}
 	}
 }
@@ -464,6 +478,8 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 			st.DiskJSON = prev.DiskJSON
 			st.USBJSON = prev.USBJSON
 			st.VMJSON = prev.VMJSON
+			st.BootJSON = prev.BootJSON
+			st.NICJSON = prev.NICJSON
 		}
 		return st
 	}
@@ -485,6 +501,8 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 	st.DiskJSON = stickyJSON(m.Disks, diskTempsComplete(m.Disks), prevJSON(prev, func(p *model.EsxiState) string { return p.DiskJSON }))
 	st.USBJSON = stickyUSBJSON(m.USB, prevJSON(prev, func(p *model.EsxiState) string { return p.USBJSON }))
 	st.VMJSON = stickyJSON(m.VMs, vmStatesComplete(m.VMs), prevJSON(prev, func(p *model.EsxiState) string { return p.VMJSON }))
+	st.BootJSON = stickyJSON(m.Boot, m.Boot.UptimeSeconds >= 0, prevJSON(prev, func(p *model.EsxiState) string { return p.BootJSON }))
+	st.NICJSON = stickyJSON(m.NICs, len(m.NICs) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.NICJSON }))
 	return st
 }
 
