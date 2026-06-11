@@ -47,6 +47,9 @@ type Config struct {
 	// 任务连续失败达此次数才告警（防抖），默认 1（每次失败都告警）。
 	SchedulerAlertFailThreshold int
 
+	// SSH 监控维护窗口。日内 HH:MM-HH:MM,窗口内跳过 UPS / ESXi 的 cron 采样。
+	SSHMonitorMaintenanceWindow string
+
 	// UPS 监控。机器从 ups_host(enabled='1')取,凭证从 ups_ssh_credential 库选。
 	// SampleCron 6 段表达式;UPSSSHTimeoutSec 是单机采样的整体超时;
 	// RetentionDays 是 ups_sample 的保留天数,过期由 cleanup cron 清。
@@ -107,6 +110,8 @@ func Load() *Config {
 		EventRemindCron:    env("EVENT_REMIND_CRON", "0 0 9 * * *"),
 
 		SchedulerAlertFailThreshold: envInt("SCHEDULER_ALERT_FAIL_THRESHOLD", 1),
+
+		SSHMonitorMaintenanceWindow: env("SSH_MONITOR_MAINTENANCE_WINDOW", "04:25-04:35"),
 
 		UPSSampleCron:       env("UPS_SAMPLE_CRON", "*/30 * * * * *"),
 		UPSCleanupCron:      env("UPS_CLEANUP_CRON", "0 0 4 * * *"),

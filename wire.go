@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io/fs"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -159,6 +161,10 @@ func buildEsxiService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*es
 // 返回 Scheduler 供调用方 defer Stop。
 func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, upsSvc *upsmon.Service, esxiSvc *esximon.Service, hub *notify.Hub) *scheduler.Scheduler {
 	sched := scheduler.New()
+	sshMaintenanceWindow, err := parseDailyMaintenanceWindow(cfg.SSHMonitorMaintenanceWindow)
+	if err != nil {
+		logx.Warn("ssh monitor maintenance window disabled", "value", cfg.SSHMonitorMaintenanceWindow, "err", err.Error())
+	}
 
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() error {
 		birthday.RunOnce(gormDB, notifier)
@@ -200,7 +206,7 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 		logx.Fatal("register acme-deploy-retry task", "err", err)
 	}
 
-	if err := sched.Register("ups-sample", cfg.UPSSampleCron, upsSvc.RunSample); err != nil {
+	if err := sched.RegisterWithTrigger("ups-sample", cfg.UPSSampleCron, withCronMaintenanceWindow("ups-sample", sshMaintenanceWindow, upsSvc.RunSample)); err != nil {
 		logx.Fatal("register ups-sample task", "err", err)
 	}
 
@@ -208,7 +214,7 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 		logx.Fatal("register ups-cleanup task", "err", err)
 	}
 
-	if err := sched.Register("esxi-sample", cfg.EsxiSampleCron, esxiSvc.RunSample); err != nil {
+	if err := sched.RegisterWithTrigger("esxi-sample", cfg.EsxiSampleCron, withCronMaintenanceWindow("esxi-sample", sshMaintenanceWindow, esxiSvc.RunSample)); err != nil {
 		logx.Fatal("register esxi-sample task", "err", err)
 	}
 
@@ -223,4 +229,79 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 
 	sched.Start()
 	return sched
+}
+
+type dailyMaintenanceWindow struct {
+	spec        string
+	enabled     bool
+	startMinute int
+	endMinute   int
+}
+
+func parseDailyMaintenanceWindow(spec string) (dailyMaintenanceWindow, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" || strings.EqualFold(spec, "off") || strings.EqualFold(spec, "none") || strings.EqualFold(spec, "disabled") {
+		return dailyMaintenanceWindow{}, nil
+	}
+	parts := strings.Split(spec, "-")
+	if len(parts) != 2 {
+		return dailyMaintenanceWindow{}, fmt.Errorf("格式必须是 HH:MM-HH:MM")
+	}
+	startMinute, err := parseClockMinute(parts[0])
+	if err != nil {
+		return dailyMaintenanceWindow{}, fmt.Errorf("开始时间无效:%w", err)
+	}
+	endMinute, err := parseClockMinute(parts[1])
+	if err != nil {
+		return dailyMaintenanceWindow{}, fmt.Errorf("结束时间无效:%w", err)
+	}
+	if startMinute == endMinute {
+		return dailyMaintenanceWindow{}, fmt.Errorf("开始时间和结束时间不能相同")
+	}
+	return dailyMaintenanceWindow{
+		spec:        spec,
+		enabled:     true,
+		startMinute: startMinute,
+		endMinute:   endMinute,
+	}, nil
+}
+
+func parseClockMinute(raw string) (int, error) {
+	hourText, minuteText, ok := strings.Cut(strings.TrimSpace(raw), ":")
+	if !ok {
+		return 0, fmt.Errorf("缺少 ':'")
+	}
+	hour, err := strconv.Atoi(strings.TrimSpace(hourText))
+	if err != nil {
+		return 0, err
+	}
+	minute, err := strconv.Atoi(strings.TrimSpace(minuteText))
+	if err != nil {
+		return 0, err
+	}
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, fmt.Errorf("时间越界")
+	}
+	return hour*60 + minute, nil
+}
+
+func (w dailyMaintenanceWindow) Contains(t time.Time) bool {
+	if !w.enabled {
+		return false
+	}
+	minute := t.Hour()*60 + t.Minute()
+	if w.startMinute < w.endMinute {
+		return minute >= w.startMinute && minute < w.endMinute
+	}
+	return minute >= w.startMinute || minute < w.endMinute
+}
+
+func withCronMaintenanceWindow(jobName string, window dailyMaintenanceWindow, fn func() error) func(trigger string) error {
+	return func(trigger string) error {
+		if trigger == "cron" && window.Contains(time.Now()) {
+			logx.Info("ssh monitor cron sample skipped: maintenance window", "job", jobName, "window", window.spec)
+			return nil
+		}
+		return fn()
+	}
 }

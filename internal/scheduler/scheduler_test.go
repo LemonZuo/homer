@@ -97,6 +97,24 @@ func TestRegisterRejectsBadCronSpec(t *testing.T) {
 	}
 }
 
+func TestRegisterWithTriggerPassesTrigger(t *testing.T) {
+	s := New()
+	var got []string
+	if err := s.RegisterWithTrigger("triggered", "", func(trigger string) error {
+		got = append(got, trigger)
+		return nil
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	j := s.jobs["triggered"]
+	s.run(j, "manual")
+	s.run(j, "cron")
+	want := []string{"manual", "cron"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("triggers = %v want %v", got, want)
+	}
+}
+
 func TestTriggerErrors(t *testing.T) {
 	s := New()
 	if err := s.Trigger("nope"); err == nil {

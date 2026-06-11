@@ -35,7 +35,7 @@ type Observer interface {
 type job struct {
 	name string
 	spec string
-	fn   func() error
+	fn   func(trigger string) error
 
 	entryID cron.EntryID
 
@@ -95,6 +95,12 @@ func (s *Scheduler) Seed(name string, last *Run, consec int) {
 // 可在面板里点「立即执行」。fn 返回 error 作为该次执行的结果摘要；
 // fn 内 panic 不会扩散到调度器，仅记录为失败。
 func (s *Scheduler) Register(name, spec string, fn func() error) error {
+	return s.RegisterWithTrigger(name, spec, func(string) error { return fn() })
+}
+
+// RegisterWithTrigger 与 Register 相同，但 fn 可以区分触发来源(cron/manual)。
+// 只有需要按触发来源改变行为的任务才使用它。
+func (s *Scheduler) RegisterWithTrigger(name, spec string, fn func(trigger string) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, dup := s.jobs[name]; dup {
@@ -136,7 +142,7 @@ func (s *Scheduler) run(j *job, trigger string) {
 			}
 		}()
 		logx.Info("scheduler job tick", "job", j.name, "trigger", trigger)
-		runErr = j.fn()
+		runErr = j.fn(trigger)
 	}()
 
 	rec := Run{Start: start, End: time.Now(), OK: runErr == nil, Trigger: trigger}
