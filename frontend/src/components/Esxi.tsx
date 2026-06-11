@@ -15,7 +15,6 @@ import {
   ShieldAlert,
   Activity,
   Network,
-  Waypoints,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -27,6 +26,7 @@ import { EsxiHostsDrawer } from './esxi/EsxiHostsDrawer'
 import { EsxiHostEditDialog } from './esxi/EsxiHostEditDialog'
 import { EsxiCredentialsDrawer } from './esxi/EsxiCredentialsDrawer'
 import { EsxiCredentialEditDialog } from './esxi/EsxiCredentialEditDialog'
+import { NetTopologyFlow } from './esxi/NetTopologyFlow'
 import type { EsxiCredential, EsxiHost } from './esxi/types'
 
 // --- 后端 snapshot 数据形态(与 Go esximon.Snapshot 对齐) ---
@@ -528,220 +528,6 @@ function NICsCard({ nics }: { nics: NIC[] }) {
         })}
       </div>
     </Card>
-  )
-}
-
-function NetTopologyCard({ topo, nics }: { topo: NetTopology; nics?: NIC[] }) {
-  // 每个 vSwitch 画成一台交换机：上方挂物理 uplink，下方挂端口组并展开 VM 列表。
-  // VM 旁标注 team_uplink 表示当前 active 出口。
-  const vswitches = topo.vswitches ?? []
-  const vmNics = topo.vm_nics ?? []
-  const nicByName = new Map<string, NIC>((nics ?? []).map((n) => [n.name, n]))
-  const vmsByPG = new Map<string, { vmName: string; teamUplink: string; mac: string }[]>()
-  for (const link of vmNics) {
-    const key = link.vswitch + '||' + link.portgroup
-    const arr = vmsByPG.get(key) ?? []
-    if (!arr.find((v) => v.vmName === link.vm_name)) {
-      arr.push({ vmName: link.vm_name, teamUplink: link.team_uplink, mac: link.mac })
-    }
-    vmsByPG.set(key, arr)
-  }
-  const pNICCount = nics?.length ?? new Set(vswitches.flatMap((s) => s.uplinks ?? [])).size
-  return (
-    <Card className="px-3 py-3">
-      <SectionHead
-        icon={<Waypoints className="h-3.5 w-3.5" />}
-        title="网络拓扑"
-        suffix={
-          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-            {pNICCount} 物理 · {vswitches.length} vSwitch · {vmNics.length} vNIC
-          </span>
-        }
-      />
-      <div className="space-y-4">
-        {vswitches.map((sw) => (
-          <SwitchChassis key={sw.name} sw={sw} vmsByPG={vmsByPG} nicByName={nicByName} />
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-function SwitchChassis({
-  sw,
-  vmsByPG,
-  nicByName,
-}: {
-  sw: VSwitchInfo
-  vmsByPG: Map<string, { vmName: string; teamUplink: string; mac: string }[]>
-  nicByName: Map<string, NIC>
-}) {
-  const uplinks = sw.uplinks ?? []
-  const portgroups = sw.portgroups ?? []
-  const totalVMs = portgroups.reduce(
-    (a, pg) => a + (vmsByPG.get(sw.name + '||' + pg)?.length ?? 0),
-    0,
-  )
-  const nonEmptyPGs = portgroups.filter((pg) => (vmsByPG.get(sw.name + '||' + pg)?.length ?? 0) > 0)
-  const emptyPGs = portgroups.filter((pg) => (vmsByPG.get(sw.name + '||' + pg)?.length ?? 0) === 0)
-  return (
-    <div className="rounded-lg border border-border bg-muted/20 p-2.5">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.7)]" />
-        <span className="font-mono text-[12px] font-semibold text-foreground">{sw.name}</span>
-        <span className="rounded-sm border border-border bg-background px-1 py-px text-[9.5px] uppercase tracking-wide text-muted-foreground">
-          vSwitch
-        </span>
-        <span className="ml-auto text-[10.5px] text-muted-foreground">
-          {uplinks.length} 上联 · {portgroups.length} 端口组 · {totalVMs} 虚机
-        </span>
-      </div>
-
-      <div className="grid grid-cols-[minmax(220px,1.4fr)_68px_minmax(200px,0.9fr)] items-stretch gap-0">
-        {/* 中间：交换机背板 */}
-        <div
-          className="col-start-2 row-start-1 mx-auto my-2 h-[calc(100%-1rem)] w-8 rounded border border-zinc-400/40 bg-gradient-to-r from-zinc-300 via-zinc-200 to-zinc-300 shadow-inner dark:from-zinc-700 dark:via-zinc-800 dark:to-zinc-700"
-          aria-hidden
-        />
-
-        {/* 左侧：端口组列表 */}
-        <div className="col-start-1 row-start-1 space-y-1.5 self-start">
-          {nonEmptyPGs.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border px-2 py-3 text-center text-[11px] text-muted-foreground">
-              无端口组
-            </div>
-          ) : (
-            nonEmptyPGs.map((pg) => (
-              <PortgroupCard
-                key={pg}
-                pg={pg}
-                vms={vmsByPG.get(sw.name + '||' + pg) ?? []}
-              />
-            ))
-          )}
-          {emptyPGs.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5 rounded-md border border-dashed border-border bg-muted/30 px-2 py-1.5">
-              <span className="text-[10.5px] text-muted-foreground">空端口组：</span>
-              {emptyPGs.map((pg) => (
-                <span
-                  key={pg}
-                  className="rounded border border-border bg-background px-1.5 py-px text-[10.5px] text-muted-foreground"
-                  title={pg}
-                >
-                  {pg}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        {/* 右侧：物理适配器卡 */}
-        <div className="col-start-3 row-start-1 self-start">
-          <UplinksCard uplinks={uplinks} nicByName={nicByName} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function PortgroupCard({
-  pg,
-  vms,
-}: {
-  pg: string
-  vms: { vmName: string; teamUplink: string; mac: string }[]
-}) {
-  return (
-    <div className="relative overflow-visible rounded-md border border-border bg-background shadow-sm">
-      <div className="flex items-center gap-1.5 border-b border-border bg-amber-500/10 px-2 py-1">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
-        <span className="truncate text-[11.5px] font-medium text-foreground" title={pg}>
-          {pg}
-        </span>
-        <span className="ml-auto text-[10px] text-muted-foreground">{vms.length} 虚机</span>
-      </div>
-      {vms.length === 0 ? null : (
-        <div>
-          {vms.map((v) => (
-            <div
-              key={v.vmName + v.mac}
-              className="relative border-t border-border/40 px-2 py-1 leading-tight"
-              title={`${v.vmName}\nMAC ${v.mac || '—'}${v.teamUplink ? ` · ${v.teamUplink}` : ''}`}
-            >
-              <div className="flex items-baseline gap-1.5">
-                <span className="min-w-0 flex-1 truncate text-[11.5px] text-foreground">{v.vmName}</span>
-                {v.teamUplink ? (
-                  <span className="shrink-0 font-mono text-[9.5px] text-muted-foreground">{v.teamUplink}</span>
-                ) : null}
-              </div>
-              <div className="truncate font-mono text-[9.5px] text-muted-foreground">{v.mac || '—'}</div>
-              <div className="pointer-events-none absolute left-full top-1/2 flex -translate-y-1/2 items-center">
-                <div className="h-px w-9 bg-foreground/40" />
-                <PortIcon />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function UplinksCard({
-  uplinks,
-  nicByName,
-}: {
-  uplinks: string[]
-  nicByName: Map<string, NIC>
-}) {
-  return (
-    <div className="relative overflow-visible rounded-md border border-border bg-background shadow-sm">
-      <div className="flex items-center gap-1.5 border-b border-border bg-sky-500/10 px-2 py-1">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
-        <span className="text-[11.5px] font-medium text-foreground">物理适配器</span>
-      </div>
-      {uplinks.length === 0 ? (
-        <div className="px-2 py-2 text-[11px] text-muted-foreground">无上联</div>
-      ) : (
-        uplinks.map((up) => {
-          const nic = nicByName.get(up)
-          const linkUp = nic ? nic.link_status === 'Up' : true
-          return (
-            <div key={up} className="relative border-t border-border/40 px-2 py-1">
-              <div className="pointer-events-none absolute right-full top-1/2 flex -translate-y-1/2 items-center">
-                <PortIcon active={linkUp} />
-                <div className="h-px w-10 bg-foreground/40" />
-              </div>
-              <div className="truncate text-[11px]" title={up}>
-                <span className="font-mono font-medium text-foreground">{up}</span>
-                {nic ? (
-                  <span className="text-muted-foreground">
-                    , {fmtBitrate(nic.speed_mbps)}
-                    {nic.duplex ? `, ${nic.duplex}` : ''}
-                  </span>
-                ) : null}
-              </div>
-              {nic && nic.mac ? (
-                <div className="font-mono text-[10px] text-muted-foreground">MAC {nic.mac}</div>
-              ) : null}
-            </div>
-          )
-        })
-      )}
-    </div>
-  )
-}
-
-function PortIcon({ active = true }: { active?: boolean }) {
-  return (
-    <div
-      className={cn(
-        'h-3.5 w-3 rounded-[2px] border shadow-sm',
-        active
-          ? 'border-emerald-800/70 bg-gradient-to-b from-emerald-400 to-emerald-600'
-          : 'border-rose-800/70 bg-gradient-to-b from-rose-400 to-rose-600',
-      )}
-    />
   )
 }
 
@@ -1976,7 +1762,7 @@ function HostBlock({ host }: { host: Snapshot }) {
               ((host.net_topology.vswitches?.length ?? 0) > 0 ||
                 (host.net_topology.vm_nics?.length ?? 0) > 0) ? (
               <div className="md:col-span-2">
-                <NetTopologyCard topo={host.net_topology} nics={host.nics} />
+                <NetTopologyFlow topo={host.net_topology} nics={host.nics} />
               </div>
             ) : null}
             <div className="md:col-span-2">
