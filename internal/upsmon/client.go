@@ -47,15 +47,15 @@ const upscPathPrefix = "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/us
 // 这行 banner。一旦合并进 stdout,会被当成 6 个伪 UPS 名(Init/SSL/without/...
 // /database/真名),后续 upsc <伪名> 全部失败,真名的诊断信息也被覆盖掉。
 // 所以正常路径用 2>/dev/null 严格只取 stdout,诊断信息走单独的 session。
-func probeHost(client *ssh.Client) ([]upscReading, string, error) {
+func probeHost(client *ssh.Client) ([]upscReading, []string, string, error) {
 	out, err := sshx.Run(client, upscPathPrefix+"upsc -l 2>/dev/null", nil)
 	if err != nil {
 		// 命令本身失败(找不到 upsc / 非零退出),用一次带 stderr 的额外探测拿诊断信息。
-		return nil, diagnose(client, ""), nil
+		return nil, nil, diagnose(client, ""), nil
 	}
 	names := splitUPSNames(out)
 	if len(names) == 0 {
-		return nil, diagnose(client, ""), nil
+		return nil, nil, diagnose(client, ""), nil
 	}
 	readings := make([]upscReading, 0, len(names))
 	var lastFailName string
@@ -64,15 +64,16 @@ func probeHost(client *ssh.Client) ([]upscReading, string, error) {
 		if !ok {
 			// upsd 在 driver pollfreq 重新枚举 USB 的瞬间会返回 exit=0 + 空白(NUT 已知行为)。
 			// 单次失败不阻断,但也不写空值 — 保留上一轮 state,避免被零值覆盖。
+			// names 仍然返回完整列表:NUT 知道这台 UPS 存在,只是本轮 reading 抖动。
 			lastFailName = name
 			continue
 		}
 		readings = append(readings, reading)
 	}
 	if len(readings) == 0 {
-		return nil, diagnose(client, lastFailName), nil
+		return nil, names, diagnose(client, lastFailName), nil
 	}
-	return readings, "", nil
+	return readings, names, "", nil
 }
 
 // readOneUPS 跑 `upsc <name>`,空白 / 解析失败时短延迟后再试两次。

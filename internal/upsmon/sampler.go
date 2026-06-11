@@ -24,6 +24,7 @@ type HostResult struct {
 	HasUPS   bool          `json:"has_ups"`
 	Diag     string        `json:"-"` // 探测连通但没拿到 UPS 时的诊断输出,供 test 接口展示
 	UPSes    []upscReading `json:"-"` // 内部用,转 sample 时消费
+	UPSNames []string      `json:"-"` // upsc -l 拿到的 UPS 名(NUT 已知集合),用于"失联"判定;与 UPSes 不一定一一对应(driver 抖动会丢 reading 但 NUT 仍知道名字)
 	StartAt  time.Time     `json:"-"`
 }
 
@@ -95,6 +96,7 @@ func (s *Sampler) probeOne(h model.UPSHost) HostResult {
 	// 这里通过 goroutine + 时限保证一台机器卡死不拖垮整轮。
 	done := make(chan struct{})
 	var readings []upscReading
+	var names []string
 	var diag string
 	var probeErr error
 	go func() {
@@ -105,7 +107,7 @@ func (s *Sampler) probeOne(h model.UPSHost) HostResult {
 			return
 		}
 		defer cleanup()
-		readings, diag, probeErr = probeHost(client)
+		readings, names, diag, probeErr = probeHost(client)
 	}()
 	select {
 	case <-done:
@@ -121,6 +123,7 @@ func (s *Sampler) probeOne(h model.UPSHost) HostResult {
 	res.OK = true
 	res.HasUPS = len(readings) > 0
 	res.UPSes = readings
+	res.UPSNames = names
 	res.Diag = diag
 	return res
 }

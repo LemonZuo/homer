@@ -251,6 +251,9 @@ func (s *Service) handleHostReachAlerts(hosts []HostResult) {
 
 // handleUPSAvailabilityAlerts 处理"主机在线但具体 UPS 失联 / 上线"的转换告警。
 // 触发场景:NUT 挂了 / USB 拔了 / driver not connected / 多 UPS 场景里拔接其中一台。
+// 集合判定用 h.UPSNames(upsc -l 的输出 = NUT 已知集合),不用 h.UPSes —— 后者
+// 是"本轮成功读出 reading 的子集",driver pollfreq 抖动会让 reading 时多时少,
+// 用它判断会和 30s cron 共振,反复横跳。
 // 只在 h.OK=true 时跟踪;主机离线时清掉记录,主机恢复时进入"首次见到不告警"分支。
 func (s *Service) handleUPSAvailabilityAlerts(hosts []HostResult) {
 	type change struct {
@@ -269,9 +272,9 @@ func (s *Service) handleUPSAvailabilityAlerts(hosts []HostResult) {
 			continue
 		}
 		prev, known := s.hostUPSNames[h.HostID]
-		curr := make(map[string]struct{}, len(h.UPSes))
-		for _, u := range h.UPSes {
-			curr[u.Name] = struct{}{}
+		curr := make(map[string]struct{}, len(h.UPSNames))
+		for _, name := range h.UPSNames {
+			curr[name] = struct{}{}
 		}
 		s.hostUPSNames[h.HostID] = curr
 		if !known {
