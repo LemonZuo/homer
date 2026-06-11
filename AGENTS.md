@@ -18,7 +18,7 @@
 ## Tech Stack
 
 - 后端：Go 1.25+，Gin，GORM，MySQL driver，`.env` 通过 godotenv 加载
-- 前端：React 19，Vite，TypeScript，Tailwind CSS v4，react-router-dom，axios，lucide-react
+- 前端：React 19，Vite，TypeScript，Tailwind CSS v4，react-router-dom，axios，lucide-react，@xyflow/react（ESXi 网络拓扑可视化）
 - UI 风格：卡片式现代极简，浅色为主，深色模式自动跟随系统，桌面和移动端响应式
 - 部署：单二进制，通过 `//go:embed all:frontend/dist` 将前端产物嵌入 Go binary
 
@@ -44,6 +44,7 @@ homer/
 │   ├── model/
 │   ├── notify/、sms/
 │   ├── router/、scheduler/
+│   ├── sshlike/、sshx/
 │   ├── upsmon/
 │   ├── esximon/
 │   └── web/

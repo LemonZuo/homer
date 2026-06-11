@@ -16,7 +16,7 @@
 ## 技术栈
 
 - **后端**: Go 1.25+，Gin + GORM + MySQL 驱动；通过 `.env`（godotenv）加载配置
-- **前端**: React 19 + Vite + TypeScript + Tailwind CSS v4 + react-router-dom + axios + lucide-react
+- **前端**: React 19 + Vite + TypeScript + Tailwind CSS v4 + react-router-dom + axios + lucide-react + @xyflow/react(ESXi 网络拓扑)
 - **风格**: 卡片式现代极简（浅色为主，深色模式自动跟随系统），桌面 + 移动响应式
 - **部署**: 单二进制 —— `//go:embed all:frontend/dist` 把前端产物打入 Go binary
 
@@ -42,8 +42,10 @@ homer/
 │   ├── model/       # 业务模型（按模块拆分文件即可）
 │   ├── notify/、sms/
 │   ├── router/、scheduler/
+│   ├── sshlike/   # 公共 SSH 拨号(acme/upsmon/esximon 共用，原 acme/deployer/sshlike）
+│   ├── sshx/      # SSH 跳板/中转工具（原 acme/deployer/sshx，提升到顶层）
 │   ├── upsmon/    # UPS：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
-│   ├── esximon/   # ESXi：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + handler
+│   ├── esximon/   # ESXi：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler；网络拓扑(vSwitch/uplink/portgroup/VM-NIC) 也在 sampler 合并
 │   └── web/
 ├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程）
 └── frontend/
@@ -52,7 +54,7 @@ homer/
         ├── main.tsx / App.tsx   # 入口；路由 + 懒加载页面映射
         ├── api.ts / colors.ts
         ├── pages.ts     # 页面/导航登记表（每页自包含，无声明式 CRUD）
-        ├── components/  # 页面组件 + 子目录 acme/ sms/ ui/ icons/
+        ├── components/  # 页面组件 + 子目录 acme/ sms/ esxi/ ups/ ui/ icons/(esxi/NetTopologyFlow 用 @xyflow/react 画拓扑)
         ├── lib/、assets/
         └── index.css
 ```
