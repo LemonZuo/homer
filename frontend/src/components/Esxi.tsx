@@ -459,36 +459,41 @@ function NICsCard({ nics }: { nics: NIC[] }) {
           }
           return (
             <div key={n.name} className="rounded-md border border-border bg-muted/30 px-2.5 py-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-[12px] font-medium text-foreground">{n.name}</span>
-                <span className={cn('rounded-md border px-1.5 py-0.5 text-[10.5px] font-medium', linkTone)}>
-                  {linkUp ? '链路 Up' : '链路 Down'}
-                </span>
-                {linkUp ? (
-                  <span className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
-                    {fmtBitrate(n.speed_mbps)}
-                    {n.duplex ? ` · ${n.duplex}` : ''}
+              <div className="flex items-start gap-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                  <span className="font-mono text-[12px] font-medium text-foreground">{n.name}</span>
+                  <span className={cn('rounded-md border px-1.5 py-0.5 text-[10.5px] font-medium', linkTone)}>
+                    {linkUp ? '链路 Up' : '链路 Down'}
                   </span>
-                ) : null}
-                {!adminUp ? (
-                  <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10.5px] text-amber-700 dark:text-amber-300">
-                    Admin Down
-                  </span>
-                ) : null}
-                {pills.map((p) => (
-                  <span
-                    key={p.label}
-                    className={cn('rounded-md border px-1.5 py-0.5 text-[10.5px]', pillCls[p.tone])}
-                  >
-                    {p.label}
-                  </span>
-                ))}
-              </div>
-              {n.description ? (
-                <div className="mt-1 truncate text-[11px] text-muted-foreground" title={n.description}>
-                  {n.description}
+                  {linkUp ? (
+                    <span className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
+                      {fmtBitrate(n.speed_mbps)}
+                      {n.duplex ? ` · ${n.duplex}` : ''}
+                    </span>
+                  ) : null}
+                  {!adminUp ? (
+                    <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10.5px] text-amber-700 dark:text-amber-300">
+                      Admin Down
+                    </span>
+                  ) : null}
+                  {pills.map((p) => (
+                    <span
+                      key={p.label}
+                      className={cn('rounded-md border px-1.5 py-0.5 text-[10.5px]', pillCls[p.tone])}
+                    >
+                      {p.label}
+                    </span>
+                  ))}
                 </div>
-              ) : null}
+                {n.description ? (
+                  <span
+                    className="min-w-0 max-w-[55%] truncate text-right text-[11px] text-muted-foreground"
+                    title={n.description}
+                  >
+                    {n.description}
+                  </span>
+                ) : null}
+              </div>
               <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
                 <span>MAC <span className="font-mono text-foreground">{n.mac || '—'}</span></span>
                 <span>驱动 <span className="text-foreground">{n.driver || '—'}</span></span>
