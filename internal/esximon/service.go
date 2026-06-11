@@ -1,10 +1,12 @@
 package esximon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LemonZuo/homer/internal/logx"
@@ -23,6 +25,11 @@ type Service struct {
 	alertCfg  AlertConfig
 	sse       *sseHub
 	retention time.Duration
+
+	// 单机可达性状态机:host_id -> 上次是否可达。首次见到的 host 仅记录,不告警,
+	// 防止刚启动 / 刚加机器时刷一片"已离线/已恢复"。
+	reachMu   sync.Mutex
+	hostReach map[int64]bool
 }
 
 func NewService(db *gorm.DB, sampler *Sampler, store *Store, hosts *HostStore, alertOut notify.Notifier, alertCfg AlertConfig, retention time.Duration) *Service {
@@ -38,6 +45,7 @@ func NewService(db *gorm.DB, sampler *Sampler, store *Store, hosts *HostStore, a
 		alertCfg:  alertCfg.withDefaults(),
 		sse:       newSSEHub(),
 		retention: retention,
+		hostReach: map[int64]bool{},
 	}
 }
 
@@ -101,6 +109,7 @@ func (s *Service) RunSample() error {
 		return fmt.Errorf("更新 esxi_state 失败:%w", err)
 	}
 
+	s.handleHostReachAlerts(results)
 	for _, a := range alerts {
 		s.processThresholdAlerts(a.prev, a.cur)
 	}
@@ -603,3 +612,61 @@ func mustJSON(v any) string {
 
 // ErrNoHosts 表示没有候选机器(handler 区分"未配机器"与"配了但全坏")。
 var ErrNoHosts = errors.New("没有可监控的机器(请在「ESXi 机器」里添加要采集的主机)")
+
+// handleHostReachAlerts 处理"单台机器可达性"状态转换告警。
+// 首次见到的 host 仅记录不告警(首轮 / 新增 host),之后只在 OK ↔ 不可达 转换时各发一条。
+// 阈值告警走 processThresholdAlerts,两者互不冲突:host 离线时只发这条,不会再叠一堆阈值告警。
+func (s *Service) handleHostReachAlerts(results []HostResult) {
+	type change struct {
+		name string
+		ok   bool
+		err  string
+	}
+	var changes []change
+
+	s.reachMu.Lock()
+	seen := make(map[int64]struct{}, len(results))
+	for _, r := range results {
+		seen[r.HostID] = struct{}{}
+		prev, known := s.hostReach[r.HostID]
+		s.hostReach[r.HostID] = r.OK
+		if !known || prev == r.OK {
+			continue
+		}
+		changes = append(changes, change{name: r.HostName, ok: r.OK, err: r.Error})
+	}
+	for id := range s.hostReach {
+		if _, ok := seen[id]; !ok {
+			delete(s.hostReach, id)
+		}
+	}
+	s.reachMu.Unlock()
+
+	if len(changes) == 0 {
+		return
+	}
+	if s.alertOut == nil || !s.alertOut.Enabled() {
+		return
+	}
+	for _, c := range changes {
+		var title, body string
+		if !c.ok {
+			title = "ESXi 主机离线"
+			if c.err != "" {
+				body = fmt.Sprintf("%s 已离线\n错误:%s", c.name, c.err)
+			} else {
+				body = fmt.Sprintf("%s 已离线", c.name)
+			}
+		} else {
+			title = "ESXi 主机已恢复"
+			body = fmt.Sprintf("%s 已恢复采样", c.name)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := s.alertOut.Send(ctx, notify.Message{Title: title, Text: body}); err != nil {
+			logx.Error("esxi host reach alert send failed", "host", c.name, "ok", c.ok, "err", err)
+		} else {
+			logx.Warn("esxi host reach alert sent", "host", c.name, "ok", c.ok)
+		}
+		cancel()
+	}
+}

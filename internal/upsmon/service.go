@@ -27,6 +27,9 @@ type Service struct {
 	// 持续不可达不重复打扰(jobmonitor 那条路径已经不走了,不会重复)。
 	reachMu sync.Mutex
 	lastOK  bool
+	// 单机可达性状态机:host_id -> 上次是否可达。首次见到的 host 仅记录,不告警,
+	// 防止刚启动 / 刚加机器时刷一片"已离线/已恢复"。
+	hostReach map[int64]bool
 }
 
 func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, retention time.Duration) *Service {
@@ -43,6 +46,7 @@ func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, re
 		sse:       newSSEHub(),
 		retention: retention,
 		lastOK:    true, // 启动假设 OK,首轮失败才会发"开始失败"
+		hostReach: map[int64]bool{},
 	}
 }
 
@@ -173,6 +177,7 @@ func (s *Service) RunSample() error {
 	} else {
 		logx.Info("ups sample done", "hosts", len(hosts), "reachable", reachableHosts, "samples", len(samples))
 	}
+	s.handleHostReachAlerts(hosts)
 	s.handleReachAlert(sampleOK, len(hosts), firstErr)
 
 	// 广播最新快照给所有 SSE 订阅者。BuildSnapshot 失败只记日志,不阻断采样链路。
@@ -182,6 +187,64 @@ func (s *Service) RunSample() error {
 		logx.Warn("ups snapshot publish skipped", "err", err.Error())
 	}
 	return nil
+}
+
+// handleHostReachAlerts 处理"单台机器可达性"状态转换告警。
+// 首次见到的 host 仅记录不告警(首轮 / 新增 host),之后只在 OK ↔ 不可达 转换时各发一条。
+// 与整体可达性告警互不冲突:全挂时整体 + 单机各发自己的。
+func (s *Service) handleHostReachAlerts(hosts []HostResult) {
+	type change struct {
+		name string
+		ok   bool
+		err  string
+	}
+	var changes []change
+
+	s.reachMu.Lock()
+	seen := make(map[int64]struct{}, len(hosts))
+	for _, h := range hosts {
+		seen[h.HostID] = struct{}{}
+		prev, known := s.hostReach[h.HostID]
+		s.hostReach[h.HostID] = h.OK
+		if !known || prev == h.OK {
+			continue
+		}
+		changes = append(changes, change{name: h.HostName, ok: h.OK, err: h.Error})
+	}
+	for id := range s.hostReach {
+		if _, ok := seen[id]; !ok {
+			delete(s.hostReach, id)
+		}
+	}
+	s.reachMu.Unlock()
+
+	if len(changes) == 0 {
+		return
+	}
+	if s.sampleOut == nil || !s.sampleOut.Enabled() {
+		return
+	}
+	for _, c := range changes {
+		var title, body string
+		if !c.ok {
+			title = "UPS 主机离线"
+			if c.err != "" {
+				body = fmt.Sprintf("%s 已离线\n错误:%s", c.name, c.err)
+			} else {
+				body = fmt.Sprintf("%s 已离线", c.name)
+			}
+		} else {
+			title = "UPS 主机已恢复"
+			body = fmt.Sprintf("%s 已恢复采样", c.name)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := s.sampleOut.Send(ctx, notify.Message{Title: title, Text: body}); err != nil {
+			logx.Error("ups host reach alert send failed", "host", c.name, "ok", c.ok, "err", err)
+		} else {
+			logx.Warn("ups host reach alert sent", "host", c.name, "ok", c.ok)
+		}
+		cancel()
+	}
 }
 
 // handleReachAlert 处理"整体可达性"状态转换告警。
