@@ -1107,35 +1107,29 @@ function MiniChart({
   )
 }
 
-function HostBlock({ host }: { host: Snapshot }) {
-  const noUPS = host.upses.length === 0
+function HostHeader({ host }: { host: Snapshot }) {
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Server className="h-4 w-4 text-muted-foreground" />
-        <span className="text-[14px] font-semibold tracking-tight">{host.host_name}</span>
-        <span className="text-[12px] text-muted-foreground">{host.endpoint}</span>
-        {!host.reachable && noUPS && (
-          <span className="ml-auto flex items-center gap-1 text-[12px] text-rose-500">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            {host.error ? '采样失败' : '尚无数据'}
-          </span>
-        )}
-      </div>
-      {noUPS ? (
-        <Card className="px-4 py-6 text-center text-[12px] text-muted-foreground">
-          {host.error
-            ? `采样失败:${host.error}`
-            : '尚未采集到 UPS 数据(机器未装 NUT / 未绑 UPS / 等待首次采样)'}
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {host.upses.map((u) => (
-            <UPSCard key={u.name} ups={u} hostKind={host.host_kind} hostID={host.host_id} />
-          ))}
-        </div>
+    <div className="flex flex-wrap items-center gap-2">
+      <Server className="h-4 w-4 text-muted-foreground" />
+      <span className="text-[14px] font-semibold tracking-tight">{host.host_name}</span>
+      <span className="text-[12px] text-muted-foreground">{host.endpoint}</span>
+      {!host.reachable && host.upses.length === 0 && (
+        <span className="ml-auto flex items-center gap-1 text-[12px] text-rose-500">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          {host.error ? '采样失败' : '尚无数据'}
+        </span>
       )}
     </div>
+  )
+}
+
+function HostEmptyCard({ host }: { host: Snapshot }) {
+  return (
+    <Card className="px-4 py-6 text-center text-[12px] text-muted-foreground">
+      {host.error
+        ? `采样失败:${host.error}`
+        : '尚未采集到 UPS 数据(机器未装 NUT / 未绑 UPS / 等待首次采样)'}
+    </Card>
   )
 }
 
@@ -1565,10 +1559,26 @@ export default function Ups() {
           </Button>
         </Card>
       ) : (
-        <div className="space-y-8">
-          {snapshots.map((s) => (
-            <HostBlock key={`${s.host_kind}-${s.host_id}`} host={s} />
-          ))}
+        <div className="grid grid-cols-1 gap-x-6 gap-y-6 lg:grid-cols-2">
+          {snapshots.flatMap((s) =>
+            s.upses.length === 0
+              ? [
+                  <div key={`${s.host_kind}-${s.host_id}-empty`} className="space-y-3">
+                    <HostHeader host={s} />
+                    <HostEmptyCard host={s} />
+                  </div>,
+                ]
+              : s.upses.map((u) => (
+                  <div key={`${s.host_kind}-${s.host_id}-${u.name}`} className="space-y-3">
+                    <HostHeader host={s} />
+                    <UPSCard
+                      ups={u}
+                      hostKind={s.host_kind}
+                      hostID={s.host_id}
+                    />
+                  </div>
+                )),
+          )}
         </div>
       )}
 
