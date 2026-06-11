@@ -945,6 +945,7 @@ function vmStatePill(state: string) {
 
 function VMsCard({ vms }: { vms: VM[] }) {
   const on = vms.filter((v) => v.state === 'powered_on').length
+  const sorted = [...vms].sort((a, b) => a.id - b.id)
   return (
     <Card className="px-3 py-3">
       <SectionHead
@@ -963,7 +964,7 @@ function VMsCard({ vms }: { vms: VM[] }) {
         <p className="py-2 text-center text-[11.5px] text-muted-foreground">没有虚拟机</p>
       ) : (
         <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
-          {vms.map((v) => {
+          {sorted.map((v) => {
             const p = vmStatePill(v.state)
             return (
               <div key={v.id} className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5">
