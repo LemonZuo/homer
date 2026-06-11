@@ -191,6 +191,34 @@ type NIC struct {
 	TxDropped int64 `json:"tx_dropped"`
 }
 
+// VSwitchInfo 标准 vSwitch 一条。
+// Uplinks/Portgroups 数组保留 esxcli 列表顺序,前端不重排。
+type VSwitchInfo struct {
+	Name       string   `json:"name"`
+	Uplinks    []string `json:"uplinks"`
+	Portgroups []string `json:"portgroups"`
+}
+
+// VMNICLink 一个 VM 的一张 vNIC 接到拓扑里的"边"。
+// TeamUplink 是当前 active 的 pNIC(标准 vSwitch + 默认 team 策略下足够稳定)。
+// MAC/IP 空串表示 vm port list 没拿到。
+type VMNICLink struct {
+	VMID       int    `json:"vmid"`
+	VMName     string `json:"vm_name"`
+	VSwitch    string `json:"vswitch"`
+	Portgroup  string `json:"portgroup"`
+	MAC        string `json:"mac"`
+	IP         string `json:"ip,omitempty"`
+	TeamUplink string `json:"team_uplink"`
+}
+
+// NetTopology 网络拓扑:vSwitch 全集 + 所有 VM 的 vNIC 边。
+// 前端按 pNIC → vSwitch → Portgroup → VMs 四列渲染。
+type NetTopology struct {
+	VSwitches []VSwitchInfo `json:"vswitches"`
+	VMNICs    []VMNICLink   `json:"vm_nics"`
+}
+
 func newHostBoot() HostBoot {
 	return HostBoot{UptimeSeconds: -1}
 }
@@ -223,6 +251,7 @@ type HostMetrics struct {
 	VMs      []VM           `json:"vms"`
 	Boot     HostBoot       `json:"boot"`
 	NICs     []NIC          `json:"nics"`
+	Topology NetTopology    `json:"net_topology"`
 }
 
 // --- 主入口:在已建立的 ssh.Client 上跑一整轮 ---
@@ -363,6 +392,9 @@ func CollectAll(client *ssh.Client) HostMetrics {
 
 	// 网卡列表 + 收发计数。
 	snap.NICs = collectNICs(client)
+
+	// 网络拓扑(vSwitch / Portgroup / VM vNIC 边)。
+	snap.Topology = collectNetTopology(client)
 
 	return snap
 }
@@ -2352,4 +2384,201 @@ func fillNICStats(n *NIC, out string) {
 			n.TxErrors = v
 		}
 	}
+}
+
+// collectNetTopology 抓 vSwitch + 每个 VM 的 vNIC 边。
+// vSwitch list 一次拿全;`esxcli network vm list` 给出每台正在跑的 VM 的 World ID,
+// 再对每个 World ID 跑一次 `esxcli network vm port list -w <wid>`。
+// 注意:这里用的 ID 是 World ID(esxcli 体系),与 VMShallow.ID(vim-cmd 的 Vmid)不是同一个值。
+func collectNetTopology(client *ssh.Client) NetTopology {
+	topo := NetTopology{}
+	if out, err := runEsxiRetry(client, "vswitch list", "esxcli network vswitch standard list", defaultCmdTimeout, 2, func(s string) bool {
+		return strings.Contains(s, "Uplinks:") || strings.Contains(s, "vSwitch")
+	}); err == nil {
+		topo.VSwitches = parseVSwitchList(out)
+	} else {
+		logx.Warn("esxi vswitch list failed", "err", err.Error())
+	}
+	listOut, err := runEsxiRetry(client, "vm net list", "esxcli network vm list", defaultCmdTimeout, 2, func(s string) bool {
+		return strings.Contains(s, "World ID") || strings.TrimSpace(s) == ""
+	})
+	if err != nil {
+		logx.Warn("esxi vm net list failed", "err", err.Error())
+		return topo
+	}
+	for _, vm := range parseVMNetList(listOut) {
+		cmd := fmt.Sprintf("esxcli network vm port list -w %d", vm.worldID)
+		out, err := runEsxiRetry(client, "vm port "+vm.name, cmd, defaultCmdTimeout, 2, func(s string) bool {
+			return strings.Contains(s, "Port ID:") || strings.TrimSpace(s) == ""
+		})
+		if err != nil {
+			logx.Warn("esxi vm port list failed", "vm", vm.name, "err", err.Error())
+			continue
+		}
+		for _, link := range parseVMPortList(out) {
+			link.VMID = vm.worldID
+			link.VMName = vm.name
+			topo.VMNICs = append(topo.VMNICs, link)
+		}
+	}
+	return topo
+}
+
+// vmNetEntry 是 parseVMNetList 的内部返回行(World ID + Name)。
+type vmNetEntry struct {
+	worldID int
+	name    string
+}
+
+// parseVMNetList 解析 `esxcli network vm list`:World ID + Name。
+// 列顺序固定:World ID | Name | Num Ports | Networks(可含逗号空格)。
+// 名字可能含空格,用"Num Ports 必是单一纯数字"做切分锚点 ——
+// 从后往前找第一个不含逗号的纯数字字段,它就是 Num Ports。
+func parseVMNetList(out string) []vmNetEntry {
+	var list []vmNetEntry
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "----") || strings.HasPrefix(trim, "World ID") {
+			continue
+		}
+		fields := strings.Fields(trim)
+		if len(fields) < 4 {
+			continue
+		}
+		wid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		numIdx := -1
+		for i := len(fields) - 1; i >= 1; i-- {
+			if strings.Contains(fields[i], ",") {
+				continue
+			}
+			if _, e := strconv.Atoi(fields[i]); e == nil {
+				numIdx = i
+				break
+			}
+		}
+		if numIdx < 2 {
+			continue
+		}
+		name := strings.Join(fields[1:numIdx], " ")
+		if name == "" {
+			continue
+		}
+		list = append(list, vmNetEntry{worldID: wid, name: name})
+	}
+	return list
+}
+
+// parseVSwitchList 解析 `esxcli network vswitch standard list`。
+// 输出按 vSwitch 分块,每块内"Name:/Uplinks:/Portgroups:"等 KV 行;块之间空行分隔。
+// Uplinks 与 Portgroups 形如 "vmnic0, vmnic1" / "VM Network, Management Network"。
+func parseVSwitchList(out string) []VSwitchInfo {
+	var list []VSwitchInfo
+	var cur *VSwitchInfo
+	flush := func() {
+		if cur != nil && cur.Name != "" {
+			list = append(list, *cur)
+		}
+		cur = nil
+	}
+	for _, line := range strings.Split(out, "\n") {
+		raw := line
+		trim := strings.TrimSpace(raw)
+		if trim == "" {
+			flush()
+			continue
+		}
+		// 块开头:列名(无前导空格,无冒号,例如 "vSwitch0")。
+		if !strings.HasPrefix(raw, " ") && !strings.HasPrefix(raw, "\t") && !strings.Contains(trim, ":") {
+			flush()
+			cur = &VSwitchInfo{Name: trim}
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		colon := strings.Index(trim, ":")
+		if colon < 0 {
+			continue
+		}
+		key := strings.TrimSpace(trim[:colon])
+		val := strings.TrimSpace(trim[colon+1:])
+		switch key {
+		case "Name":
+			cur.Name = val
+		case "Uplinks":
+			cur.Uplinks = splitCSV(val)
+		case "Portgroups":
+			cur.Portgroups = splitCSV(val)
+		}
+	}
+	flush()
+	return list
+}
+
+// parseVMPortList 解析 `esxcli network vm port list -w <wid>`。
+// 输出按 vNIC 分块,块之间空行分隔。每块的 KV 包括
+// Port ID / vSwitch / Portgroup / MAC Address / IP Address / Team Uplink。
+func parseVMPortList(out string) []VMNICLink {
+	var list []VMNICLink
+	var cur *VMNICLink
+	flush := func() {
+		if cur != nil && (cur.MAC != "" || cur.VSwitch != "") {
+			list = append(list, *cur)
+		}
+		cur = nil
+	}
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if trim == "" {
+			flush()
+			continue
+		}
+		colon := strings.Index(trim, ":")
+		if colon < 0 {
+			continue
+		}
+		key := strings.TrimSpace(trim[:colon])
+		val := strings.TrimSpace(trim[colon+1:])
+		switch key {
+		case "Port ID":
+			flush()
+			cur = &VMNICLink{}
+		case "vSwitch":
+			if cur != nil {
+				cur.VSwitch = val
+			}
+		case "Portgroup":
+			if cur != nil {
+				cur.Portgroup = val
+			}
+		case "MAC Address":
+			if cur != nil {
+				cur.MAC = val
+			}
+		case "IP Address":
+			if cur != nil && val != "0.0.0.0" {
+				cur.IP = val
+			}
+		case "Team Uplink":
+			if cur != nil {
+				cur.TeamUplink = val
+			}
+		}
+	}
+	flush()
+	return list
+}
+
+// splitCSV 拆 "a, b, c" 风格的列表,去空格、丢空段。
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

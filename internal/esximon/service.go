@@ -155,6 +155,7 @@ type Snapshot struct {
 	VMs       []VM            `json:"vms,omitempty"`
 	Boot      *HostBoot       `json:"boot,omitempty"`
 	NICs      []NIC           `json:"nics,omitempty"`
+	Topology  *NetTopology    `json:"net_topology,omitempty"`
 }
 
 // BuildSnapshot 基于 esxi_host(主) + esxi_state(JSON 列) 组装快照。
@@ -266,6 +267,12 @@ func hydrate(sn *Snapshot, st model.EsxiState) {
 		var v []NIC
 		if json.Unmarshal([]byte(st.NICJSON), &v) == nil {
 			sn.NICs = v
+		}
+	}
+	if st.TopologyJSON != "" {
+		var v NetTopology
+		if json.Unmarshal([]byte(st.TopologyJSON), &v) == nil {
+			sn.Topology = &v
 		}
 	}
 }
@@ -480,6 +487,7 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 			st.VMJSON = prev.VMJSON
 			st.BootJSON = prev.BootJSON
 			st.NICJSON = prev.NICJSON
+			st.TopologyJSON = prev.TopologyJSON
 		}
 		return st
 	}
@@ -503,6 +511,7 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 	st.VMJSON = stickyJSON(m.VMs, vmStatesComplete(m.VMs), prevJSON(prev, func(p *model.EsxiState) string { return p.VMJSON }))
 	st.BootJSON = stickyJSON(m.Boot, m.Boot.UptimeSeconds >= 0, prevJSON(prev, func(p *model.EsxiState) string { return p.BootJSON }))
 	st.NICJSON = stickyJSON(m.NICs, len(m.NICs) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.NICJSON }))
+	st.TopologyJSON = stickyJSON(m.Topology, len(m.Topology.VSwitches) > 0 || len(m.Topology.VMNICs) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.TopologyJSON }))
 	return st
 }
 

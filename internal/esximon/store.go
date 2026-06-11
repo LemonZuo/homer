@@ -37,7 +37,7 @@ func (s *Store) UpsertState(states []model.EsxiState) error {
 			"host_name", "reachable", "last_error",
 			"platform_json", "cpu_static_json", "memory_json", "runtime_json",
 			"cpu_temp_json", "mce_json", "disk_json", "usb_json", "vm_json",
-			"boot_json", "nic_json",
+			"boot_json", "nic_json", "topology_json",
 			"sampled_at", "updated_at",
 		}),
 	}).Create(&states).Error

@@ -174,6 +174,12 @@ func mergeHostMetrics(base, next HostMetrics) HostMetrics {
 	if len(base.NICs) == 0 && len(next.NICs) > 0 {
 		base.NICs = next.NICs
 	}
+	if len(base.Topology.VSwitches) == 0 && len(next.Topology.VSwitches) > 0 {
+		base.Topology.VSwitches = next.Topology.VSwitches
+	}
+	if len(base.Topology.VMNICs) == 0 && len(next.Topology.VMNICs) > 0 {
+		base.Topology.VMNICs = next.Topology.VMNICs
+	}
 	return base
 }
 
