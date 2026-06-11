@@ -458,6 +458,25 @@ func vmStatesComplete(vms []VM) bool {
 	return true
 }
 
+// topologyComplete 判定拓扑是否抓全:vSwitch 列表非空,且每台开机 VM 都在 vm_nics 里。
+// 假设所有开机 VM 都至少有一块 vNIC(esxcli network vm list 只列有网络端口的 VM,
+// 个人环境的 VM 全都带网卡;若以后出现无网卡 VM 再放宽)。
+func topologyComplete(m HostMetrics) bool {
+	if len(m.Topology.VSwitches) == 0 {
+		return false
+	}
+	inTopo := make(map[string]bool, len(m.Topology.VMNICs))
+	for _, l := range m.Topology.VMNICs {
+		inTopo[l.VMName] = true
+	}
+	for _, v := range m.VMs {
+		if v.State == "powered_on" && !inTopo[v.Name] {
+			return false
+		}
+	}
+	return true
+}
+
 // buildState 把单台机器一轮采集结果转成 esxi_state 行。
 // 关键约定:当某个子项采集失败(整轮 SSH 挂 / 单个命令空返回)时,该 JSON 列不会被
 // "新的空值"覆盖,而是回退到 prev 的同名 JSON,让前端看到的快照保持上一次已知值。
@@ -511,7 +530,7 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 	st.VMJSON = stickyJSON(m.VMs, vmStatesComplete(m.VMs), prevJSON(prev, func(p *model.EsxiState) string { return p.VMJSON }))
 	st.BootJSON = stickyJSON(m.Boot, m.Boot.UptimeSeconds >= 0, prevJSON(prev, func(p *model.EsxiState) string { return p.BootJSON }))
 	st.NICJSON = stickyJSON(m.NICs, len(m.NICs) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.NICJSON }))
-	st.TopologyJSON = stickyJSON(m.Topology, len(m.Topology.VSwitches) > 0 || len(m.Topology.VMNICs) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.TopologyJSON }))
+	st.TopologyJSON = stickyJSON(m.Topology, topologyComplete(m), prevJSON(prev, func(p *model.EsxiState) string { return p.TopologyJSON }))
 	return st
 }
 

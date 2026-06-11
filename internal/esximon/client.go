@@ -394,7 +394,9 @@ func CollectAll(client *ssh.Client) HostMetrics {
 	snap.NICs = collectNICs(client)
 
 	// 网络拓扑(vSwitch / Portgroup / VM vNIC 边)。
-	snap.Topology = collectNetTopology(client)
+	// 传入开机 VM 名单做交叉验证:`esxcli network vm list` 偶发输出截断时,
+	// validator 能发现缺台并触发重试,避免拓扑图上 VM 时多时少。
+	snap.Topology = collectNetTopology(client, poweredOnVMNames(snap.VMs))
 
 	return snap
 }
@@ -2386,11 +2388,24 @@ func fillNICStats(n *NIC, out string) {
 	}
 }
 
+// poweredOnVMNames 从 VM 电源态列表里挑出开机 VM 的名字,给拓扑采集做交叉验证。
+func poweredOnVMNames(vms []VM) []string {
+	var names []string
+	for _, v := range vms {
+		if v.State == "powered_on" {
+			names = append(names, v.Name)
+		}
+	}
+	return names
+}
+
 // collectNetTopology 抓 vSwitch + 每个 VM 的 vNIC 边。
 // vSwitch list 一次拿全;`esxcli network vm list` 给出每台正在跑的 VM 的 World ID,
 // 再对每个 World ID 跑一次 `esxcli network vm port list -w <wid>`。
 // 注意:这里用的 ID 是 World ID(esxcli 体系),与 VMShallow.ID(vim-cmd 的 Vmid)不是同一个值。
-func collectNetTopology(client *ssh.Client) NetTopology {
+// expectVMs 是已知开机的 VM 名单(来自 vim-cmd 电源态):`esxcli network vm list`
+// 偶发把表输出截断时行数会变少,用名单做 validator 让 runEsxiRetry 能感知并重试。
+func collectNetTopology(client *ssh.Client, expectVMs []string) NetTopology {
 	topo := NetTopology{}
 	if out, err := runEsxiRetry(client, "vswitch list", "esxcli network vswitch standard list", defaultCmdTimeout, 2, func(s string) bool {
 		return strings.Contains(s, "Uplinks:") || strings.Contains(s, "vSwitch")
@@ -2399,12 +2414,20 @@ func collectNetTopology(client *ssh.Client) NetTopology {
 	} else {
 		logx.Warn("esxi vswitch list failed", "err", err.Error())
 	}
-	listOut, err := runEsxiRetry(client, "vm net list", "esxcli network vm list", defaultCmdTimeout, 2, func(s string) bool {
-		return strings.Contains(s, "World ID") || strings.TrimSpace(s) == ""
+	listOut, err := runEsxiRetry(client, "vm net list", "esxcli network vm list", defaultCmdTimeout, 3, func(s string) bool {
+		if strings.TrimSpace(s) == "" {
+			// 没有开机 VM 时输出为空是合法的;有 VM 该开机却输出为空就是截断
+			return len(expectVMs) == 0
+		}
+		if !strings.Contains(s, "World ID") {
+			return false
+		}
+		return vmNetListCovers(parseVMNetList(s), expectVMs)
 	})
 	if err != nil {
-		logx.Warn("esxi vm net list failed", "err", err.Error())
-		return topo
+		// 重试后依然缺台:照常解析已有的行(部分数据比没有强),
+		// 完整性由 service 层的 topologyComplete 判定并回退 prev。
+		logx.Warn("esxi vm net list incomplete", "err", err.Error())
 	}
 	for _, vm := range parseVMNetList(listOut) {
 		cmd := fmt.Sprintf("esxcli network vm port list -w %d", vm.worldID)
@@ -2422,6 +2445,25 @@ func collectNetTopology(client *ssh.Client) NetTopology {
 		}
 	}
 	return topo
+}
+
+// vmNetListCovers 检查 `esxcli network vm list` 的解析结果是否覆盖了全部期望 VM。
+// 名字按精确匹配;expectVMs 里有而列表里没有的视为缺台(输出截断或 VM 刚好关机,
+// 后者会在下一轮自愈,宁可多重试一次也不让拓扑缺 VM)。
+func vmNetListCovers(entries []vmNetEntry, expectVMs []string) bool {
+	if len(expectVMs) == 0 {
+		return true
+	}
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		seen[e.name] = true
+	}
+	for _, want := range expectVMs {
+		if !seen[want] {
+			return false
+		}
+	}
+	return true
 }
 
 // vmNetEntry 是 parseVMNetList 的内部返回行(World ID + Name)。

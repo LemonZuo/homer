@@ -102,13 +102,13 @@ func (s *Sampler) probeOne(h model.EsxiHost) HostResult {
 		}
 		defer cleanup()
 		metrics = CollectAll(client)
-		missing := sampleMissingMetrics(metrics)
+		missing := probeMissing(metrics)
 		for attempt := 2; len(missing) > 0 && attempt <= 2; attempt++ {
 			logx.Warn("esxi probe incomplete, retrying",
 				"host", h.Name, "attempt", attempt, "missing", strings.Join(missing, ","))
 			next := CollectAll(client)
 			metrics = mergeHostMetrics(metrics, next)
-			missing = sampleMissingMetrics(metrics)
+			missing = probeMissing(metrics)
 		}
 		if len(missing) > 0 {
 			logx.Warn("esxi probe incomplete after retries", "host", h.Name, "missing", strings.Join(missing, ","))
@@ -128,6 +128,17 @@ func (s *Sampler) probeOne(h model.EsxiHost) HostResult {
 	res.OK = true
 	res.Metrics = metrics
 	return res
+}
+
+// probeMissing 在 sampleMissingMetrics 基础上追加拓扑完整性,驱动同一轮内的整轮重试。
+// 拓扑不写 esxi_sample,所以 sampleMissingMetrics 不含它(不挡时序入库),
+// 这里加上只为了重试时把缺的 VM 边补全;最终完整性兜底在 buildState 的 prev 回退。
+func probeMissing(m HostMetrics) []string {
+	missing := sampleMissingMetrics(m)
+	if !topologyComplete(m) {
+		missing = append(missing, "net_topology")
+	}
+	return missing
 }
 
 func mergeHostMetrics(base, next HostMetrics) HostMetrics {
@@ -174,11 +185,26 @@ func mergeHostMetrics(base, next HostMetrics) HostMetrics {
 	if len(base.NICs) == 0 && len(next.NICs) > 0 {
 		base.NICs = next.NICs
 	}
-	if len(base.Topology.VSwitches) == 0 && len(next.Topology.VSwitches) > 0 {
-		base.Topology.VSwitches = next.Topology.VSwitches
+	base.Topology = mergeTopology(base.Topology, next.Topology)
+	return base
+}
+
+// mergeTopology 两轮采集的拓扑做并集:vSwitch 按整组补,vm_nics 按 vm_name+mac 去重合并。
+// `esxcli network vm list` 偶发截断会让单轮只抓到部分 VM,并集能把两轮各自抓到的拼全。
+func mergeTopology(base, next NetTopology) NetTopology {
+	if len(base.VSwitches) == 0 {
+		base.VSwitches = next.VSwitches
 	}
-	if len(base.Topology.VMNICs) == 0 && len(next.Topology.VMNICs) > 0 {
-		base.Topology.VMNICs = next.Topology.VMNICs
+	seen := make(map[string]bool, len(base.VMNICs))
+	for _, l := range base.VMNICs {
+		seen[l.VMName+"|"+l.MAC] = true
+	}
+	for _, l := range next.VMNICs {
+		key := l.VMName + "|" + l.MAC
+		if !seen[key] {
+			base.VMNICs = append(base.VMNICs, l)
+			seen[key] = true
+		}
 	}
 	return base
 }
