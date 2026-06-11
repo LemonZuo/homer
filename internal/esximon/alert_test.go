@@ -2,8 +2,6 @@ package esximon
 
 import (
 	"testing"
-
-	"github.com/LemonZuo/homer/internal/model"
 )
 
 func TestThresholdAlertItems(t *testing.T) {
@@ -43,44 +41,53 @@ func TestThresholdAlertItems(t *testing.T) {
 	}
 }
 
-func TestThresholdAlertDiffOnlyNewItems(t *testing.T) {
-	cfg := AlertConfig{
-		CPUTempC:           80,
-		CPUUsagePercent:    90,
-		MemoryUsagePercent: 90,
-		DiskTempC:          55,
-		DiskUsagePercent:   90,
-	}
-	prevMetrics := HostMetrics{
-		CPUTemp: CPUTemperature{MaxC: 82},
-		Runtime: RuntimeUsage{CPUCapacityMHz: 10000, CPUUsagePercent: 91},
-	}
-	prev := model.EsxiState{
-		CPUTempJSON: mustJSON(prevMetrics.CPUTemp),
-		RuntimeJSON: mustJSON(prevMetrics.Runtime),
-	}
-	cur := HostMetrics{
-		CPUTemp: CPUTemperature{MaxC: 83},
-		Runtime: RuntimeUsage{
-			CPUCapacityMHz:     10000,
-			CPUUsagePercent:    92,
-			MemoryTotalBytes:   1000,
-			MemoryUsagePercent: 95,
-		},
-	}
-
-	prevItems := thresholdAlertItems(metricsFromState(&prev), cfg)
-	prevSet := map[string]struct{}{}
-	for _, item := range prevItems {
-		prevSet[item.Key] = struct{}{}
-	}
-	var newKeys []string
-	for _, item := range thresholdAlertItems(cur, cfg) {
-		if _, ok := prevSet[item.Key]; !ok {
-			newKeys = append(newKeys, item.Key)
+func TestThresholdAlertNeedsConsecutiveSamples(t *testing.T) {
+	item := thresholdAlertItem{Key: "cpu_temp", Metric: "CPU 温度"}
+	state := thresholdAlertState{}
+	for i := 1; i <= 4; i++ {
+		var due []thresholdAlertItem
+		state, due = advanceThresholdAlertState(state, []thresholdAlertItem{item}, 5)
+		if len(due) != 0 {
+			t.Fatalf("attempt %d should not alert: %#v", i, due)
+		}
+		if state.Items[item.Key].Count != i {
+			t.Fatalf("attempt %d count = %d", i, state.Items[item.Key].Count)
 		}
 	}
-	if len(newKeys) != 1 || newKeys[0] != "memory_usage" {
-		t.Fatalf("new keys = %#v", newKeys)
+
+	state, due := advanceThresholdAlertState(state, []thresholdAlertItem{item}, 5)
+	if len(due) != 1 || due[0].Key != item.Key {
+		t.Fatalf("5th attempt should alert: %#v", due)
+	}
+	record := state.Items[item.Key]
+	record.Notified = true
+	state.Items[item.Key] = record
+
+	state, due = advanceThresholdAlertState(state, []thresholdAlertItem{item}, 5)
+	if len(due) != 0 {
+		t.Fatalf("notified active alert should not repeat: %#v", due)
+	}
+	if state.Items[item.Key].Count != 6 {
+		t.Fatalf("continued count = %d", state.Items[item.Key].Count)
+	}
+}
+
+func TestThresholdAlertResetsAfterRecovery(t *testing.T) {
+	item := thresholdAlertItem{Key: "cpu_usage", Metric: "CPU 使用率"}
+	state := thresholdAlertState{}
+	state, _ = advanceThresholdAlertState(state, []thresholdAlertItem{item}, 5)
+	state, _ = advanceThresholdAlertState(state, []thresholdAlertItem{item}, 5)
+	if state.Items[item.Key].Count != 2 {
+		t.Fatalf("count before recovery = %d", state.Items[item.Key].Count)
+	}
+
+	state, due := advanceThresholdAlertState(state, nil, 5)
+	if len(due) != 0 || len(state.Items) != 0 {
+		t.Fatalf("recovery should clear state, state=%#v due=%#v", state, due)
+	}
+
+	state, due = advanceThresholdAlertState(state, []thresholdAlertItem{item}, 5)
+	if len(due) != 0 || state.Items[item.Key].Count != 1 {
+		t.Fatalf("after recovery should start over, state=%#v due=%#v", state, due)
 	}
 }

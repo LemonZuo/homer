@@ -50,6 +50,16 @@ func (s *Store) MarkAlerted(hostKind string, hostID int64, at time.Time) error {
 		Update("last_alert_at", at).Error
 }
 
+func (s *Store) UpdateAlertState(hostKind string, hostID int64, stateJSON string, alertedAt *time.Time) error {
+	updates := map[string]any{"alert_state_json": stateJSON}
+	if alertedAt != nil {
+		updates["last_alert_at"] = *alertedAt
+	}
+	return s.db.Model(&model.EsxiState{}).
+		Where("host_kind = ? AND host_id = ?", hostKind, hostID).
+		Updates(updates).Error
+}
+
 // LoadStates 读全部 state(每台 host 一行,极小)。
 func (s *Store) LoadStates() ([]model.EsxiState, error) {
 	var rows []model.EsxiState

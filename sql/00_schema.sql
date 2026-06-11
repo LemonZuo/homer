@@ -462,6 +462,7 @@ CREATE TABLE `esxi_state` (
   `boot_json`        TEXT         NULL                    COMMENT 'JSON：{ uptime_seconds, booted_at, crash_dump_count, last_crash_at }',
   `nic_json`         TEXT         NULL                    COMMENT 'JSON：[{name, driver, mac, link_status, speed_mbps, rx_bytes, tx_bytes, rx_errors, tx_errors, ...}]',
   `topology_json`    TEXT         NULL                    COMMENT 'JSON：{ vswitches:[{name,uplinks,portgroups}], vm_nics:[{vmid,vm_name,vswitch,portgroup,mac,ip,team_uplink}] }',
+  `alert_state_json` TEXT         NULL                    COMMENT 'JSON：阈值告警连续计数与已通知状态',
   `last_alert_at`    DATETIME(3)  DEFAULT NULL            COMMENT '最近一次告警时刻（去抖留痕）',
   `sampled_at`       DATETIME(3)  DEFAULT NULL            COMMENT '最近一次成功采样时刻',
   `updated_at`       DATETIME(3)  NOT NULL                COMMENT '本行最近一次写入时刻',

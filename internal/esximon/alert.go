@@ -19,6 +19,7 @@ type AlertConfig struct {
 	MemoryUsagePercent int
 	DiskTempC          int
 	DiskUsagePercent   int
+	ConsecutiveSamples int
 }
 
 func (c AlertConfig) withDefaults() AlertConfig {
@@ -37,6 +38,9 @@ func (c AlertConfig) withDefaults() AlertConfig {
 	if c.DiskUsagePercent <= 0 {
 		c.DiskUsagePercent = 90
 	}
+	if c.ConsecutiveSamples <= 0 {
+		c.ConsecutiveSamples = 5
+	}
 	return c
 }
 
@@ -49,54 +53,49 @@ type thresholdAlertItem struct {
 }
 
 func (s *Service) processThresholdAlerts(prev *model.EsxiState, cur HostResult) {
-	if s == nil || !cur.OK {
+	if s == nil {
 		return
 	}
 	cfg := s.alertCfg.withDefaults()
-	currItems := thresholdAlertItems(cur.Metrics, cfg)
-	if len(currItems) == 0 {
+	if !cur.OK {
+		s.persistThresholdAlertState(cur.HostKind, cur.HostID, thresholdAlertState{})
 		return
 	}
-	prevItems := thresholdAlertItems(metricsFromState(prev), cfg)
-	prevSet := map[string]struct{}{}
-	for _, item := range prevItems {
-		prevSet[item.Key] = struct{}{}
-	}
 
-	newItems := make([]thresholdAlertItem, 0, len(currItems))
-	for _, item := range currItems {
-		if _, ok := prevSet[item.Key]; !ok {
-			newItems = append(newItems, item)
-		}
+	currItems := thresholdAlertItems(cur.Metrics, cfg)
+	prevState := parseThresholdAlertState(prev)
+	nextState, dueItems := advanceThresholdAlertState(prevState, currItems, cfg.ConsecutiveSamples)
+	if len(dueItems) == 0 {
+		s.persistThresholdAlertState(cur.HostKind, cur.HostID, nextState)
+		return
 	}
-	if len(newItems) == 0 {
-		if prev == nil || prev.LastAlertAt != nil {
-			return
-		}
-		// 功能首次上线时,上一轮 state 可能已经超阈值但从未发送过 ESXi 阈值告警。
-		// last_alert_at 为空时补发一次当前活跃告警,之后同一状态不再重复。
-		newItems = currItems
-	}
-	sort.Slice(newItems, func(i, j int) bool { return newItems[i].Key < newItems[j].Key })
+	sort.Slice(dueItems, func(i, j int) bool { return dueItems[i].Key < dueItems[j].Key })
 
 	if s.alertOut == nil || !s.alertOut.Enabled() {
 		logx.Warn("esxi threshold alert skipped: no channel",
-			"host", cur.HostName, "host_id", cur.HostID, "items", len(newItems))
+			"host", cur.HostName, "host_id", cur.HostID, "items", len(dueItems))
+		s.persistThresholdAlertState(cur.HostKind, cur.HostID, nextState)
 		return
 	}
 
-	title, body := composeThresholdAlert(cur, newItems)
+	title, body := composeThresholdAlert(cur, dueItems, cfg.ConsecutiveSamples)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := s.alertOut.Send(ctx, notify.Message{Title: title, Text: body}); err != nil {
 		logx.Error("esxi threshold alert send failed", "host", cur.HostName, "host_id", cur.HostID, "err", err)
+		s.persistThresholdAlertState(cur.HostKind, cur.HostID, nextState)
 		return
 	}
-	logx.Warn("esxi threshold alert sent", "host", cur.HostName, "host_id", cur.HostID, "items", len(newItems))
-	_ = s.store.MarkAlerted(cur.HostKind, cur.HostID, time.Now())
+	logx.Warn("esxi threshold alert sent", "host", cur.HostName, "host_id", cur.HostID, "items", len(dueItems))
+	for _, item := range dueItems {
+		record := nextState.Items[item.Key]
+		record.Notified = true
+		nextState.Items[item.Key] = record
+	}
+	s.persistThresholdAlertState(cur.HostKind, cur.HostID, nextState, time.Now())
 }
 
-func composeThresholdAlert(cur HostResult, items []thresholdAlertItem) (string, string) {
+func composeThresholdAlert(cur HostResult, items []thresholdAlertItem, consecutiveSamples int) (string, string) {
 	var b strings.Builder
 	b.WriteString("机器:")
 	b.WriteString(cur.HostName)
@@ -104,6 +103,8 @@ func composeThresholdAlert(cur HostResult, items []thresholdAlertItem) (string, 
 		b.WriteString("\n地址:")
 		b.WriteString(cur.Endpoint)
 	}
+	b.WriteString("\n连续超阈值:")
+	b.WriteString(fmt.Sprintf("%d 次", consecutiveSamples))
 	b.WriteString("\n新增超阈值:")
 	for _, item := range items {
 		b.WriteString("\n- ")
@@ -121,31 +122,68 @@ func composeThresholdAlert(cur HostResult, items []thresholdAlertItem) (string, 
 	return "ESXi 阈值告警", b.String()
 }
 
-func metricsFromState(st *model.EsxiState) HostMetrics {
-	m := HostMetrics{
-		CPUTemp: CPUTemperature{TjMaxC: -1, MaxC: -1, AvgC: -1},
-		Runtime: RuntimeUsage{CPUUsagePercent: -1, MemoryUsagePercent: -1},
-		CPU:     CPUStatic{TjMaxC: -1},
+type thresholdAlertState struct {
+	Items map[string]thresholdAlertRecord `json:"items,omitempty"`
+}
+
+type thresholdAlertRecord struct {
+	Count    int  `json:"count"`
+	Notified bool `json:"notified"`
+}
+
+func parseThresholdAlertState(st *model.EsxiState) thresholdAlertState {
+	if st == nil || st.AlertStateJSON == "" {
+		return thresholdAlertState{}
 	}
-	if st == nil {
-		return m
+	var state thresholdAlertState
+	if json.Unmarshal([]byte(st.AlertStateJSON), &state) != nil {
+		return thresholdAlertState{}
 	}
-	if st.CPUStaticJSON != "" {
-		_ = json.Unmarshal([]byte(st.CPUStaticJSON), &m.CPU)
+	if len(state.Items) == 0 {
+		return thresholdAlertState{}
 	}
-	if st.MemoryJSON != "" {
-		_ = json.Unmarshal([]byte(st.MemoryJSON), &m.Memory)
+	return state
+}
+
+func advanceThresholdAlertState(prev thresholdAlertState, curr []thresholdAlertItem, consecutiveSamples int) (thresholdAlertState, []thresholdAlertItem) {
+	if consecutiveSamples <= 0 {
+		consecutiveSamples = 5
 	}
-	if st.RuntimeJSON != "" {
-		_ = json.Unmarshal([]byte(st.RuntimeJSON), &m.Runtime)
+	if len(curr) == 0 {
+		return thresholdAlertState{}, nil
 	}
-	if st.CPUTempJSON != "" {
-		_ = json.Unmarshal([]byte(st.CPUTempJSON), &m.CPUTemp)
+	next := thresholdAlertState{Items: make(map[string]thresholdAlertRecord, len(curr))}
+	due := make([]thresholdAlertItem, 0)
+	for _, item := range curr {
+		record := thresholdAlertRecord{}
+		if prev.Items != nil {
+			record = prev.Items[item.Key]
+		}
+		record.Count++
+		if record.Count >= consecutiveSamples && !record.Notified {
+			due = append(due, item)
+		}
+		next.Items[item.Key] = record
 	}
-	if st.DiskJSON != "" {
-		_ = json.Unmarshal([]byte(st.DiskJSON), &m.Disks)
+	return next, due
+}
+
+func (s *Service) persistThresholdAlertState(hostKind string, hostID int64, state thresholdAlertState, alertedAt ...time.Time) {
+	if s == nil || s.store == nil || hostKind == "" || hostID <= 0 {
+		return
 	}
-	return m
+	stateJSON := ""
+	if len(state.Items) > 0 {
+		stateJSON = mustJSON(state)
+	}
+	var at *time.Time
+	if len(alertedAt) > 0 {
+		t := alertedAt[0]
+		at = &t
+	}
+	if err := s.store.UpdateAlertState(hostKind, hostID, stateJSON, at); err != nil {
+		logx.Warn("esxi threshold alert state update failed", "host_id", hostID, "err", err.Error())
+	}
 }
 
 func thresholdAlertItems(m HostMetrics, cfg AlertConfig) []thresholdAlertItem {

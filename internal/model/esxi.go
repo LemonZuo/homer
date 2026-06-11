@@ -77,26 +77,27 @@ func (EsxiSample) TableName() string { return "esxi_sample" }
 // 变长结构(每核温度数组、磁盘列表、VM 列表等)按 prompt 范式存 JSON 列,
 // 由 sampler 序列化后整块写入,前端直接 JSON.parse 渲染。
 type EsxiState struct {
-	HostKind      string     `gorm:"primaryKey;column:host_kind;size:16" json:"host_kind"`
-	HostID        int64      `gorm:"primaryKey;column:host_id" json:"host_id"`
-	HostName      string     `gorm:"column:host_name;size:64" json:"host_name"`
-	Reachable     BoolFlag   `gorm:"column:reachable;type:varchar(1);default:'0'" json:"reachable"`
-	LastError     string     `gorm:"column:last_error;size:512" json:"last_error"`
-	PlatformJSON  string     `gorm:"column:platform_json;type:text" json:"platform_json"`
-	CPUStaticJSON string     `gorm:"column:cpu_static_json;type:text" json:"cpu_static_json"`
-	MemoryJSON    string     `gorm:"column:memory_json;type:text" json:"memory_json"`
-	RuntimeJSON   string     `gorm:"column:runtime_json;type:text" json:"runtime_json"`
-	CPUTempJSON   string     `gorm:"column:cpu_temp_json;type:text" json:"cpu_temp_json"`
-	MCEJSON       string     `gorm:"column:mce_json;type:text" json:"mce_json"`
-	DiskJSON      string     `gorm:"column:disk_json;type:text" json:"disk_json"`
-	USBJSON       string     `gorm:"column:usb_json;type:text" json:"usb_json"`
-	VMJSON        string     `gorm:"column:vm_json;type:text" json:"vm_json"`
-	BootJSON      string     `gorm:"column:boot_json;type:text" json:"boot_json"`
-	NICJSON       string     `gorm:"column:nic_json;type:text" json:"nic_json"`
-	TopologyJSON  string     `gorm:"column:topology_json;type:text" json:"topology_json"`
-	LastAlertAt   *time.Time `gorm:"column:last_alert_at" json:"last_alert_at"`
-	SampledAt     *time.Time `gorm:"column:sampled_at" json:"sampled_at"`
-	UpdatedAt     time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	HostKind       string     `gorm:"primaryKey;column:host_kind;size:16" json:"host_kind"`
+	HostID         int64      `gorm:"primaryKey;column:host_id" json:"host_id"`
+	HostName       string     `gorm:"column:host_name;size:64" json:"host_name"`
+	Reachable      BoolFlag   `gorm:"column:reachable;type:varchar(1);default:'0'" json:"reachable"`
+	LastError      string     `gorm:"column:last_error;size:512" json:"last_error"`
+	PlatformJSON   string     `gorm:"column:platform_json;type:text" json:"platform_json"`
+	CPUStaticJSON  string     `gorm:"column:cpu_static_json;type:text" json:"cpu_static_json"`
+	MemoryJSON     string     `gorm:"column:memory_json;type:text" json:"memory_json"`
+	RuntimeJSON    string     `gorm:"column:runtime_json;type:text" json:"runtime_json"`
+	CPUTempJSON    string     `gorm:"column:cpu_temp_json;type:text" json:"cpu_temp_json"`
+	MCEJSON        string     `gorm:"column:mce_json;type:text" json:"mce_json"`
+	DiskJSON       string     `gorm:"column:disk_json;type:text" json:"disk_json"`
+	USBJSON        string     `gorm:"column:usb_json;type:text" json:"usb_json"`
+	VMJSON         string     `gorm:"column:vm_json;type:text" json:"vm_json"`
+	BootJSON       string     `gorm:"column:boot_json;type:text" json:"boot_json"`
+	NICJSON        string     `gorm:"column:nic_json;type:text" json:"nic_json"`
+	TopologyJSON   string     `gorm:"column:topology_json;type:text" json:"topology_json"`
+	AlertStateJSON string     `gorm:"column:alert_state_json;type:text" json:"alert_state_json"`
+	LastAlertAt    *time.Time `gorm:"column:last_alert_at" json:"last_alert_at"`
+	SampledAt      *time.Time `gorm:"column:sampled_at" json:"sampled_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (EsxiState) TableName() string { return "esxi_state" }

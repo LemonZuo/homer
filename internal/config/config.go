@@ -66,6 +66,7 @@ type Config struct {
 	EsxiAlertMemoryUsagePercent int
 	EsxiAlertDiskTempC          int
 	EsxiAlertDiskUsagePercent   int
+	EsxiAlertConsecutiveSamples int
 }
 
 func Load() *Config {
@@ -115,6 +116,7 @@ func Load() *Config {
 		EsxiAlertMemoryUsagePercent: envInt("ESXI_ALERT_MEMORY_USAGE_PERCENT", 90),
 		EsxiAlertDiskTempC:          envInt("ESXI_ALERT_DISK_TEMP_C", 55),
 		EsxiAlertDiskUsagePercent:   envInt("ESXI_ALERT_DISK_USAGE_PERCENT", 90),
+		EsxiAlertConsecutiveSamples: envInt("ESXI_ALERT_CONSECUTIVE_SAMPLES", 5),
 	}
 }
 

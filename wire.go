@@ -149,6 +149,7 @@ func buildEsxiService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*es
 		MemoryUsagePercent: cfg.EsxiAlertMemoryUsagePercent,
 		DiskTempC:          cfg.EsxiAlertDiskTempC,
 		DiskUsagePercent:   cfg.EsxiAlertDiskUsagePercent,
+		ConsecutiveSamples: cfg.EsxiAlertConsecutiveSamples,
 	}
 	svc := esximon.NewService(gormDB, sampler, store, hosts, hub.For(notify.ModuleESXi), alertCfg, time.Duration(cfg.EsxiRetentionDays)*24*time.Hour)
 	return svc, sampler, hosts, creds
