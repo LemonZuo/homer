@@ -30,6 +30,11 @@ type Service struct {
 	// 单机可达性状态机:host_id -> 上次是否可达。首次见到的 host 仅记录,不告警,
 	// 防止刚启动 / 刚加机器时刷一片"已离线/已恢复"。
 	hostReach map[int64]bool
+	// UPS 可用性状态机:host_id -> 上次该主机上观察到的 UPS 名集合。
+	// 覆盖"SSH 通但 upsc 拿不到数据"(NUT 挂了 / USB 拔了 / driver not connected)
+	// 与多 UPS 场景下"拔一台 / 加一台"。只在 OK 主机上跟踪,主机离线时清掉记录,
+	// 主机恢复时进入"首次见到不告警"分支,避免重复打扰。
+	hostUPSNames map[int64]map[string]struct{}
 }
 
 func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, retention time.Duration) *Service {
@@ -38,15 +43,16 @@ func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, re
 	}
 	out := hub.For(notify.ModuleUPS)
 	return &Service{
-		db:        db,
-		sampler:   sampler,
-		store:     store,
-		notifier:  NewNotifier(out, store),
-		sampleOut: out,
-		sse:       newSSEHub(),
-		retention: retention,
-		lastOK:    true, // 启动假设 OK,首轮失败才会发"开始失败"
-		hostReach: map[int64]bool{},
+		db:           db,
+		sampler:      sampler,
+		store:        store,
+		notifier:     NewNotifier(out, store),
+		sampleOut:    out,
+		sse:          newSSEHub(),
+		retention:    retention,
+		lastOK:       true, // 启动假设 OK,首轮失败才会发"开始失败"
+		hostReach:    map[int64]bool{},
+		hostUPSNames: map[int64]map[string]struct{}{},
 	}
 }
 
@@ -178,6 +184,7 @@ func (s *Service) RunSample() error {
 		logx.Info("ups sample done", "hosts", len(hosts), "reachable", reachableHosts, "samples", len(samples))
 	}
 	s.handleHostReachAlerts(hosts)
+	s.handleUPSAvailabilityAlerts(hosts)
 	s.handleReachAlert(sampleOK, len(hosts), firstErr)
 
 	// 广播最新快照给所有 SSE 订阅者。BuildSnapshot 失败只记日志,不阻断采样链路。
@@ -196,7 +203,6 @@ func (s *Service) handleHostReachAlerts(hosts []HostResult) {
 	type change struct {
 		name string
 		ok   bool
-		err  string
 	}
 	var changes []change
 
@@ -209,7 +215,7 @@ func (s *Service) handleHostReachAlerts(hosts []HostResult) {
 		if !known || prev == h.OK {
 			continue
 		}
-		changes = append(changes, change{name: h.HostName, ok: h.OK, err: h.Error})
+		changes = append(changes, change{name: h.HostName, ok: h.OK})
 	}
 	for id := range s.hostReach {
 		if _, ok := seen[id]; !ok {
@@ -228,20 +234,87 @@ func (s *Service) handleHostReachAlerts(hosts []HostResult) {
 		var title, body string
 		if !c.ok {
 			title = "UPS 主机离线"
-			if c.err != "" {
-				body = fmt.Sprintf("%s 已离线\n错误:%s", c.name, c.err)
-			} else {
-				body = fmt.Sprintf("%s 已离线", c.name)
-			}
+			body = fmt.Sprintf("%s 已离线", c.name)
 		} else {
 			title = "UPS 主机已恢复"
-			body = fmt.Sprintf("%s 已恢复采样", c.name)
+			body = fmt.Sprintf("%s 已上线", c.name)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := s.sampleOut.Send(ctx, notify.Message{Title: title, Text: body}); err != nil {
 			logx.Error("ups host reach alert send failed", "host", c.name, "ok", c.ok, "err", err)
 		} else {
 			logx.Warn("ups host reach alert sent", "host", c.name, "ok", c.ok)
+		}
+		cancel()
+	}
+}
+
+// handleUPSAvailabilityAlerts 处理"主机在线但具体 UPS 失联 / 上线"的转换告警。
+// 触发场景:NUT 挂了 / USB 拔了 / driver not connected / 多 UPS 场景里拔接其中一台。
+// 只在 h.OK=true 时跟踪;主机离线时清掉记录,主机恢复时进入"首次见到不告警"分支。
+func (s *Service) handleUPSAvailabilityAlerts(hosts []HostResult) {
+	type change struct {
+		host string
+		ups  string
+		has  bool
+	}
+	var changes []change
+
+	s.reachMu.Lock()
+	seen := make(map[int64]struct{}, len(hosts))
+	for _, h := range hosts {
+		seen[h.HostID] = struct{}{}
+		if !h.OK {
+			delete(s.hostUPSNames, h.HostID)
+			continue
+		}
+		prev, known := s.hostUPSNames[h.HostID]
+		curr := make(map[string]struct{}, len(h.UPSes))
+		for _, u := range h.UPSes {
+			curr[u.Name] = struct{}{}
+		}
+		s.hostUPSNames[h.HostID] = curr
+		if !known {
+			continue
+		}
+		for name := range prev {
+			if _, ok := curr[name]; !ok {
+				changes = append(changes, change{host: h.HostName, ups: name, has: false})
+			}
+		}
+		for name := range curr {
+			if _, ok := prev[name]; !ok {
+				changes = append(changes, change{host: h.HostName, ups: name, has: true})
+			}
+		}
+	}
+	for id := range s.hostUPSNames {
+		if _, ok := seen[id]; !ok {
+			delete(s.hostUPSNames, id)
+		}
+	}
+	s.reachMu.Unlock()
+
+	if len(changes) == 0 {
+		return
+	}
+	if s.sampleOut == nil || !s.sampleOut.Enabled() {
+		return
+	}
+	for _, c := range changes {
+		var title, body string
+		if !c.has {
+			title = "UPS 设备失联"
+			body = fmt.Sprintf("%s 上的 %s 已失联", c.host, c.ups)
+		} else {
+			title = "UPS 设备已恢复"
+			body = fmt.Sprintf("%s 上的 %s 已上线", c.host, c.ups)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := s.sampleOut.Send(ctx, notify.Message{Title: title, Text: body}); err != nil {
+			logx.Error("ups availability alert send failed", "host", c.host, "ups", c.ups, "has", c.has, "err", err)
+		} else {
+			logx.Warn("ups availability alert sent", "host", c.host, "ups", c.ups, "has", c.has)
 		}
 		cancel()
 	}
@@ -264,7 +337,7 @@ func (s *Service) handleReachAlert(curOK bool, hosts int, firstErr string) {
 	var title, body string
 	if !curOK {
 		title = "UPS 采样开始失败"
-		body = fmt.Sprintf("候选机器:%d 台\n全部不可达\n示例错误:%s", hosts, firstErr)
+		body = fmt.Sprintf("候选机器:%d 台\n全部不可达", hosts)
 	} else {
 		title = "UPS 采样已恢复"
 		body = fmt.Sprintf("候选机器:%d 台\n至少 1 台可达,采样恢复", hosts)

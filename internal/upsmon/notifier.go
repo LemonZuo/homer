@@ -3,6 +3,7 @@ package upsmon
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/LemonZuo/homer/internal/logx"
@@ -94,26 +95,24 @@ func (n *Notifier) send(kind string, st model.UPSState) {
 }
 
 func composeMessage(kind string, st model.UPSState) (string, string) {
-	device := st.Mfr + " " + st.Model
-	if device == " " {
-		device = st.UPSName
+	device := strings.TrimSpace(st.Mfr + " " + st.Model)
+	header := fmt.Sprintf("%s 上的 %s", st.HostName, st.UPSName)
+	if device != "" {
+		header += ":(" + device + ")"
 	}
 	switch kind {
 	case "switched_to_battery":
 		return "UPS 切到电池供电",
-			fmt.Sprintf("机器:%s\nUPS:%s(%s)\n剩余电量:%d%%\n预估续航:%s\n原始状态:%s",
-				st.HostName, st.UPSName, device,
-				st.LastBatteryPercent, fmtRuntime(st.LastRuntimeMinutes), st.LastRawStatus)
+			fmt.Sprintf("%s\n剩余电量:%d%%\n预估续航:%s\n原始状态:%s",
+				header, st.LastBatteryPercent, fmtRuntime(st.LastRuntimeMinutes), st.LastRawStatus)
 	case "low_battery":
 		return "UPS 低电量告警",
-			fmt.Sprintf("机器:%s\nUPS:%s(%s)\n剩余电量:%d%%\n预估续航:%s\n原始状态:%s",
-				st.HostName, st.UPSName, device,
-				st.LastBatteryPercent, fmtRuntime(st.LastRuntimeMinutes), st.LastRawStatus)
+			fmt.Sprintf("%s\n剩余电量:%d%%\n预估续航:%s\n原始状态:%s",
+				header, st.LastBatteryPercent, fmtRuntime(st.LastRuntimeMinutes), st.LastRawStatus)
 	case "restored_mains":
 		return "UPS 已恢复市电",
-			fmt.Sprintf("机器:%s\nUPS:%s(%s)\n剩余电量:%d%%\n原始状态:%s",
-				st.HostName, st.UPSName, device,
-				st.LastBatteryPercent, st.LastRawStatus)
+			fmt.Sprintf("%s\n剩余电量:%d%%\n原始状态:%s",
+				header, st.LastBatteryPercent, st.LastRawStatus)
 	default:
 		return "UPS 状态变化", st.LastRawStatus
 	}
