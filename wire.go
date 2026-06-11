@@ -133,7 +133,7 @@ func buildUPSService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*ups
 	creds := upsmon.NewCredentialStore(gormDB, hosts)
 	sampler := upsmon.NewSampler(gormDB, hosts, creds, time.Duration(cfg.UPSSSHTimeoutSec)*time.Second)
 	store := upsmon.NewStore(gormDB)
-	svc := upsmon.NewService(gormDB, sampler, store, hub, time.Duration(cfg.UPSRetentionDays)*24*time.Hour)
+	svc := upsmon.NewService(gormDB, sampler, store, hub, time.Duration(cfg.UPSRetentionDays)*24*time.Hour, cfg.UPSOfflineThreshold, cfg.NUTOfflineThreshold)
 	return svc, sampler, hosts, creds
 }
 

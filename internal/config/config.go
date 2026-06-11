@@ -54,6 +54,12 @@ type Config struct {
 	UPSCleanupCron   string
 	UPSRetentionDays int
 	UPSSSHTimeoutSec int
+	// UPS 告警去抖阈值,值是"连续 N 轮采样"。
+	// UPSOfflineThreshold:单台 UPS reading 连续失败几轮才报"UPS 设备失联"。
+	// NUTOfflineThreshold:主机 `upsc -l` 连续失败几轮才报"主机 NUT 不可用"。
+	// 默认 3 / 5,即约 90s / 150s 窗口(对应默认 30s cron)。
+	UPSOfflineThreshold int
+	NUTOfflineThreshold int
 
 	// ESXi 监控。机器从 esxi_host(enabled='1')取,凭证从 esxi_ssh_credential 库选。
 	// 单机一轮要跑多次 esxcli/vsish/vim-cmd,EsxiSSHTimeoutSec 给得宽一点。
@@ -102,10 +108,12 @@ func Load() *Config {
 
 		SchedulerAlertFailThreshold: envInt("SCHEDULER_ALERT_FAIL_THRESHOLD", 1),
 
-		UPSSampleCron:    env("UPS_SAMPLE_CRON", "*/30 * * * * *"),
-		UPSCleanupCron:   env("UPS_CLEANUP_CRON", "0 0 4 * * *"),
-		UPSRetentionDays: envInt("UPS_RETENTION_DAYS", 7),
-		UPSSSHTimeoutSec: envInt("UPS_SSH_TIMEOUT_SEC", 5),
+		UPSSampleCron:       env("UPS_SAMPLE_CRON", "*/30 * * * * *"),
+		UPSCleanupCron:      env("UPS_CLEANUP_CRON", "0 0 4 * * *"),
+		UPSRetentionDays:    envInt("UPS_RETENTION_DAYS", 7),
+		UPSSSHTimeoutSec:    envInt("UPS_SSH_TIMEOUT_SEC", 5),
+		UPSOfflineThreshold: envInt("UPS_OFFLINE_THRESHOLD", 3),
+		NUTOfflineThreshold: envInt("UPS_NUT_OFFLINE_THRESHOLD", 5),
 
 		EsxiSampleCron:              env("ESXI_SAMPLE_CRON", "*/30 * * * * *"),
 		EsxiCleanupCron:             env("ESXI_CLEANUP_CRON", "0 0 4 * * *"),

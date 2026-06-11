@@ -48,16 +48,17 @@ type Service struct {
 	// 单 UPS 永远不会被报失联;但用户应当被告知"主机的 NUT 服务整体不可用"。
 	// 主机离线时清记录(交给 handleHostReachAlerts 报),复用 upsTrack 结构语义。
 	hostNUTState map[int64]upsTrack
+
+	// 告警去抖阈值,见各自字段注释。从 .env 注入,不在 .env 配置时走 NewService 内默认值。
+	// upsOfflineThreshold:单台 UPS 连续几轮 readings 缺失才报"UPS 设备失联"。
+	// 30s cron + 默认 3 → 约 90s 窗口,readOneUPS 内部已有 3 次重试扛单次 pollfreq 共振,
+	// 所以连续 3 轮还失败意味着 driver 真死了(USB 拔了 / 配置移除)。
+	upsOfflineThreshold int
+	// nutOfflineThreshold:主机 `upsc -l` 连续几轮失败才报"主机 NUT 不可用"。
+	// 默认 5 → 约 150s 窗口,比 UPS 失联阈值宽,扛 homer/fnOS 间网络瞬抖、homer 自身
+	// GC 卡顿之类的"两台机器同时哑一会"共因,这些通常 90s 内自愈,不该报警。
+	nutOfflineThreshold int
 }
-
-// 连续 upsOfflineThreshold 轮 readings 没出现某 UPS,才认为它真失联。
-// 30s cron + threshold=3 → 约 90s 去抖窗口。readOneUPS 内部已有 3 次重试扛单次
-// pollfreq 共振,所以连续 3 轮还失败意味着 driver 真死了(USB 拔了 / 配置移除)。
-const upsOfflineThreshold = 3
-
-// 连续 nutOfflineThreshold 轮 `upsc -l` 失败,才认为 NUT 服务整体挂掉。
-// 阈值跟 UPS 失联一致(3 轮 ≈ 90s),刚好吃下拔接 USB 时 NUT 整体抖 1-2 轮。
-const nutOfflineThreshold = 3
 
 // upsTrack 通用"计数 + 已告警"状态:用作单个 UPS 的失联去抖,也用作主机级 NUT 不可用去抖。
 // missCount 是连续触发次数,alertedDown 防止跨阈值后每轮都重复发同一条告警。
@@ -66,23 +67,31 @@ type upsTrack struct {
 	alertedDown bool
 }
 
-func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, retention time.Duration) *Service {
+func NewService(db *gorm.DB, sampler *Sampler, store *Store, hub *notify.Hub, retention time.Duration, upsOfflineThreshold, nutOfflineThreshold int) *Service {
 	if retention <= 0 {
 		retention = 7 * 24 * time.Hour
 	}
+	if upsOfflineThreshold <= 0 {
+		upsOfflineThreshold = 3
+	}
+	if nutOfflineThreshold <= 0 {
+		nutOfflineThreshold = 5
+	}
 	out := hub.For(notify.ModuleUPS)
 	return &Service{
-		db:           db,
-		sampler:      sampler,
-		store:        store,
-		notifier:     NewNotifier(out, store),
-		sampleOut:    out,
-		sse:          newSSEHub(),
-		retention:    retention,
-		lastOK:       true, // 启动假设 OK,首轮失败才会发"开始失败"
-		hostReach:    map[int64]bool{},
-		hostUPSNames: map[int64]map[string]upsTrack{},
-		hostNUTState: map[int64]upsTrack{},
+		db:                  db,
+		sampler:             sampler,
+		store:               store,
+		notifier:            NewNotifier(out, store),
+		sampleOut:           out,
+		sse:                 newSSEHub(),
+		retention:           retention,
+		lastOK:              true, // 启动假设 OK,首轮失败才会发"开始失败"
+		hostReach:           map[int64]bool{},
+		hostUPSNames:        map[int64]map[string]upsTrack{},
+		hostNUTState:        map[int64]upsTrack{},
+		upsOfflineThreshold: upsOfflineThreshold,
+		nutOfflineThreshold: nutOfflineThreshold,
 	}
 }
 
@@ -315,7 +324,7 @@ func (s *Service) handleNUTAlerts(hosts []HostResult) {
 			continue
 		}
 		prev.missCount++
-		if prev.missCount >= nutOfflineThreshold && !prev.alertedDown {
+		if prev.missCount >= s.nutOfflineThreshold && !prev.alertedDown {
 			changes = append(changes, change{host: h.HostName, ok: false})
 			prev.alertedDown = true
 		}
@@ -409,7 +418,7 @@ func (s *Service) handleUPSAvailabilityAlerts(hosts []HostResult) {
 				continue
 			}
 			t.missCount++
-			if t.missCount >= upsOfflineThreshold && !t.alertedDown {
+			if t.missCount >= s.upsOfflineThreshold && !t.alertedDown {
 				changes = append(changes, change{host: h.HostName, ups: name, has: false})
 				t.alertedDown = true
 			}
