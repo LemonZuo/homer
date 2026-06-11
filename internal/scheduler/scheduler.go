@@ -16,11 +16,19 @@ import (
 // 每个任务在内存里保留最近 N 次执行记录，单进程够用，重启即清空。
 const historySize = 10
 
+// ErrSkipped 由任务包装层(如维护窗口)返回,告诉 scheduler「本轮主动跳过」。
+// 跳过既不算成功也不算失败:不重置 consec 失败计数,不递增,不写 Observer,不告警。
+// 跳过仍记入 history 与 last,便于 UI 展示「这一槽位被刻意跳过了」。
+// 包装时可用 fmt.Errorf("%w: <reason>", ErrSkipped) 附原因,日志会展示。
+var ErrSkipped = errors.New("scheduler: run skipped")
+
 // Run 一次执行的结果。
+// Skipped=true 时 OK=true、Err 是跳过原因(用于日志/面板),consec 不动。
 type Run struct {
 	Start   time.Time `json:"start"`
 	End     time.Time `json:"end"`
 	OK      bool      `json:"ok"`
+	Skipped bool      `json:"skipped,omitempty"`
 	Err     string    `json:"err,omitempty"`
 	Trigger string    `json:"trigger"` // cron | manual
 }
@@ -145,22 +153,36 @@ func (s *Scheduler) run(j *job, trigger string) {
 		runErr = j.fn(trigger)
 	}()
 
-	rec := Run{Start: start, End: time.Now(), OK: runErr == nil, Trigger: trigger}
-	if runErr != nil {
+	skipped := errors.Is(runErr, ErrSkipped)
+	rec := Run{Start: start, End: time.Now(), Trigger: trigger}
+	switch {
+	case skipped:
+		rec.OK = true
+		rec.Skipped = true
+		if runErr != nil {
+			rec.Err = runErr.Error()
+		}
+		logx.Info("scheduler job skipped", "job", j.name, "trigger", trigger,
+			"elapsed", time.Since(start).Round(time.Millisecond).String(),
+			"reason", rec.Err)
+	case runErr != nil:
 		rec.Err = runErr.Error()
 		logx.Error("scheduler job failed", "job", j.name, "trigger", trigger,
 			"elapsed", time.Since(start).Round(time.Millisecond).String(), "err", runErr)
-	} else {
+	default:
+		rec.OK = true
 		logx.Info("scheduler job done", "job", j.name, "trigger", trigger,
 			"elapsed", time.Since(start).Round(time.Millisecond).String())
 	}
 	j.mu.Lock()
 	j.running = false
 	j.last = &rec
-	if rec.OK {
-		j.consec = 0
-	} else {
-		j.consec++
+	if !skipped {
+		if rec.OK {
+			j.consec = 0
+		} else {
+			j.consec++
+		}
 	}
 	consec := j.consec
 	j.history = append(j.history, rec)
@@ -169,6 +191,9 @@ func (s *Scheduler) run(j *job, trigger string) {
 	}
 	j.mu.Unlock()
 
+	if skipped {
+		return
+	}
 	s.mu.RLock()
 	obs, threshold := s.obs, s.failThreshold
 	s.mu.RUnlock()

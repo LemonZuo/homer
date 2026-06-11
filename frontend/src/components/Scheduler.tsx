@@ -9,6 +9,7 @@ import {
   Clock,
   History,
   Loader2,
+  MinusCircle,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -27,6 +28,7 @@ interface Run {
   start: string
   end: string
   ok: boolean
+  skipped?: boolean
   err?: string
   trigger: string
 }
@@ -96,11 +98,12 @@ function describeCron(spec: string): string {
   return ''
 }
 
-type Status = 'running' | 'ok' | 'fail' | 'idle'
+type Status = 'running' | 'ok' | 'fail' | 'skipped' | 'idle'
 
 function statusOf(job: Job): Status {
   if (job.running) return 'running'
   if (!job.last) return 'idle'
+  if (job.last.skipped) return 'skipped'
   return job.last.ok ? 'ok' : 'fail'
 }
 
@@ -123,6 +126,12 @@ const STATUS_STYLE: Record<Status, { dot: string; text: string; label: string; c
     label: '上次失败',
     chip: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
   },
+  skipped: {
+    dot: 'bg-amber-500',
+    text: 'text-amber-600 dark:text-amber-400',
+    label: '上次跳过',
+    chip: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  },
   idle: {
     dot: 'bg-muted-foreground/40',
     text: 'text-muted-foreground',
@@ -132,26 +141,32 @@ const STATUS_STYLE: Record<Status, { dot: string; text: string; label: string; c
 }
 
 function RunLine({ r }: { r: Run }) {
+  const dotColor = r.skipped ? 'bg-amber-500' : r.ok ? 'bg-emerald-500' : 'bg-rose-500'
   return (
     <div className="flex items-start gap-2.5 py-2">
-      <span
-        className={cn(
-          'mt-1 h-1.5 w-1.5 shrink-0 rounded-full',
-          r.ok ? 'bg-emerald-500' : 'bg-rose-500',
-        )}
-      />
+      <span className={cn('mt-1 h-1.5 w-1.5 shrink-0 rounded-full', dotColor)} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
           <span className="font-mono text-foreground/80">{fmtTime(r.start)}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground">
             {triggerLabel(r.trigger)}
           </span>
+          {r.skipped && (
+            <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-600 dark:text-amber-400">
+              跳过
+            </span>
+          )}
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Timer className="h-3 w-3" />
             {fmtDuration(r.start, r.end)}
           </span>
         </div>
-        {!r.ok && r.err && (
+        {r.skipped && r.err && (
+          <div className="mt-1 break-words rounded-md bg-amber-500/5 px-2 py-1 font-mono text-[11.5px] text-amber-600 dark:text-amber-400">
+            {r.err}
+          </div>
+        )}
+        {!r.skipped && !r.ok && r.err && (
           <div className="mt-1 break-words rounded-md bg-rose-500/5 px-2 py-1 font-mono text-[11.5px] text-rose-600 dark:text-rose-400">
             {r.err}
           </div>
@@ -281,7 +296,9 @@ function JobCard({
             </span>
             {job.last ? (
               <span className={cn('flex items-center gap-1.5 text-[12px]', st.text)}>
-                {job.last.ok ? (
+                {job.last.skipped ? (
+                  <MinusCircle className="h-3.5 w-3.5 shrink-0" />
+                ) : job.last.ok ? (
                   <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
                 ) : (
                   <XCircle className="h-3.5 w-3.5 shrink-0" />
@@ -295,7 +312,12 @@ function JobCard({
           </div>
         </div>
 
-        {job.last && !job.last.ok && job.last.err && (
+        {job.last && job.last.skipped && job.last.err && (
+          <div className="mt-2.5 break-words rounded-md bg-amber-500/5 px-2.5 py-1.5 font-mono text-[11.5px] text-amber-600 dark:text-amber-400">
+            {job.last.err}
+          </div>
+        )}
+        {job.last && !job.last.skipped && !job.last.ok && job.last.err && (
           <div className="mt-2.5 break-words rounded-md bg-rose-500/5 px-2.5 py-1.5 font-mono text-[11.5px] text-rose-600 dark:text-rose-400">
             {job.last.err}
           </div>

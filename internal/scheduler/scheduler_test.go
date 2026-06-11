@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -53,6 +54,54 @@ func TestRunConsecCountingAndReset(t *testing.T) {
 	}
 	if want := []int{2}; !equalInts(obs.alerts, want) {
 		t.Fatalf("alerts = %v want %v (only when consec>=threshold)", obs.alerts, want)
+	}
+}
+
+func TestRunSkippedPreservesConsec(t *testing.T) {
+	s := New()
+	obs := &stubObserver{}
+	s.SetObserver(obs, 2)
+
+	var mode int // 0=fail,1=skip,2=ok
+	_ = s.Register("sk", "", func() error {
+		switch mode {
+		case 0:
+			return errors.New("boom")
+		case 1:
+			return fmt.Errorf("%w: maintenance", ErrSkipped)
+		default:
+			return nil
+		}
+	})
+	j := s.jobs["sk"]
+
+	mode = 0
+	s.run(j, "manual") // consec=1
+	s.run(j, "manual") // consec=2, alert
+	mode = 1
+	s.run(j, "manual") // skipped, consec stays 2, no Record/Alert
+	mode = 0
+	s.run(j, "manual") // consec=3, alert again
+
+	if j.consec != 3 {
+		t.Fatalf("consec after skip + fail = %d want 3 (skip must not reset)", j.consec)
+	}
+	if want := []int{1, 2, 3}; !equalInts(obs.records, want) {
+		t.Fatalf("records = %v want %v (skipped run must not call Record)", obs.records, want)
+	}
+	if want := []int{2, 3}; !equalInts(obs.alerts, want) {
+		t.Fatalf("alerts = %v want %v", obs.alerts, want)
+	}
+	// 跳过这一拍仍记入 history,且标记 Skipped=true、OK=true。
+	if len(j.history) != 4 {
+		t.Fatalf("history len = %d want 4", len(j.history))
+	}
+	skipRec := j.history[2]
+	if !skipRec.Skipped || !skipRec.OK {
+		t.Fatalf("skipped run record = %+v want Skipped=true OK=true", skipRec)
+	}
+	if skipRec.Err == "" {
+		t.Fatal("skipped run should carry skip reason in Err for UI/log")
 	}
 }
 

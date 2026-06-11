@@ -161,9 +161,9 @@ func buildEsxiService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*es
 // 返回 Scheduler 供调用方 defer Stop。
 func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, upsSvc *upsmon.Service, esxiSvc *esximon.Service, hub *notify.Hub) *scheduler.Scheduler {
 	sched := scheduler.New()
-	sshMaintenanceWindow, err := parseDailyMaintenanceWindow(cfg.SSHMonitorMaintenanceWindow)
+	routerMaintenanceWindow, err := parseDailyMaintenanceWindow(cfg.RouterMaintenanceWindow)
 	if err != nil {
-		logx.Warn("ssh monitor maintenance window disabled", "value", cfg.SSHMonitorMaintenanceWindow, "err", err.Error())
+		logx.Warn("router maintenance window disabled", "value", cfg.RouterMaintenanceWindow, "err", err.Error())
 	}
 
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() error {
@@ -206,7 +206,7 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 		logx.Fatal("register acme-deploy-retry task", "err", err)
 	}
 
-	if err := sched.RegisterWithTrigger("ups-sample", cfg.UPSSampleCron, withCronMaintenanceWindow("ups-sample", sshMaintenanceWindow, upsSvc.RunSample)); err != nil {
+	if err := sched.RegisterWithTrigger("ups-sample", cfg.UPSSampleCron, withCronMaintenanceWindow(routerMaintenanceWindow, upsSvc.RunSample)); err != nil {
 		logx.Fatal("register ups-sample task", "err", err)
 	}
 
@@ -214,7 +214,7 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 		logx.Fatal("register ups-cleanup task", "err", err)
 	}
 
-	if err := sched.RegisterWithTrigger("esxi-sample", cfg.EsxiSampleCron, withCronMaintenanceWindow("esxi-sample", sshMaintenanceWindow, esxiSvc.RunSample)); err != nil {
+	if err := sched.RegisterWithTrigger("esxi-sample", cfg.EsxiSampleCron, withCronMaintenanceWindow(routerMaintenanceWindow, esxiSvc.RunSample)); err != nil {
 		logx.Fatal("register esxi-sample task", "err", err)
 	}
 
@@ -296,11 +296,13 @@ func (w dailyMaintenanceWindow) Contains(t time.Time) bool {
 	return minute >= w.startMinute || minute < w.endMinute
 }
 
-func withCronMaintenanceWindow(jobName string, window dailyMaintenanceWindow, fn func() error) func(trigger string) error {
+// withCronMaintenanceWindow 仅在 cron 触发且当前处于维护窗口内时主动跳过本拍,
+// 用 scheduler.ErrSkipped 通知调度器「这不是成功」——consec 失败计数不被重置,
+// 真实问题不会被维护窗口的「正常返回」掩盖。手动触发(trigger=="manual")不受影响。
+func withCronMaintenanceWindow(window dailyMaintenanceWindow, fn func() error) func(trigger string) error {
 	return func(trigger string) error {
 		if trigger == "cron" && window.Contains(time.Now()) {
-			logx.Info("ssh monitor cron sample skipped: maintenance window", "job", jobName, "window", window.spec)
-			return nil
+			return fmt.Errorf("%w: 维护窗口 %s", scheduler.ErrSkipped, window.spec)
 		}
 		return fn()
 	}
