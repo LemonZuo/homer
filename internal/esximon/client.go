@@ -889,12 +889,33 @@ func collectDisks(client *ssh.Client) []DiskHealth {
 	}
 	smartByID := splitSMARTOutput(smartAll)
 	retryMissingSMART(client, ids, smartByID)
-	logx.Debug("esxi collectDisks", "n_dev", len(ids), "smart_bytes", len(smartAll), "smart_segments", len(smartByID))
+	// ATA 盘走 vsish 拿真实 6-byte raw,修正 esxcli 截断到 1 字节的 attribute 9/12 等。
+	// NVMe 不支持 vsish smart 路径,这里直接跳过(返回 map 不包含 NVMe 盘)。
+	ataAttrsByID := collectATASmartBuffers(client, ids)
+	logx.Debug("esxi collectDisks", "n_dev", len(ids), "smart_bytes", len(smartAll), "smart_segments", len(smartByID), "ata_vsish", len(ataAttrsByID))
 
 	var out []DiskHealth
 	for _, id := range ids {
 		smart := smartByID[id]
 		attrs := parseSMARTAttrs(smart)
+		if ata, ok := ataAttrsByID[id]; ok {
+			// vsish 给到非 -1 的字段优先覆盖 esxcli 解析结果(esxcli Raw 列截断到低 1 字节)
+			if ata.PowerOnHours >= 0 {
+				attrs.PowerOnHours = ata.PowerOnHours
+			}
+			if ata.PowerCycleCount >= 0 {
+				attrs.PowerCycleCount = ata.PowerCycleCount
+			}
+			if ata.ReallocatedSectors >= 0 {
+				attrs.ReallocatedSectors = ata.ReallocatedSectors
+			}
+			if ata.PendingSectorReallocation >= 0 {
+				attrs.PendingSectorReallocation = ata.PendingSectorReallocation
+			}
+			if ata.UncorrectableErrors >= 0 {
+				attrs.UncorrectableErrors = ata.UncorrectableErrors
+			}
+		}
 		info := devInfo[id]
 		usage := usageByDevice[id]
 		usedBytes := int64(-1)
@@ -1313,6 +1334,135 @@ func smartIntPick(raw, value string) int {
 		return v
 	}
 	return parseIntDefault(value, -1)
+}
+
+// ataSMARTAttrs 是 ATA 盘从 vsish valuesBuffer 解析出的真实 6-byte raw 值。
+// 作用:覆盖 esxcli 输出的 Raw 列(对 ATA 盘只暴露低 1 字节,Power-on Hours 等会被截到 0-255)。
+// NVMe 不走这条路(vsish 该节点 Not supported),所有字段保持 -1。
+type ataSMARTAttrs struct {
+	PowerOnHours              int64
+	PowerCycleCount           int64
+	ReallocatedSectors        int64
+	PendingSectorReallocation int64
+	UncorrectableErrors       int64
+}
+
+func newATASMARTAttrs() ataSMARTAttrs {
+	return ataSMARTAttrs{
+		PowerOnHours:              -1,
+		PowerCycleCount:           -1,
+		ReallocatedSectors:        -1,
+		PendingSectorReallocation: -1,
+		UncorrectableErrors:       -1,
+	}
+}
+
+// collectATASmartBuffers 对每块 ATA 盘合批跑 vsish,读 /storage/scsifw/devices/<id>/smart/valuesBuffer。
+// vsish 返回的 512 字节就是 ATA SMART data 结构:bytes[0:2]=revision + 30 个 12 字节 attribute entry。
+// NVMe 设备前缀以 "t10.NVMe" 起手,直接跳过(vsish 该路径返回 "Not supported")。
+func collectATASmartBuffers(client *ssh.Client, ids []string) map[string]ataSMARTAttrs {
+	var ataIDs []string
+	for _, id := range ids {
+		if strings.HasPrefix(id, "t10.ATA_") {
+			ataIDs = append(ataIDs, id)
+		}
+	}
+	if len(ataIDs) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	for _, id := range ataIDs {
+		b.WriteString(`printf '===DEV===%s\n' `)
+		b.WriteString(sshx.ShellQuote(id))
+		b.WriteString("; vsish -e get /storage/scsifw/devices/")
+		b.WriteString(sshx.ShellQuote(id))
+		b.WriteString("/smart/valuesBuffer; ")
+	}
+	out, err := runEsxiRetry(client, "disk vsish smart batch", b.String(), 20*time.Second, 2, func(s string) bool {
+		return strings.Count(s, "===DEV===") >= len(ataIDs)
+	})
+	if err != nil && !strings.Contains(out, "===DEV===") {
+		logx.Warn("esxi vsish smart batch failed", "err", err.Error(), "n", len(ataIDs))
+		return nil
+	}
+	segs := splitSMARTOutput(out)
+	res := map[string]ataSMARTAttrs{}
+	for id, seg := range segs {
+		if attrs, ok := parseATASMARTBuffer(seg); ok {
+			res[id] = attrs
+		}
+	}
+	return res
+}
+
+// parseATASMARTBuffer 把 vsish 输出(每行形如 `[N]: 0xXX`)还原成 512 字节 ATA SMART data,
+// 然后按 12 字节为一组扫 30 个 attribute,取关注的 attribute id 的 6 字节 raw(little endian)。
+// 不关心 value/worst 列(那些 esxcli 已经给到了)。
+// attribute ID 含义(SATA 标准):5=Reallocated / 9=Power-on Hours / 12=Power Cycle / 197=Pending Realloc / 198=Offline Uncorr。
+func parseATASMARTBuffer(text string) (ataSMARTAttrs, bool) {
+	attrs := newATASMARTAttrs()
+	var buf [512]byte
+	got := 0
+	for _, line := range strings.Split(text, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.HasPrefix(trim, "[") {
+			continue
+		}
+		rb := strings.IndexByte(trim, ']')
+		if rb < 2 {
+			continue
+		}
+		idx, err := strconv.Atoi(trim[1:rb])
+		if err != nil || idx < 0 || idx >= 512 {
+			continue
+		}
+		hx := strings.Index(trim, "0x")
+		if hx < 0 {
+			continue
+		}
+		end := hx + 2
+		for end < len(trim) {
+			c := trim[end]
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				break
+			}
+			end++
+		}
+		n, err := strconv.ParseUint(trim[hx+2:end], 16, 8)
+		if err != nil {
+			continue
+		}
+		buf[idx] = byte(n)
+		got++
+	}
+	// 解析过少说明 vsish 输出截断/格式异常,放弃覆盖,沿用 esxcli。
+	if got < 50 {
+		return attrs, false
+	}
+	for i := 0; i < 30; i++ {
+		off := 2 + i*12
+		aid := buf[off]
+		if aid == 0 {
+			continue
+		}
+		var raw int64
+		for j := 0; j < 6; j++ {
+			raw |= int64(buf[off+5+j]) << (8 * j)
+		}
+		switch aid {
+		case 5:
+			attrs.ReallocatedSectors = raw
+		case 9:
+			attrs.PowerOnHours = raw
+		case 12:
+			attrs.PowerCycleCount = raw
+		case 197:
+			attrs.PendingSectorReallocation = raw
+		case 198:
+			attrs.UncorrectableErrors = raw
+		}
+	}
+	return attrs, true
 }
 
 // classifyDisk 给磁盘按温度评 ok/warning/critical(基于 prompt 表格)。

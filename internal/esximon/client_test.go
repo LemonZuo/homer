@@ -1,6 +1,10 @@
 package esximon
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestParseDeviceInventory(t *testing.T) {
 	out := `
@@ -350,6 +354,80 @@ Drive Temperature         47     82         N/A    N/A
 		a := parseSMARTAttrs("")
 		if a.TempC != -1 || a.PowerOnHours != -1 || a.HealthStatus != "" {
 			t.Fatalf("empty input not all defaults: %+v", a)
+		}
+	})
+}
+
+// renderVsishBuffer 把 [512]byte 还原成 vsish 输出格式(每行 `[N]: 0xXX`),
+// 用于在测试里合成 ATA SMART data buffer。
+func renderVsishBuffer(buf [512]byte) string {
+	var sb strings.Builder
+	for i, b := range buf {
+		fmt.Fprintf(&sb, "[%d]: 0x%02x \n", i, b)
+	}
+	return sb.String()
+}
+
+// putAttr 在 buf 的指定 attribute 槽位写入 id + 6 字节 LE raw。
+// slot 取值 0..29,对应 ATA SMART data 第 1..30 个 entry。
+func putAttr(buf *[512]byte, slot int, id byte, raw int64) {
+	off := 2 + slot*12
+	buf[off] = id
+	for j := 0; j < 6; j++ {
+		buf[off+5+j] = byte(raw >> (8 * j))
+	}
+}
+
+func TestParseATASMARTBuffer(t *testing.T) {
+	t.Run("decodes_full_6byte_raw", func(t *testing.T) {
+		// 关键场景:Power-on Hours 真值 30425 (0x76D9),低 1 字节 0xD9=217,
+		// 这正是 esxcli 截断时会显示的错值。vsish 必须给出 30425。
+		var buf [512]byte
+		buf[0] = 0x01 // revision lo
+		buf[1] = 0x00
+		putAttr(&buf, 0, 5, 0)     // Reallocated Sector Count
+		putAttr(&buf, 1, 9, 30425) // Power-on Hours
+		putAttr(&buf, 2, 12, 160)  // Power Cycle Count
+		putAttr(&buf, 3, 197, 0)   // Pending Sector Reallocation
+		putAttr(&buf, 4, 198, 0)   // Offline Uncorrectable
+		// 故意塞个无关 attribute,确认不影响关注字段
+		putAttr(&buf, 5, 194, 35) // Temperature (不在覆盖列表)
+
+		attrs, ok := parseATASMARTBuffer(renderVsishBuffer(buf))
+		if !ok {
+			t.Fatalf("parse failed (got<50?)")
+		}
+		if attrs.PowerOnHours != 30425 {
+			t.Fatalf("power-on hours = %d (want 30425)", attrs.PowerOnHours)
+		}
+		if attrs.PowerCycleCount != 160 {
+			t.Fatalf("power cycle = %d (want 160)", attrs.PowerCycleCount)
+		}
+		if attrs.ReallocatedSectors != 0 {
+			t.Fatalf("reallocated = %d (want 0)", attrs.ReallocatedSectors)
+		}
+		if attrs.PendingSectorReallocation != 0 {
+			t.Fatalf("pending = %d (want 0)", attrs.PendingSectorReallocation)
+		}
+		if attrs.UncorrectableErrors != 0 {
+			t.Fatalf("uncorr = %d (want 0)", attrs.UncorrectableErrors)
+		}
+	})
+
+	t.Run("nvme_not_supported", func(t *testing.T) {
+		attrs, ok := parseATASMARTBuffer("VSISHCmdGetInt():Get failed: Not supported\n")
+		if ok {
+			t.Fatalf("expected parse to bail on Not supported, got %+v", attrs)
+		}
+		if attrs.PowerOnHours != -1 {
+			t.Fatalf("attrs not reset to -1 on failure: %+v", attrs)
+		}
+	})
+
+	t.Run("empty_input", func(t *testing.T) {
+		_, ok := parseATASMARTBuffer("")
+		if ok {
+			t.Fatalf("expected !ok for empty input")
 		}
 	})
 }
