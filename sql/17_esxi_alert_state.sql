@@ -9,7 +9,7 @@ BEGIN
                    AND TABLE_NAME = 'esxi_state'
                    AND COLUMN_NAME = 'alert_state_json') THEN
     ALTER TABLE `esxi_state`
-      ADD COLUMN `alert_state_json` TEXT NULL COMMENT 'JSON: 阈值告警连续计数与已通知状态' AFTER `topology_json`;
+      ADD COLUMN `alert_state_json` TEXT NULL COMMENT '告警状态' AFTER `topology_json`;
   END IF;
 END //
 DELIMITER ;

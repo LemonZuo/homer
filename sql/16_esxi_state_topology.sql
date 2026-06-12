@@ -16,7 +16,7 @@ BEGIN
                      AND COLUMN_NAME = 'topology_json') THEN
       ALTER TABLE `esxi_state`
         ADD COLUMN `topology_json` TEXT NULL
-          COMMENT 'JSON：{ vswitches:[{name,uplinks,portgroups}], vm_nics:[{vmid,vm_name,vswitch,portgroup,mac,ip,team_uplink}] }'
+          COMMENT '网络拓扑'
           AFTER `nic_json`;
     END IF;
   END IF;

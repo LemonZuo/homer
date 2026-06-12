@@ -5,12 +5,12 @@
 RENAME TABLE `sys_birthday_remind` TO `birthday_reminder`;
 
 ALTER TABLE `birthday_reminder`
-  CHANGE COLUMN `remind_id`               `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '唯一标识',
+  CHANGE COLUMN `remind_id`               `id`               BIGINT      NOT NULL AUTO_INCREMENT,
   CHANGE COLUMN `remind_name`             `name`             VARCHAR(30) NOT NULL DEFAULT ''     COMMENT '姓名',
-  CHANGE COLUMN `remind_birthday`         `birthday`         VARCHAR(10) NOT NULL DEFAULT ''     COMMENT '公历生日 yyyy-MM-dd',
-  CHANGE COLUMN `remind_chinese_birthday` `chinese_birthday` VARCHAR(30) NOT NULL DEFAULT ''     COMMENT '农历生日（后端自动）',
-  CHANGE COLUMN `remind_zodiac`           `zodiac`           VARCHAR(30) NOT NULL DEFAULT ''     COMMENT '生肖（后端自动）',
-  CHANGE COLUMN `is_remind`               `enabled`          VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0';
+  CHANGE COLUMN `remind_birthday`         `birthday`         VARCHAR(10) NOT NULL DEFAULT ''     COMMENT '公历生日',
+  CHANGE COLUMN `remind_chinese_birthday` `chinese_birthday` VARCHAR(30) NOT NULL DEFAULT ''     COMMENT '农历生日',
+  CHANGE COLUMN `remind_zodiac`           `zodiac`           VARCHAR(30) NOT NULL DEFAULT ''     COMMENT '生肖',
+  CHANGE COLUMN `is_remind`               `enabled`          VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否启用';
 
 ALTER TABLE `birthday_reminder`
   DROP INDEX `idx_chinese_birthday`,

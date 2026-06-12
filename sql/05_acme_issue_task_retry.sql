@@ -20,19 +20,19 @@ BEGIN
                  WHERE TABLE_SCHEMA = DATABASE()
                    AND TABLE_NAME = 'acme_issue_task'
                    AND COLUMN_NAME = 'max_attempt') THEN
-    ALTER TABLE `acme_issue_task` ADD COLUMN `max_attempt` INT NOT NULL DEFAULT 1 COMMENT '允许总次数，1=不重试';
+    ALTER TABLE `acme_issue_task` ADD COLUMN `max_attempt` INT NOT NULL DEFAULT 1 COMMENT '允许总次数';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE()
                    AND TABLE_NAME = 'acme_issue_task'
                    AND COLUMN_NAME = 'config_id') THEN
-    ALTER TABLE `acme_issue_task` ADD COLUMN `config_id` BIGINT NOT NULL DEFAULT 0 COMMENT '触发的持久化部署配置 id，>0 才参与重试';
+    ALTER TABLE `acme_issue_task` ADD COLUMN `config_id` BIGINT NOT NULL DEFAULT 0 COMMENT '部署配置 ID';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE()
                    AND TABLE_NAME = 'acme_issue_task'
                    AND COLUMN_NAME = 'next_retry_at') THEN
-    ALTER TABLE `acme_issue_task` ADD COLUMN `next_retry_at` DATETIME NULL COMMENT '下次可重试时刻';
+    ALTER TABLE `acme_issue_task` ADD COLUMN `next_retry_at` DATETIME NULL COMMENT '下次重试时刻';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS
                  WHERE TABLE_SCHEMA = DATABASE()

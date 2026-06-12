@@ -16,7 +16,7 @@ BEGIN
                      AND COLUMN_NAME = 'boot_json') THEN
       ALTER TABLE `esxi_state`
         ADD COLUMN `boot_json` TEXT NULL
-          COMMENT 'JSON：{ uptime_seconds, booted_at, crash_dump_count, last_crash_at }'
+          COMMENT '启动信息'
           AFTER `vm_json`;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
@@ -25,7 +25,7 @@ BEGIN
                      AND COLUMN_NAME = 'nic_json') THEN
       ALTER TABLE `esxi_state`
         ADD COLUMN `nic_json` TEXT NULL
-          COMMENT 'JSON：[{name, driver, mac, link_status, speed_mbps, rx_bytes, tx_bytes, rx_errors, tx_errors, ...}]'
+          COMMENT '物理网卡'
           AFTER `boot_json`;
     END IF;
   END IF;

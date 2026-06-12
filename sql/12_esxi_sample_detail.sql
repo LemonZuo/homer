@@ -10,8 +10,8 @@ BEGIN
                    AND TABLE_NAME = 'esxi_sample'
                    AND COLUMN_NAME = 'cpu_temp_json') THEN
     ALTER TABLE `esxi_sample`
-      ADD COLUMN `cpu_temp_json`  TEXT NULL COMMENT '每核温度明细 JSON：[{"id":0,"temp_c":54},...]'  AFTER `vm_powered_on`,
-      ADD COLUMN `disk_temp_json` TEXT NULL COMMENT '每盘温度明细 JSON：[{"device":"t10.XXX","temp_c":35},...]' AFTER `cpu_temp_json`;
+      ADD COLUMN `cpu_temp_json`  TEXT NULL COMMENT '每核温度明细'  AFTER `vm_powered_on`,
+      ADD COLUMN `disk_temp_json` TEXT NULL COMMENT '每盘温度明细' AFTER `cpu_temp_json`;
   END IF;
 END //
 DELIMITER ;

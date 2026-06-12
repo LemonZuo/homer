@@ -9,7 +9,7 @@ BEGIN
                    AND TABLE_NAME = 'esxi_state'
                    AND COLUMN_NAME = 'runtime_json') THEN
     ALTER TABLE `esxi_state`
-      ADD COLUMN `runtime_json` TEXT NULL COMMENT 'JSON: CPU/内存运行时使用率' AFTER `memory_json`;
+      ADD COLUMN `runtime_json` TEXT NULL COMMENT '运行时使用率' AFTER `memory_json`;
   END IF;
 END //
 DELIMITER ;

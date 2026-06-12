@@ -60,11 +60,11 @@ func (b *BoolFlag) UnmarshalJSON(data []byte) error {
 // 公历日期由用户输入，chinese_birthday / zodiac 由 birthday 模块在保存时计算。
 type BirthdayRemind struct {
 	ID              int      `gorm:"primaryKey;column:id" json:"id"`
-	Name            string   `gorm:"column:name;size:30" json:"name"`
-	Birthday        string   `gorm:"column:birthday;size:10" json:"birthday"`
-	ChineseBirthday string   `gorm:"column:chinese_birthday;size:30" json:"chinese_birthday"`
-	Zodiac          string   `gorm:"column:zodiac;size:30" json:"zodiac"`
-	IsRemind        BoolFlag `gorm:"column:enabled;type:varchar(1);default:'1'" json:"enabled"`
+	Name            string   `gorm:"column:name;size:30;comment:姓名" json:"name"`
+	Birthday        string   `gorm:"column:birthday;size:10;comment:公历生日" json:"birthday"`
+	ChineseBirthday string   `gorm:"column:chinese_birthday;size:30;comment:农历生日" json:"chinese_birthday"`
+	Zodiac          string   `gorm:"column:zodiac;size:30;comment:生肖" json:"zodiac"`
+	IsRemind        BoolFlag `gorm:"column:enabled;type:varchar(1);default:'1';comment:是否启用" json:"enabled"`
 }
 
 func (BirthdayRemind) TableName() string { return "birthday_reminder" }

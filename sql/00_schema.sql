@@ -14,12 +14,12 @@
 --   enabled           : varchar('0'/'1'); Go 侧用 BoolFlag 自动转 bool
 DROP TABLE IF EXISTS `birthday_reminder`;
 CREATE TABLE `birthday_reminder` (
-  `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '唯一标识',
+  `id`               BIGINT       NOT NULL AUTO_INCREMENT,
   `name`             VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '姓名',
-  `birthday`         VARCHAR(10)  NOT NULL DEFAULT ''     COMMENT '公历生日 yyyy-MM-dd',
-  `chinese_birthday` VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '农历生日（后端自动）',
-  `zodiac`           VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '生肖（后端自动）',
-  `enabled`          VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `birthday`         VARCHAR(10)  NOT NULL DEFAULT ''     COMMENT '公历生日',
+  `chinese_birthday` VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '农历生日',
+  `zodiac`           VARCHAR(30)  NOT NULL DEFAULT ''     COMMENT '生肖',
+  `enabled`          VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用',
   PRIMARY KEY (`id`),
   KEY `idx_chinese_birthday` (`chinese_birthday`, `enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='生日提醒';
@@ -37,25 +37,25 @@ CREATE TABLE `birthday_reminder` (
 DROP TABLE IF EXISTS `acme_account`;
 CREATE TABLE `acme_account` (
   `id`            BIGINT       NOT NULL AUTO_INCREMENT,
-  `name`          VARCHAR(64)  NOT NULL                COMMENT '账号名称，前端显示与本地目录命名使用',
-  `ca`            VARCHAR(32)  NOT NULL                COMMENT 'letsencrypt | zerossl | custom',
-  `directory_url` VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'ACME directory URL；内置 CA 自动回填',
-  `email`         VARCHAR(255) NOT NULL                COMMENT 'ACME 注册邮箱',
-  `eab_kid`       VARCHAR(255) NOT NULL DEFAULT ''     COMMENT 'External Account Binding KID，ZeroSSL 必填',
-  `eab_hmac`      VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'External Account Binding HMAC，ZeroSSL 必填',
-  `enabled`       VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `name`          VARCHAR(64)  NOT NULL                COMMENT '账号名称',
+  `ca`            VARCHAR(32)  NOT NULL                COMMENT 'CA 类型',
+  `directory_url` VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'ACME directory URL',
+  `email`         VARCHAR(255) NOT NULL                COMMENT '注册邮箱',
+  `eab_kid`       VARCHAR(255) NOT NULL DEFAULT ''     COMMENT 'EAB KID',
+  `eab_hmac`      VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'EAB HMAC',
+  `enabled`       VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用',
   `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_name` (`name`),
   KEY `idx_enabled` (`enabled`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME CA 账号配置';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME CA 账号';
 
 DROP TABLE IF EXISTS `acme_credential`;
 CREATE TABLE `acme_credential` (
   `id`         BIGINT      NOT NULL AUTO_INCREMENT,
-  `provider`   VARCHAR(64) NOT NULL                COMMENT 'lego DNS provider key',
-  `envs_json`  TEXT        NOT NULL                COMMENT 'JSON: {"LEGO_ENV_KEY":"value"}',
+  `provider`   VARCHAR(64) NOT NULL                COMMENT 'DNS provider',
+  `envs_json`  TEXT        NOT NULL                COMMENT '环境变量 JSON',
   `created_at` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -64,19 +64,19 @@ CREATE TABLE `acme_credential` (
 
 DROP TABLE IF EXISTS `acme_domain`;
 CREATE TABLE `acme_domain` (
-  `id`           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '唯一标识',
+  `id`           BIGINT       NOT NULL AUTO_INCREMENT,
   `main_domain`  VARCHAR(255) NOT NULL                COMMENT '主域名',
-  `san_domains`  VARCHAR(1024) NOT NULL DEFAULT ''    COMMENT 'SAN，逗号分隔；可空',
-  `account_id`   BIGINT       NOT NULL DEFAULT 0      COMMENT 'ACME CA 账号 ID',
-  `provider`     VARCHAR(64)  NOT NULL                COMMENT 'lego DNS provider key（alidns/cloudflare/dnspod...）',
-  `san_providers` VARCHAR(1024) NOT NULL DEFAULT ''   COMMENT '按域名指定 provider 的覆盖表 JSON {"b.com":"alidns"}；空=全用 provider',
-  `enabled`      VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用自动续期：1/0',
+  `san_domains`  VARCHAR(1024) NOT NULL DEFAULT ''    COMMENT 'SAN 域名',
+  `account_id`   BIGINT       NOT NULL DEFAULT 0      COMMENT '账号 ID',
+  `provider`     VARCHAR(64)  NOT NULL                COMMENT 'DNS provider',
+  `san_providers` VARCHAR(1024) NOT NULL DEFAULT ''   COMMENT 'SAN provider 覆盖',
+  `enabled`      VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用',
   `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_main_domain` (`main_domain`),
   KEY `idx_account_id` (`account_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 自动签发域名（同一主域名可有多张证书并存）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发域名';
 
 DROP TABLE IF EXISTS `acme_safeline_target`;
 DROP TABLE IF EXISTS `acme_safeline_deploy_config`;
@@ -87,30 +87,30 @@ DROP TABLE IF EXISTS `acme_deploy_target`;
 CREATE TABLE `acme_deploy_target` (
   `id`          BIGINT       NOT NULL AUTO_INCREMENT,
   `name`        VARCHAR(64)  NOT NULL                COMMENT '目标名称',
-  `kind`        VARCHAR(32)  NOT NULL                COMMENT 'ssh | safeline | upload_cas | ...',
-  `endpoint`    VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '目标地址；ssh 为 host:port，雷池为管理端根地址，upload_cas 留空',
-  `auth_json`   TEXT         NOT NULL                COMMENT 'driver 认证配置 JSON',
-  `config_json` TEXT         NOT NULL                COMMENT 'driver 目标配置 JSON',
-  `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `kind`        VARCHAR(32)  NOT NULL                COMMENT '目标类型',
+  `endpoint`    VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '目标地址',
+  `auth_json`   TEXT         NOT NULL                COMMENT '认证配置',
+  `config_json` TEXT         NOT NULL                COMMENT '目标配置',
+  `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用',
   `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_kind_name` (`kind`, `name`),
   KEY `idx_kind` (`kind`),
   KEY `idx_enabled` (`enabled`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 证书部署目标';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 部署目标';
 
 DROP TABLE IF EXISTS `acme_deploy_config`;
 CREATE TABLE `acme_deploy_config` (
   `id`          BIGINT      NOT NULL AUTO_INCREMENT,
-  `domain_id`   BIGINT      NOT NULL                COMMENT 'ACME 域名 ID',
-  `target_id`   BIGINT      NOT NULL                COMMENT '部署目标 ID',
-  `kind`        VARCHAR(32) NOT NULL                COMMENT 'ssh | safeline | upload_cas | ...',
-  `name`        VARCHAR(64) NOT NULL DEFAULT ''     COMMENT '部署配置名称',
-  `config_json` TEXT        NOT NULL                COMMENT 'driver 部署配置 JSON',
-  `state_json`  TEXT        NOT NULL                COMMENT 'driver 部署状态 JSON，如雷池 cert_id',
-  `auto_deploy` VARCHAR(1)  NOT NULL DEFAULT '0'    COMMENT '签发/续期成功后是否自动部署：1/0',
-  `enabled`     VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `domain_id`   BIGINT      NOT NULL                COMMENT '域名 ID',
+  `target_id`   BIGINT      NOT NULL                COMMENT '目标 ID',
+  `kind`        VARCHAR(32) NOT NULL                COMMENT '目标类型',
+  `name`        VARCHAR(64) NOT NULL DEFAULT ''     COMMENT '配置名称',
+  `config_json` TEXT        NOT NULL                COMMENT '部署配置',
+  `state_json`  TEXT        NOT NULL                COMMENT '部署状态',
+  `auto_deploy` VARCHAR(1)  NOT NULL DEFAULT '0'    COMMENT '自动部署',
+  `enabled`     VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否启用',
   `created_at`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -118,48 +118,48 @@ CREATE TABLE `acme_deploy_config` (
   KEY `idx_target_id` (`target_id`),
   KEY `idx_kind` (`kind`),
   KEY `idx_enabled_auto` (`enabled`, `auto_deploy`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 证书部署配置';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 部署配置';
 
 DROP TABLE IF EXISTS `acme_cert`;
 CREATE TABLE `acme_cert` (
   `id`             BIGINT     NOT NULL AUTO_INCREMENT,
-  `domain_id`      BIGINT     NOT NULL,
-  `cert_pem`       MEDIUMTEXT NOT NULL,
-  `key_pem`        MEDIUMTEXT NOT NULL,
-  `chain_pem`      MEDIUMTEXT NOT NULL,
-  `fullchain_pem`  MEDIUMTEXT NOT NULL,
-  `serial`         VARCHAR(128) NOT NULL DEFAULT '',
-  `not_before`     DATETIME   NULL,
-  `not_after`      DATETIME   NULL,
-  `status`         VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active | revoked',
-  `revoked_at`     DATETIME   NULL,
-  `issued_at`      DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `domain_id`      BIGINT     NOT NULL                COMMENT '域名 ID',
+  `cert_pem`       MEDIUMTEXT NOT NULL                COMMENT '证书',
+  `key_pem`        MEDIUMTEXT NOT NULL                COMMENT '私钥',
+  `chain_pem`      MEDIUMTEXT NOT NULL                COMMENT '中间证书',
+  `fullchain_pem`  MEDIUMTEXT NOT NULL                COMMENT '完整链',
+  `serial`         VARCHAR(128) NOT NULL DEFAULT ''   COMMENT '序列号',
+  `not_before`     DATETIME   NULL                    COMMENT '生效时间',
+  `not_after`      DATETIME   NULL                    COMMENT '到期时间',
+  `status`         VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT '状态',
+  `revoked_at`     DATETIME   NULL                    COMMENT '吊销时间',
+  `issued_at`      DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '签发时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_domain_id` (`domain_id`),
   KEY `idx_not_after` (`not_after`),
   KEY `idx_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发的证书';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 证书';
 
 DROP TABLE IF EXISTS `acme_issue_task`;
 CREATE TABLE `acme_issue_task` (
   `id`           BIGINT       NOT NULL AUTO_INCREMENT,
-  `domain_id`    BIGINT       NOT NULL,
-  `main_domain`  VARCHAR(255) NOT NULL DEFAULT '',
-  `kind`         VARCHAR(32)  NOT NULL COMMENT 'issue | renew | revoke | deploy_ssh | deploy_safeline | deploy_upload_cas | deploy',
-  `status`       VARCHAR(16)  NOT NULL COMMENT 'pending | running | success | failed | retrying',
-  `started_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `finished_at`  DATETIME     NULL,
-  `log_text`     MEDIUMTEXT   NOT NULL,
-  `error_msg`    VARCHAR(1024) NOT NULL DEFAULT '',
-  `attempt`      INT          NOT NULL DEFAULT 0 COMMENT '已执行次数',
-  `max_attempt`  INT          NOT NULL DEFAULT 1 COMMENT '允许总次数，1=不重试',
-  `config_id`    BIGINT       NOT NULL DEFAULT 0 COMMENT '触发的持久化部署配置 id，>0 才参与重试',
-  `next_retry_at` DATETIME    NULL COMMENT '下次可重试时刻',
+  `domain_id`    BIGINT       NOT NULL                COMMENT '域名 ID',
+  `main_domain`  VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '主域名',
+  `kind`         VARCHAR(32)  NOT NULL                COMMENT '任务类型',
+  `status`       VARCHAR(16)  NOT NULL                COMMENT '状态',
+  `started_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '开始时间',
+  `finished_at`  DATETIME     NULL                    COMMENT '结束时间',
+  `log_text`     MEDIUMTEXT   NOT NULL                COMMENT '日志',
+  `error_msg`    VARCHAR(1024) NOT NULL DEFAULT ''    COMMENT '错误信息',
+  `attempt`      INT          NOT NULL DEFAULT 0      COMMENT '已执行次数',
+  `max_attempt`  INT          NOT NULL DEFAULT 1      COMMENT '允许总次数',
+  `config_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '部署配置 ID',
+  `next_retry_at` DATETIME    NULL                    COMMENT '下次重试时刻',
   PRIMARY KEY (`id`),
   KEY `idx_domain_started` (`domain_id`, `started_at`),
   KEY `idx_status` (`status`),
   KEY `idx_retry` (`status`, `next_retry_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发/续期任务流水';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ACME 签发任务';
 
 
 -- ============================================================
@@ -173,20 +173,20 @@ CREATE TABLE `acme_issue_task` (
 DROP TABLE IF EXISTS `sms_forwarder`;
 CREATE TABLE `sms_forwarder` (
   `id`         BIGINT       NOT NULL AUTO_INCREMENT,
-  `name`       VARCHAR(64)  NOT NULL                COMMENT '转发器名称，前端下拉显示',
-  `server_url` VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '服务端地址，如 http://192.168.1.100:5000',
-  `auth_mode`  INT          NOT NULL DEFAULT 1      COMMENT '客户端安全措施：0无 1签名 2RSA 3SM4',
-  `sign_key`   VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '签名模式 HmacSHA256 密钥',
-  `rsa_public_key` TEXT     NULL                    COMMENT 'RSA 模式服务端公钥（X.509/SPKI DER 的 Base64）',
-  `sm4_key`    VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT 'SM4 模式密钥（16 字节，32 位 hex）',
-  `timeout_seconds` INT     NOT NULL DEFAULT 30     COMMENT '请求超时秒数，旧机器可适当调大',
-  `enabled`    VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `name`       VARCHAR(64)  NOT NULL                COMMENT '转发器名称',
+  `server_url` VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '服务端地址',
+  `auth_mode`  INT          NOT NULL DEFAULT 1      COMMENT '安全模式',
+  `sign_key`   VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '签名密钥',
+  `rsa_public_key` TEXT     NULL                    COMMENT 'RSA 公钥',
+  `sm4_key`    VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT 'SM4 密钥',
+  `timeout_seconds` INT     NOT NULL DEFAULT 30     COMMENT '超时秒数',
+  `enabled`    VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_name` (`name`),
   KEY `idx_enabled` (`enabled`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短信转发器服务端配置';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='短信转发器';
 
 
 -- ============================================================
@@ -198,17 +198,17 @@ CREATE TABLE `sms_forwarder` (
 DROP TABLE IF EXISTS `ssh_credential`;
 CREATE TABLE `ssh_credential` (
   `id`           BIGINT       NOT NULL AUTO_INCREMENT,
-  `name`         VARCHAR(64)  NOT NULL                COMMENT '凭证名称，前端下拉显示',
-  `username`     VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '登录用户名（与密钥/密码绑定）',
-  `auth_type`    VARCHAR(16)  NOT NULL DEFAULT 'password' COMMENT 'password | key',
-  `password`     TEXT         NULL                    COMMENT 'password 模式登录密码',
-  `private_key`  TEXT         NULL                    COMMENT 'key 模式 OpenSSH 私钥',
-  `passphrase`   TEXT         NULL                    COMMENT 'key 模式私钥口令（可选）',
+  `name`         VARCHAR(64)  NOT NULL                COMMENT '凭证名称',
+  `username`     VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '用户名',
+  `auth_type`    VARCHAR(16)  NOT NULL DEFAULT 'password' COMMENT '认证类型',
+  `password`     TEXT         NULL                    COMMENT '密码',
+  `private_key`  TEXT         NULL                    COMMENT '私钥',
+  `passphrase`   TEXT         NULL                    COMMENT '私钥口令',
   `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_name` (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SSH 登录凭证（可被多台机器复用）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SSH 登录凭证';
 
 
 -- ============================================================
@@ -221,17 +221,17 @@ CREATE TABLE `ssh_credential` (
 DROP TABLE IF EXISTS `event_reminder`;
 CREATE TABLE `event_reminder` (
   `id`                BIGINT       NOT NULL AUTO_INCREMENT,
-  `title`             VARCHAR(128) NOT NULL                COMMENT '事项标题，推送时作为正文主体',
-  `event_date`        VARCHAR(10)  NOT NULL                COMMENT '事项日期 YYYY-MM-DD',
-  `lead_days`         INT          NOT NULL DEFAULT 5      COMMENT '提前多少天起开始每天提醒',
-  `remark`            VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '备注，附加在推送末尾',
-  `enabled`           VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
-  `last_notified_at`  DATETIME     NULL                    COMMENT '最近一次推送时间，用于同一天去重',
+  `title`             VARCHAR(128) NOT NULL                COMMENT '事项标题',
+  `event_date`        VARCHAR(10)  NOT NULL                COMMENT '事项日期',
+  `lead_days`         INT          NOT NULL DEFAULT 5      COMMENT '提前天数',
+  `remark`            VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '备注',
+  `enabled`           VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用',
+  `last_notified_at`  DATETIME     NULL                    COMMENT '最近推送时间',
   `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_enabled_event_date` (`enabled`, `event_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事项提醒（一次性日期）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事项提醒';
 
 
 -- ============================================================
@@ -247,24 +247,24 @@ CREATE TABLE `event_reminder` (
 DROP TABLE IF EXISTS `notify_channel`;
 CREATE TABLE `notify_channel` (
   `id`          BIGINT      NOT NULL AUTO_INCREMENT,
-  `name`        VARCHAR(64) NOT NULL                COMMENT '通道名称，前端显示',
-  `type`        VARCHAR(16) NOT NULL                COMMENT 'wework | email | webhook',
-  `config_json` TEXT        NOT NULL                COMMENT '类型相关配置 JSON',
-  `enabled`     VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `name`        VARCHAR(64) NOT NULL                COMMENT '通道名称',
+  `type`        VARCHAR(16) NOT NULL                COMMENT '通道类型',
+  `config_json` TEXT        NOT NULL                COMMENT '通道配置',
+  `enabled`     VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否启用',
   `created_at`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_name` (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知通道（出站）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知通道';
 
 DROP TABLE IF EXISTS `notify_binding`;
 CREATE TABLE `notify_binding` (
   `id`         BIGINT      NOT NULL AUTO_INCREMENT,
-  `module`     VARCHAR(32) NOT NULL                COMMENT 'birthday | event | bypass | scheduler_alert | ups | esxi',
-  `channel_id` BIGINT      NOT NULL                COMMENT 'notify_channel.id',
+  `module`     VARCHAR(32) NOT NULL                COMMENT '模块',
+  `channel_id` BIGINT      NOT NULL                COMMENT '通道 ID',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_notify_bind` (`module`, `channel_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模块 → 通道 多对多绑定';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模块通道绑定';
 
 
 -- ============================================================
@@ -275,16 +275,16 @@ CREATE TABLE `notify_binding` (
 
 DROP TABLE IF EXISTS `scheduler_job_state`;
 CREATE TABLE `scheduler_job_state` (
-  `name`         VARCHAR(64) NOT NULL                COMMENT '任务名（唯一）',
-  `last_start`   DATETIME    NULL                    COMMENT '最近一次开始时间',
-  `last_end`     DATETIME    NULL                    COMMENT '最近一次结束时间',
-  `last_ok`      VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '最近一次是否成功：1/0',
-  `last_err`     TEXT        NULL                    COMMENT '最近一次错误信息',
-  `last_trigger` VARCHAR(16) NOT NULL DEFAULT ''     COMMENT 'cron | manual',
-  `consec_fails` INT         NOT NULL DEFAULT 0      COMMENT '连续失败次数，成功清零',
+  `name`         VARCHAR(64) NOT NULL                COMMENT '任务名',
+  `last_start`   DATETIME    NULL                    COMMENT '最近开始时间',
+  `last_end`     DATETIME    NULL                    COMMENT '最近结束时间',
+  `last_ok`      VARCHAR(1)  NOT NULL DEFAULT '1'    COMMENT '是否成功',
+  `last_err`     TEXT        NULL                    COMMENT '错误信息',
+  `last_trigger` VARCHAR(16) NOT NULL DEFAULT ''     COMMENT '触发方式',
+  `consec_fails` INT         NOT NULL DEFAULT 0      COMMENT '连续失败次数',
   `updated_at`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='调度任务最近一次执行状态';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='调度任务状态';
 
 
 -- ============================================================
@@ -303,82 +303,82 @@ CREATE TABLE `scheduler_job_state` (
 DROP TABLE IF EXISTS `ups_ssh_credential`;
 CREATE TABLE `ups_ssh_credential` (
   `id`          BIGINT       NOT NULL AUTO_INCREMENT,
-  `name`        VARCHAR(64)  NOT NULL                COMMENT '凭证名称，前端下拉显示',
-  `username`    VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '登录用户名',
-  `auth_type`   VARCHAR(16)  NOT NULL DEFAULT 'password' COMMENT 'password | key',
-  `password`    TEXT         NULL                    COMMENT 'password 模式登录密码',
-  `private_key` TEXT         NULL                    COMMENT 'key 模式 OpenSSH 私钥',
-  `passphrase`  TEXT         NULL                    COMMENT 'key 模式私钥口令（可选）',
+  `name`        VARCHAR(64)  NOT NULL                COMMENT '凭证名称',
+  `username`    VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '用户名',
+  `auth_type`   VARCHAR(16)  NOT NULL DEFAULT 'password' COMMENT '认证类型',
+  `password`    TEXT         NULL                    COMMENT '密码',
+  `private_key` TEXT         NULL                    COMMENT '私钥',
+  `passphrase`  TEXT         NULL                    COMMENT '私钥口令',
   `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_name` (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 模块专用 SSH 凭证';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS SSH 凭证';
 
 DROP TABLE IF EXISTS `ups_host`;
 CREATE TABLE `ups_host` (
   `id`          BIGINT       NOT NULL AUTO_INCREMENT,
   `name`        VARCHAR(64)  NOT NULL                COMMENT '机器名称',
-  `endpoint`    VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'host:port（NUT upsd 所在机器 SSH 入口）',
-  `auth_json`   TEXT         NOT NULL                COMMENT 'JSON: {"auth_source":"inline|credential","credential_id":N,"username":...,"auth_type":"password|key","password":...,"private_key":...,"passphrase":...}',
-  `config_json` TEXT         NOT NULL                COMMENT 'JSON: {"bastion_id":N} 或空 {}',
-  `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `endpoint`    VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'SSH 入口',
+  `auth_json`   TEXT         NOT NULL                COMMENT '认证配置',
+  `config_json` TEXT         NOT NULL                COMMENT '扩展配置',
+  `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用',
   `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_name` (`name`),
   KEY `idx_enabled` (`enabled`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 监控目标机器';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 监控机器';
 
 DROP TABLE IF EXISTS `ups_sample`;
 CREATE TABLE `ups_sample` (
   `id`              BIGINT       NOT NULL AUTO_INCREMENT,
-  `host_kind`       VARCHAR(16)  NOT NULL                COMMENT '固定 ups（保留列名，便于将来扩展）',
-  `host_id`         BIGINT       NOT NULL                COMMENT 'ups_host.id',
-  `host_name`       VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '冗余主机名，便于历史查询不依赖关联表',
-  `ups_name`        VARCHAR(64)  NOT NULL                COMMENT 'NUT upsname（同一台机器可能挂多台 UPS）',
+  `host_kind`       VARCHAR(16)  NOT NULL                COMMENT '主机类型',
+  `host_id`         BIGINT       NOT NULL                COMMENT '主机 ID',
+  `host_name`       VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '主机名',
+  `ups_name`        VARCHAR(64)  NOT NULL                COMMENT 'UPS 名称',
   `mfr`             VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '品牌',
   `model`           VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '型号',
-  `power_source`    VARCHAR(16)  NOT NULL DEFAULT 'unknown' COMMENT 'mains | battery | low_battery | unknown',
-  `battery_percent` TINYINT      NOT NULL DEFAULT -1     COMMENT '剩余电量百分比；-1 表示无数据',
-  `runtime_minutes` INT          NOT NULL DEFAULT -1     COMMENT '预估续航分钟；-1 表示无数据',
-  `battery_voltage`         DECIMAL(5,1) NOT NULL DEFAULT -1 COMMENT '当前电池端电压 V；-1 表示无数据',
-  `battery_nominal_voltage` DECIMAL(5,1) NOT NULL DEFAULT -1 COMMENT '电池组标称电压 V（12/24/48...）；-1 表示无数据',
-  `battery_type`            VARCHAR(16)  NOT NULL DEFAULT '' COMMENT '电池类型（PbAc=铅酸 / Li-ion=锂电...）；空串表示无数据',
-  `input_voltage`   DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '输入电压 V；-1 表示无数据',
-  `output_voltage`  DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '输出电压 V；-1 表示无数据',
-  `load_percent`    TINYINT      NOT NULL DEFAULT -1     COMMENT '负载百分比；-1 表示无数据',
-  `real_power`      SMALLINT     NOT NULL DEFAULT -1     COMMENT '实时功率 W（回退 ups.power）；-1 表示无数据',
-  `raw_status`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT 'NUT ups.status 原文（OL/OB/LB/CHRG ...）',
+  `power_source`    VARCHAR(16)  NOT NULL DEFAULT 'unknown' COMMENT '供电状态',
+  `battery_percent` TINYINT      NOT NULL DEFAULT -1     COMMENT '剩余电量',
+  `runtime_minutes` INT          NOT NULL DEFAULT -1     COMMENT '续航分钟',
+  `battery_voltage`         DECIMAL(5,1) NOT NULL DEFAULT -1 COMMENT '电池端电压',
+  `battery_nominal_voltage` DECIMAL(5,1) NOT NULL DEFAULT -1 COMMENT '电池标称电压',
+  `battery_type`            VARCHAR(16)  NOT NULL DEFAULT '' COMMENT '电池类型',
+  `input_voltage`   DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '输入电压',
+  `output_voltage`  DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '输出电压',
+  `load_percent`    TINYINT      NOT NULL DEFAULT -1     COMMENT '负载百分比',
+  `real_power`      SMALLINT     NOT NULL DEFAULT -1     COMMENT '实时功率',
+  `raw_status`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '原始状态',
   `sampled_at`      DATETIME(3)  NOT NULL                COMMENT '采样时刻',
   PRIMARY KEY (`id`),
   KEY `idx_host_ups_time` (`host_kind`, `host_id`, `ups_name`, `sampled_at` DESC),
   KEY `idx_sampled_at` (`sampled_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 采样时间序列';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 采样';
 
 DROP TABLE IF EXISTS `ups_state`;
 CREATE TABLE `ups_state` (
-  `host_kind`            VARCHAR(16)  NOT NULL                COMMENT '固定 ups（保留列名，便于将来扩展）',
-  `host_id`              BIGINT       NOT NULL                COMMENT 'ups_host.id',
-  `ups_name`             VARCHAR(64)  NOT NULL                COMMENT 'NUT upsname',
-  `host_name`            VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '冗余主机名',
+  `host_kind`            VARCHAR(16)  NOT NULL                COMMENT '主机类型',
+  `host_id`              BIGINT       NOT NULL                COMMENT '主机 ID',
+  `ups_name`             VARCHAR(64)  NOT NULL                COMMENT 'UPS 名称',
+  `host_name`            VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '主机名',
   `mfr`                  VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '品牌',
   `model`                VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '型号',
-  `last_power_source`    VARCHAR(16)  NOT NULL DEFAULT 'unknown' COMMENT '最近一次供电状态',
-  `last_battery_percent` TINYINT      NOT NULL DEFAULT -1     COMMENT '最近一次电量',
-  `last_runtime_minutes` INT          NOT NULL DEFAULT -1     COMMENT '最近一次续航分钟',
-  `last_battery_voltage`         DECIMAL(5,1) NOT NULL DEFAULT -1 COMMENT '最近一次电池端电压',
-  `last_battery_nominal_voltage` DECIMAL(5,1) NOT NULL DEFAULT -1 COMMENT '最近一次电池标称电压',
-  `last_battery_type`            VARCHAR(16)  NOT NULL DEFAULT '' COMMENT '最近一次电池类型',
-  `last_input_voltage`   DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '最近一次输入电压',
-  `last_output_voltage`  DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '最近一次输出电压',
-  `last_load_percent`    TINYINT      NOT NULL DEFAULT -1     COMMENT '最近一次负载百分比',
-  `last_real_power`      SMALLINT     NOT NULL DEFAULT -1     COMMENT '最近一次实时功率 W',
-  `last_raw_status`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '最近一次 ups.status 原文',
-  `last_alert_at`        DATETIME(3)  DEFAULT NULL            COMMENT '最近一次告警时刻（去抖留痕）',
-  `updated_at`           DATETIME(3)  NOT NULL                COMMENT '本行最近一次写入时刻',
+  `last_power_source`    VARCHAR(16)  NOT NULL DEFAULT 'unknown' COMMENT '最近供电状态',
+  `last_battery_percent` TINYINT      NOT NULL DEFAULT -1     COMMENT '最近电量',
+  `last_runtime_minutes` INT          NOT NULL DEFAULT -1     COMMENT '最近续航分钟',
+  `last_battery_voltage`         DECIMAL(5,1) NOT NULL DEFAULT -1 COMMENT '最近电池端电压',
+  `last_battery_nominal_voltage` DECIMAL(5,1) NOT NULL DEFAULT -1 COMMENT '最近电池标称电压',
+  `last_battery_type`            VARCHAR(16)  NOT NULL DEFAULT '' COMMENT '最近电池类型',
+  `last_input_voltage`   DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '最近输入电压',
+  `last_output_voltage`  DECIMAL(6,1) NOT NULL DEFAULT -1     COMMENT '最近输出电压',
+  `last_load_percent`    TINYINT      NOT NULL DEFAULT -1     COMMENT '最近负载百分比',
+  `last_real_power`      SMALLINT     NOT NULL DEFAULT -1     COMMENT '最近实时功率',
+  `last_raw_status`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '最近原始状态',
+  `last_alert_at`        DATETIME(3)  DEFAULT NULL            COMMENT '最近告警时刻',
+  `updated_at`           DATETIME(3)  NOT NULL                COMMENT '更新时刻',
   PRIMARY KEY (`host_kind`, `host_id`, `ups_name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 最新状态快照（每台 host × UPS 一行）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 最新状态';
 
 -- ============================================================================
 -- ESXi SSH 监控模块（与 UPS 同结构：独立凭证 + 独立 host + sample/state 双表）
@@ -393,78 +393,78 @@ CREATE TABLE `ups_state` (
 DROP TABLE IF EXISTS `esxi_ssh_credential`;
 CREATE TABLE `esxi_ssh_credential` (
   `id`          BIGINT       NOT NULL AUTO_INCREMENT,
-  `name`        VARCHAR(64)  NOT NULL                COMMENT '凭证名称，前端下拉显示',
-  `username`    VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '登录用户名',
-  `auth_type`   VARCHAR(16)  NOT NULL DEFAULT 'password' COMMENT 'password | key',
-  `password`    TEXT         NULL                    COMMENT 'password 模式登录密码',
-  `private_key` TEXT         NULL                    COMMENT 'key 模式 OpenSSH 私钥',
-  `passphrase`  TEXT         NULL                    COMMENT 'key 模式私钥口令（可选）',
+  `name`        VARCHAR(64)  NOT NULL                COMMENT '凭证名称',
+  `username`    VARCHAR(128) NOT NULL DEFAULT ''     COMMENT '用户名',
+  `auth_type`   VARCHAR(16)  NOT NULL DEFAULT 'password' COMMENT '认证类型',
+  `password`    TEXT         NULL                    COMMENT '密码',
+  `private_key` TEXT         NULL                    COMMENT '私钥',
+  `passphrase`  TEXT         NULL                    COMMENT '私钥口令',
   `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_name` (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi 模块专用 SSH 凭证';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi SSH 凭证';
 
 DROP TABLE IF EXISTS `esxi_host`;
 CREATE TABLE `esxi_host` (
   `id`          BIGINT       NOT NULL AUTO_INCREMENT,
   `name`        VARCHAR(64)  NOT NULL                COMMENT '机器名称',
-  `endpoint`    VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'host:port（ESXi SSH 入口，默认 22）',
-  `auth_json`   TEXT         NOT NULL                COMMENT 'JSON: {"auth_source":"inline|credential","credential_id":N,"username":...,"auth_type":"password|key","password":...,"private_key":...,"passphrase":...}',
-  `config_json` TEXT         NOT NULL                COMMENT 'JSON: {"bastion_id":N} 或 {}',
-  `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用：1/0',
+  `endpoint`    VARCHAR(512) NOT NULL DEFAULT ''     COMMENT 'SSH 入口',
+  `auth_json`   TEXT         NOT NULL                COMMENT '认证配置',
+  `config_json` TEXT         NOT NULL                COMMENT '扩展配置',
+  `enabled`     VARCHAR(1)   NOT NULL DEFAULT '1'    COMMENT '是否启用',
   `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_name` (`name`),
   KEY `idx_enabled` (`enabled`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi 监控目标机器';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi 监控机器';
 
 DROP TABLE IF EXISTS `esxi_sample`;
 CREATE TABLE `esxi_sample` (
   `id`                    BIGINT       NOT NULL AUTO_INCREMENT,
-  `host_kind`             VARCHAR(16)  NOT NULL                COMMENT '固定 esxi（保留列名，便于将来扩展）',
-  `host_id`               BIGINT       NOT NULL                COMMENT 'esxi_host.id',
-  `host_name`             VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '冗余主机名',
-  `cpu_max_c`             SMALLINT     NOT NULL DEFAULT -1     COMMENT 'CPU 各核最高温；-1 表示无数据',
-  `cpu_avg_c`             SMALLINT     NOT NULL DEFAULT -1     COMMENT 'CPU 平均温度；-1 表示无数据',
-  `cpu_tjmax_c`           SMALLINT     NOT NULL DEFAULT -1     COMMENT 'CPU TjMax 节流阈值',
-  `mce_state`             VARCHAR(16)  NOT NULL DEFAULT ''     COMMENT 'MCE 健康状态：Green / Yellow / Red',
-  `mce_corrected_total`   BIGINT       NOT NULL DEFAULT 0      COMMENT 'MCE 累计可纠正错误数',
-  `mce_uncorrected_total` BIGINT       NOT NULL DEFAULT 0      COMMENT 'MCE 累计不可纠正错误数',
-  `disk_max_c`            SMALLINT     NOT NULL DEFAULT -1     COMMENT '所有盘里最热的那块温度；-1 表示无数据',
-  `vm_total`              SMALLINT     NOT NULL DEFAULT -1     COMMENT 'VM 总数；-1 表示无数据',
-  `vm_powered_on`         SMALLINT     NOT NULL DEFAULT -1     COMMENT '已开机 VM 数；-1 表示无数据',
-  `cpu_temp_json`         TEXT         NULL                    COMMENT '每核温度明细 JSON：[{"id":0,"temp_c":54},...]；历史曲线"每核一条线"用',
-  `disk_temp_json`        TEXT         NULL                    COMMENT '每盘温度明细 JSON：[{"device":"t10.XXX","temp_c":35},...]；历史曲线"每盘一条线"用',
+  `host_kind`             VARCHAR(16)  NOT NULL                COMMENT '主机类型',
+  `host_id`               BIGINT       NOT NULL                COMMENT '主机 ID',
+  `host_name`             VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '主机名',
+  `cpu_max_c`             SMALLINT     NOT NULL DEFAULT -1     COMMENT 'CPU 最高温',
+  `cpu_avg_c`             SMALLINT     NOT NULL DEFAULT -1     COMMENT 'CPU 平均温度',
+  `cpu_tjmax_c`           SMALLINT     NOT NULL DEFAULT -1     COMMENT 'CPU TjMax',
+  `mce_state`             VARCHAR(16)  NOT NULL DEFAULT ''     COMMENT 'MCE 状态',
+  `mce_corrected_total`   BIGINT       NOT NULL DEFAULT 0      COMMENT 'MCE 可纠正错误',
+  `mce_uncorrected_total` BIGINT       NOT NULL DEFAULT 0      COMMENT 'MCE 不可纠正错误',
+  `disk_max_c`            SMALLINT     NOT NULL DEFAULT -1     COMMENT '磁盘最高温',
+  `vm_total`              SMALLINT     NOT NULL DEFAULT -1     COMMENT 'VM 总数',
+  `vm_powered_on`         SMALLINT     NOT NULL DEFAULT -1     COMMENT '已开机 VM 数',
+  `cpu_temp_json`         TEXT         NULL                    COMMENT '每核温度明细',
+  `disk_temp_json`        TEXT         NULL                    COMMENT '每盘温度明细',
   `sampled_at`            DATETIME(3)  NOT NULL                COMMENT '采样时刻',
   PRIMARY KEY (`id`),
   KEY `idx_host_time` (`host_kind`, `host_id`, `sampled_at` DESC),
   KEY `idx_sampled_at` (`sampled_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi 标量趋势时间序列';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi 采样';
 
 DROP TABLE IF EXISTS `esxi_state`;
 CREATE TABLE `esxi_state` (
-  `host_kind`        VARCHAR(16)  NOT NULL                COMMENT '固定 esxi',
-  `host_id`          BIGINT       NOT NULL                COMMENT 'esxi_host.id',
-  `host_name`        VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '冗余主机名',
-  `reachable`        VARCHAR(1)   NOT NULL DEFAULT '0'    COMMENT '最近一轮是否拿到数据：1/0',
-  `last_error`       VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '最近一轮失败原因（成功时清空）',
-  `platform_json`    TEXT         NULL                    COMMENT 'JSON：主机标识 + ESXi 版本',
-  `cpu_static_json`  TEXT         NULL                    COMMENT 'JSON：CPU 静态信息（brand/family/cores/freq/...）',
-  `memory_json`      TEXT         NULL                    COMMENT 'JSON：内存信息（total/reliable/numa）',
-  `runtime_json`     TEXT         NULL                    COMMENT 'JSON：CPU/内存运行时使用率',
-  `cpu_temp_json`    TEXT         NULL                    COMMENT 'JSON：{ tjmax_c, cores:[{id,temp_c,headroom_c}], max_c, avg_c }',
-  `mce_json`         TEXT         NULL                    COMMENT 'JSON：{ state, corrected_total, corrected_ewma, uncorrected_total, period_seconds }',
-  `disk_json`        TEXT         NULL                    COMMENT 'JSON：[{device, model, type, temp_c, threshold_c, status}]',
-  `usb_json`         TEXT         NULL                    COMMENT 'JSON：{ controllers, arbitrator_running, available_for_passthrough, vm_owned }',
-  `vm_json`          TEXT         NULL                    COMMENT 'JSON：[{id, name, guest_os, state}]',
-  `boot_json`        TEXT         NULL                    COMMENT 'JSON：{ uptime_seconds, booted_at, crash_dump_count, last_crash_at }',
-  `nic_json`         TEXT         NULL                    COMMENT 'JSON：[{name, driver, mac, link_status, speed_mbps, rx_bytes, tx_bytes, rx_errors, tx_errors, ...}]',
-  `topology_json`    TEXT         NULL                    COMMENT 'JSON：{ vswitches:[{name,uplinks,portgroups}], vm_nics:[{vmid,vm_name,vswitch,portgroup,mac,ip,team_uplink}] }',
-  `alert_state_json` TEXT         NULL                    COMMENT 'JSON：阈值告警连续计数与已通知状态',
-  `last_alert_at`    DATETIME(3)  DEFAULT NULL            COMMENT '最近一次告警时刻（去抖留痕）',
-  `sampled_at`       DATETIME(3)  DEFAULT NULL            COMMENT '最近一次成功采样时刻',
-  `updated_at`       DATETIME(3)  NOT NULL                COMMENT '本行最近一次写入时刻',
+  `host_kind`        VARCHAR(16)  NOT NULL                COMMENT '主机类型',
+  `host_id`          BIGINT       NOT NULL                COMMENT '主机 ID',
+  `host_name`        VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '主机名',
+  `reachable`        VARCHAR(1)   NOT NULL DEFAULT '0'    COMMENT '是否可达',
+  `last_error`       VARCHAR(512) NOT NULL DEFAULT ''     COMMENT '最近错误',
+  `platform_json`    TEXT         NULL                    COMMENT '平台信息',
+  `cpu_static_json`  TEXT         NULL                    COMMENT 'CPU 静态信息',
+  `memory_json`      TEXT         NULL                    COMMENT '内存信息',
+  `runtime_json`     TEXT         NULL                    COMMENT '运行时使用率',
+  `cpu_temp_json`    TEXT         NULL                    COMMENT 'CPU 温度',
+  `mce_json`         TEXT         NULL                    COMMENT 'MCE 信息',
+  `disk_json`        TEXT         NULL                    COMMENT '磁盘信息',
+  `usb_json`         TEXT         NULL                    COMMENT 'USB 信息',
+  `vm_json`          TEXT         NULL                    COMMENT 'VM 列表',
+  `boot_json`        TEXT         NULL                    COMMENT '启动信息',
+  `nic_json`         TEXT         NULL                    COMMENT '物理网卡',
+  `topology_json`    TEXT         NULL                    COMMENT '网络拓扑',
+  `alert_state_json` TEXT         NULL                    COMMENT '告警状态',
+  `last_alert_at`    DATETIME(3)  DEFAULT NULL            COMMENT '最近告警时刻',
+  `sampled_at`       DATETIME(3)  DEFAULT NULL            COMMENT '采样时刻',
+  `updated_at`       DATETIME(3)  NOT NULL                COMMENT '更新时刻',
   PRIMARY KEY (`host_kind`, `host_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi 最新状态快照（每台 host 一行）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi 最新状态';
