@@ -5,8 +5,6 @@ import {
   Settings2,
   Plug,
   AlertTriangle,
-  Server,
-  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -18,184 +16,11 @@ import { UpsHostsDrawer } from './ups/UpsHostsDrawer'
 import { UpsHostEditDialog } from './ups/UpsHostEditDialog'
 import { UpsCredentialsDrawer } from './ups/UpsCredentialsDrawer'
 import { UpsCredentialEditDialog } from './ups/UpsCredentialEditDialog'
-import { DEMO_BATTERY_VARIANTS } from './ups/constants'
-import { extractErr, fmtDateTime, fmtRuntime, isStaleSample, useNowTick } from './ups/format'
+import { extractErr, fmtDateTime } from './ups/format'
 import type { Snapshot, SnapshotUPS, UpsCredential, UpsHost } from './ups/types'
-import { UPSCard } from './ups/UPSCard'
-
-// 垂直电池:≤20% rose / ≤50% amber / 否则 emerald;飞牛风方形圆角 + 一条清晰白光。
-// 动效按 power_source 区分:mains 走上升扫描光(在线/充电感),battery/low_battery
-// 走整体呼吸 opacity(正在被消耗),unknown / 离线无动效。
-function HostHeader({ host }: { host: Snapshot }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Server className="h-4 w-4 text-muted-foreground" />
-      <span className="text-[14px] font-semibold tracking-tight">{host.host_name}</span>
-      <span className="text-[12px] text-muted-foreground">{host.endpoint}</span>
-      {!host.reachable && host.upses.length === 0 && (
-        <span className="ml-auto flex items-center gap-1 text-[12px] text-rose-500">
-          <AlertTriangle className="h-3.5 w-3.5" />
-          {host.error ? '采样失败' : '尚无数据'}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function HostEmptyCard({ host }: { host: Snapshot }) {
-  return (
-    <Card className="px-4 py-6 text-center text-[12px] text-muted-foreground">
-      {host.error
-        ? `采样失败:${host.error}`
-        : '尚未采集到 UPS 数据(机器未装 NUT / 未绑 UPS / 等待首次采样)'}
-    </Card>
-  )
-}
-
-function DemoSection({ onClose }: { onClose: () => void }) {
-  // 演示卡的 sampled_at 跟着 useNowTick 滴答推进:
-  //   demo-offline → now - 15min,始终展示离线样式
-  //   其余卡        → now,始终保持新鲜
-  const now = useNowTick()
-  const demoUpses = useMemo<SnapshotUPS[]>(
-    () =>
-      DEMO_BATTERY_VARIANTS.map((u) => ({
-        ...u,
-        sampled_at: new Date(u.name === 'demo-offline' ? now - 15 * 60 * 1000 : now).toISOString(),
-      })),
-    [now],
-  )
-  const demoSnapshots: Snapshot[] = [
-    {
-      host_kind: 'demo',
-      host_id: -1,
-      host_name: '演示机器',
-      endpoint: 'demo:0',
-      reachable: true,
-      upses: demoUpses,
-    },
-  ]
-  return (
-    <div className="mt-10 rounded-2xl border border-dashed border-muted-foreground/30 bg-muted/20 p-4 sm:p-5">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[14px] font-semibold">样式演示</div>
-          <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-            非真实数据,仅展示聚合总览卡、不同电量 / 电源 / 充电状态、以及超过 10 分钟未上报的离线样式。
-          </div>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <X className="mr-1 h-3.5 w-3.5" />
-          退出演示
-        </Button>
-      </div>
-      <SummaryCard snapshots={demoSnapshots} />
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {demoUpses.map((u) => (
-          <UPSCard key={u.name} ups={u} hostKind="demo" hostID={-1} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function SummaryCard({ snapshots }: { snapshots: Snapshot[] }) {
-  const now = useNowTick()
-  const agg = useMemo(() => {
-    let mainsCount = 0
-    let batteryCount = 0
-    let lowCount = 0
-    let offlineCount = 0
-    let totalPower = 0
-    let maxLoad = -1
-    let minRuntime = -1
-    for (const s of snapshots) {
-      for (const u of s.upses) {
-        if (isStaleSample(u.sampled_at, now)) {
-          offlineCount++
-          continue
-        }
-        if (u.power_source === 'mains') mainsCount++
-        else if (u.power_source === 'battery') batteryCount++
-        else if (u.power_source === 'low_battery') lowCount++
-        if (u.real_power > 0) totalPower += u.real_power
-        if (u.load_percent >= 0 && u.load_percent > maxLoad) maxLoad = u.load_percent
-        if (u.runtime_minutes > 0 && (minRuntime < 0 || u.runtime_minutes < minRuntime)) {
-          minRuntime = u.runtime_minutes
-        }
-      }
-    }
-    return { mainsCount, batteryCount, lowCount, offlineCount, totalPower, maxLoad, minRuntime }
-  }, [snapshots, now])
-
-  const alerts = agg.batteryCount + agg.lowCount
-
-  return (
-    <Card className="mb-6 grid grid-cols-2 gap-x-4 gap-y-4 px-4 py-4 sm:grid-cols-4 sm:gap-x-6 sm:px-6 sm:py-5">
-      <div>
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">状态</div>
-        <div className="mt-1.5 flex items-baseline gap-1.5">
-          <span
-            className={cn(
-              'text-[22px] font-semibold leading-none tabular-nums',
-              alerts > 0 ? 'text-foreground' : 'text-teal-600 dark:text-teal-400',
-            )}
-          >
-            {agg.mainsCount}
-          </span>
-          <span className="text-[12px] text-muted-foreground">正常</span>
-          {alerts > 0 && (
-            <>
-              <span className="text-[12px] text-muted-foreground/60">/</span>
-              <span
-                className={cn(
-                  'text-[18px] font-semibold leading-none tabular-nums',
-                  agg.lowCount > 0 ? 'text-rose-500' : 'text-amber-500',
-                )}
-              >
-                {alerts}
-              </span>
-              <span className="text-[12px] text-muted-foreground">告警</span>
-            </>
-          )}
-          {agg.offlineCount > 0 && (
-            <>
-              <span className="text-[12px] text-muted-foreground/60">/</span>
-              <span className="text-[18px] font-semibold leading-none tabular-nums text-muted-foreground">
-                {agg.offlineCount}
-              </span>
-              <span className="text-[12px] text-muted-foreground">离线</span>
-            </>
-          )}
-        </div>
-      </div>
-      <div>
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">总实时功率</div>
-        <div className="mt-1.5 flex items-baseline gap-1">
-          <span className="text-[22px] font-semibold leading-none tabular-nums">
-            {agg.totalPower > 0 ? agg.totalPower.toFixed(0) : '—'}
-          </span>
-          {agg.totalPower > 0 && <span className="text-[12px] text-muted-foreground">W</span>}
-        </div>
-      </div>
-      <div>
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">最大负载</div>
-        <div className="mt-1.5 flex items-baseline gap-1">
-          <span className="text-[22px] font-semibold leading-none tabular-nums">
-            {agg.maxLoad >= 0 ? agg.maxLoad.toFixed(0) : '—'}
-          </span>
-          {agg.maxLoad >= 0 && <span className="text-[12px] text-muted-foreground">%</span>}
-        </div>
-      </div>
-      <div>
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">最短续航</div>
-        <div className="mt-1.5 text-[22px] font-semibold leading-none tabular-nums">
-          {agg.minRuntime > 0 ? fmtRuntime(agg.minRuntime) : '—'}
-        </div>
-      </div>
-    </Card>
-  )
-}
+import { DemoSection } from './ups/DemoSection'
+import { HostSection } from './ups/HostSection'
+import { SummaryCard } from './ups/SummaryCard'
 
 export default function Ups() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
@@ -479,25 +304,9 @@ export default function Ups() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-x-6 gap-y-6 lg:grid-cols-2">
-          {snapshots.flatMap((s) =>
-            s.upses.length === 0
-              ? [
-                  <div key={`${s.host_kind}-${s.host_id}-empty`} className="space-y-3">
-                    <HostHeader host={s} />
-                    <HostEmptyCard host={s} />
-                  </div>,
-                ]
-              : s.upses.map((u) => (
-                  <div key={`${s.host_kind}-${s.host_id}-${u.name}`} className="space-y-3">
-                    <HostHeader host={s} />
-                    <UPSCard
-                      ups={u}
-                      hostKind={s.host_kind}
-                      hostID={s.host_id}
-                    />
-                  </div>
-                )),
-          )}
+          {snapshots.map((s) => (
+            <HostSection key={`${s.host_kind}-${s.host_id}`} host={s} />
+          ))}
         </div>
       )}
 
