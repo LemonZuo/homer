@@ -13,7 +13,7 @@ export function buildCoreLines(series: SeriesPoint[], ts: number[]): LineSeries[
   const ids = [...idSet].sort((a, b) => a - b)
   return ids.map((id, idx) => ({
     id: `core-${id}`,
-    label: `核 ${id}`,
+    label: `CPU ${id}`,
     color: LINE_COLORS[idx % LINE_COLORS.length],
     points: series.map((p, i) => {
       const c = (p.cpu_cores ?? []).find((x) => x.id === id)

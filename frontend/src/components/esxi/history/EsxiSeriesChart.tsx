@@ -87,6 +87,8 @@ export function EsxiSeriesChart({
       unit = 'GiB'
       stroke = 'rgb(20 184 166)'
       yMin = 0
+      yMax = series.reduce((max, p) => Math.max(max, p.memory_total_bytes ?? 0), 0) / 1024 ** 3
+      if (yMax <= 0) yMax = undefined
       format = (v) => (v >= 100 ? v.toFixed(0) : v.toFixed(1))
       break
     case 'vm_on':

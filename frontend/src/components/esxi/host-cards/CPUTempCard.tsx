@@ -29,7 +29,7 @@ export function CPUTempCard({ t }: { t: CPUTemperature }) {
             const pct = Math.max(0, Math.min(100, (c.temp_c / tjmax) * 100))
             return (
               <div key={c.id} className="flex items-center gap-2">
-                <span className="w-12 shrink-0 text-[11px] tabular-nums text-muted-foreground">核 {c.id}</span>
+                <span className="w-12 shrink-0 text-[11px] tabular-nums text-muted-foreground">CPU {c.id}</span>
                 <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
                   <div
                     className={cn('absolute inset-y-0 left-0 rounded-full transition-all', tone.bar)}
