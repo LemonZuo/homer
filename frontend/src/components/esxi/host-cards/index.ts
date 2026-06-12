@@ -1,0 +1,8 @@
+export { CPUStaticCard } from './CPUStaticCard'
+export { CPUTempCard } from './CPUTempCard'
+export { DisksCard } from './DisksCard'
+export { MCECard } from './MCECard'
+export { NICsCard } from './NICsCard'
+export { PlatformCard } from './PlatformCard'
+export { USBCard } from './USBCard'
+export { VMsCard } from './VMsCard'
