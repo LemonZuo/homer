@@ -23,13 +23,14 @@ import (
 
 // PlatformInfo 主机标识 + ESXi 版本(启动时一次就够,但我们每轮都顺手刷一次)。
 type PlatformInfo struct {
-	Vendor        string `json:"vendor"`
-	Product       string `json:"product"`
-	Serial        string `json:"serial"`
-	UUID          string `json:"uuid"`
-	IPMISupported bool   `json:"ipmi_supported"`
-	ESXiVersion   string `json:"esxi_version"`
-	ESXiBuild     int64  `json:"esxi_build"`
+	Vendor                  string    `json:"vendor"`
+	Product                 string    `json:"product"`
+	Serial                  string    `json:"serial"`
+	UUID                    string    `json:"uuid"`
+	IPMISupported           bool      `json:"ipmi_supported"`
+	ESXiVersion             string    `json:"esxi_version"`
+	ESXiBuild               int64     `json:"esxi_build"`
+	StaticLastFullSuccessAt time.Time `json:"static_last_full_success_at,omitzero"`
 }
 
 // CPUStatic 静态 CPU 信息。
@@ -102,14 +103,15 @@ type DiskHealth struct {
 
 	// SMART 属性。统一规则:优先取 Raw 列,Raw=N/A 时回退 Value 列(NVMe 都走 Value)。
 	// 未拿到/不适用统一兜底:string→"",int64→-1,int→-1。
-	HealthStatus              string `json:"smart_health"`                 // OK / 厂商私有
-	PowerOnHours              int64  `json:"smart_power_on_hours"`         // 通电小时
-	PowerCycleCount           int64  `json:"smart_power_cycle_count"`      // 开机次数
-	ReallocatedSectors        int64  `json:"smart_reallocated_sectors"`    // 重映射扇区数
-	UncorrectableErrors       int64  `json:"smart_uncorrectable_errors"`   // SSD/HDD 二选一名,合并入此字段
-	MediaWearoutValue         int    `json:"smart_media_wearout"`          // SSD 独有,normalized 100=新,0=磨损完
-	ReadErrorCount            int64  `json:"smart_read_error_count"`       // HDD 独有
-	PendingSectorReallocation int64  `json:"smart_pending_sector_realloc"` // HDD 独有
+	HealthStatus              string    `json:"smart_health"`                 // OK / 厂商私有
+	PowerOnHours              int64     `json:"smart_power_on_hours"`         // 通电小时
+	PowerCycleCount           int64     `json:"smart_power_cycle_count"`      // 开机次数
+	ReallocatedSectors        int64     `json:"smart_reallocated_sectors"`    // 重映射扇区数
+	UncorrectableErrors       int64     `json:"smart_uncorrectable_errors"`   // SSD/HDD 二选一名,合并入此字段
+	MediaWearoutValue         int       `json:"smart_media_wearout"`          // SSD 独有,normalized 100=新,0=磨损完
+	ReadErrorCount            int64     `json:"smart_read_error_count"`       // HDD 独有
+	PendingSectorReallocation int64     `json:"smart_pending_sector_realloc"` // HDD 独有
+	SMARTLastFullSuccessAt    time.Time `json:"smart_last_full_success_at,omitzero"`
 }
 
 // USBController USB 控制器(实测 TS80X 只有一个 xHCI)。
@@ -141,22 +143,25 @@ type USBVMOwned struct {
 
 // USBState USB 完整状态。
 type USBState struct {
-	Controllers             []USBController        `json:"controllers"`
-	ArbitratorRunning       bool                   `json:"arbitrator_running"`
-	AvailableForPassthrough []USBPassthroughDevice `json:"available_for_passthrough"`
-	VMOwned                 []USBVMOwned           `json:"vm_owned"`
+	Controllers              []USBController        `json:"controllers"`
+	ArbitratorRunning        bool                   `json:"arbitrator_running"`
+	AvailableForPassthrough  []USBPassthroughDevice `json:"available_for_passthrough"`
+	VMOwned                  []USBVMOwned           `json:"vm_owned"`
+	VMOwnedLastFullSuccessAt time.Time              `json:"vm_owned_last_full_success_at,omitzero"`
 
 	controllersKnown bool
 	arbitratorKnown  bool
 	passthroughKnown bool
+	vmOwnedKnown     bool
 }
 
 // VM 单台虚拟机。
 type VM struct {
-	ID      int    `json:"id"`
-	Name    string `json:"name"`
-	GuestOS string `json:"guest_os"`
-	State   string `json:"state"` // powered_on / powered_off / suspended / unknown
+	ID                          int       `json:"id"`
+	Name                        string    `json:"name"`
+	GuestOS                     string    `json:"guest_os"`
+	State                       string    `json:"state"` // powered_on / powered_off / suspended / unknown
+	PowerStateLastFullSuccessAt time.Time `json:"power_state_last_full_success_at,omitzero"`
 }
 
 // HostBoot 主机启动信息。
@@ -183,12 +188,13 @@ type NIC struct {
 	SpeedMbps   int    `json:"speed_mbps"`
 	Duplex      string `json:"duplex"` // Full / Half / ""
 
-	RxBytes   int64 `json:"rx_bytes"`
-	TxBytes   int64 `json:"tx_bytes"`
-	RxErrors  int64 `json:"rx_errors"`
-	TxErrors  int64 `json:"tx_errors"`
-	RxDropped int64 `json:"rx_dropped"`
-	TxDropped int64 `json:"tx_dropped"`
+	RxBytes                int64     `json:"rx_bytes"`
+	TxBytes                int64     `json:"tx_bytes"`
+	RxErrors               int64     `json:"rx_errors"`
+	TxErrors               int64     `json:"tx_errors"`
+	RxDropped              int64     `json:"rx_dropped"`
+	TxDropped              int64     `json:"tx_dropped"`
+	StatsLastFullSuccessAt time.Time `json:"stats_last_full_success_at,omitzero"`
 }
 
 // VSwitchInfo 标准 vSwitch 一条。
@@ -283,6 +289,18 @@ const esxiPathPrefix = "export PATH=/bin:/sbin:/usr/lib/vmware/bin:/usr/lib/vmwa
 type CollectOptions struct {
 	SkipTopology     bool
 	PreviousTopology NetTopology
+	SkipStatic       bool
+	PreviousPlatform PlatformInfo
+	PreviousCPU      CPUStatic
+	PreviousMemory   MemoryInfo
+	SkipVMPower      bool
+	PreviousVMs      []VM
+	SkipUSBVMOwned   bool
+	PreviousUSB      USBState
+	SkipDiskSMART    bool
+	PreviousDisks    []DiskHealth
+	SkipNICStats     bool
+	PreviousNICs     []NIC
 }
 
 // CollectAll 在 client 上跑所有 ESXi 数据采集命令并解析。
@@ -300,75 +318,93 @@ func CollectAllWithOptions(client *ssh.Client, opts CollectOptions) HostMetrics 
 		Boot:    newHostBoot(),
 	}
 
-	if out, err := runEsxiRetry(client, "platform", "esxcli hardware platform get", defaultCmdTimeout, 2, func(out string) bool {
-		p := parsePlatform(out)
-		return p.Vendor != "" || p.Product != "" || p.UUID != ""
-	}); err == nil {
-		snap.Platform = parsePlatform(out)
+	if opts.SkipStatic {
+		snap.Platform = opts.PreviousPlatform
+		snap.CPU = opts.PreviousCPU
+		snap.Memory = opts.PreviousMemory
 	} else {
-		logx.Warn("esxi platform fetch failed", "err", err.Error())
-	}
-	if out, err := runEsxiRetry(client, "version", "vmware -v; esxcli system version get", defaultCmdTimeout, 2, func(out string) bool {
-		return versionRe.MatchString(out)
-	}); err == nil {
-		parseVersionInto(&snap.Platform, out)
-	} else {
-		logx.Warn("esxi version fetch failed", "err", err.Error())
-	}
-	if out, err := runEsxiRetry(client, "cpu list", "esxcli hardware cpu list", defaultCmdTimeout, 2, func(out string) bool {
-		c := parseCPUStatic(out)
-		return c.Brand != "" || c.Family > 0 || c.ModelID > 0
-	}); err == nil {
-		snap.CPU = parseCPUStatic(out)
-	} else {
-		logx.Warn("esxi cpu list failed", "err", err.Error())
-	}
-	// 补核心数(cpu list 没这字段)。
-	if out, err := runEsxiRetry(client, "cpu global", "esxcli hardware cpu global get", defaultCmdTimeout, 2, func(out string) bool {
-		kv := parseKV(out)
-		return parseIntDefault(kv["cpu_cores"], 0) > 0
-	}); err == nil {
-		fillCoresFromGlobal(&snap.CPU, out)
-	} else {
-		logx.Warn("esxi cpu global failed", "err", err.Error())
-	}
-	// smbiosDump 给真实 CPU 型号/当前频率/核心数,覆盖 esxcli 的 vendor 名。
-	// 远端 awk 裁出 Type 4 块(约 30 行) —— smbiosDump 全量约 700 行/35 KiB,
-	// 没必要全拉回来,且大输出在 SSH 窗口流控下偶发拖慢。
-	smbiosCmd := `smbiosDump 2>/dev/null | awk '/Processor Info \(Type 4\)/{p=NR+30} NR<=p'`
-	if out, err := runEsxiRetry(client, "smbios cpu", smbiosCmd, 12*time.Second, 2, func(out string) bool {
-		return strings.Contains(out, "Processor Info") && strings.Contains(out, "Type 4")
-	}); err == nil {
-		logx.Debug("esxi smbios slice", "bytes", len(out))
-		fillFromSmbios(&snap.CPU, out)
-	} else {
-		logx.Warn("esxi smbios fetch failed", "err", err.Error())
-	}
-	if out, err := runEsxiRetry(client, "cpu tjmax", "vsish -e get /hardware/msr/pcpu/0/addr/0x1A2", defaultCmdTimeout, 2, func(out string) bool {
-		return decodeTjMax(out) > 0
-	}); err == nil {
-		if tj := decodeTjMax(out); tj > 0 {
-			snap.CPU.TjMaxC = tj
+		staticOK := true
+		if out, err := runEsxiRetry(client, "platform", "esxcli hardware platform get", defaultCmdTimeout, 2, func(out string) bool {
+			p := parsePlatform(out)
+			return p.Vendor != "" || p.Product != "" || p.UUID != ""
+		}); err == nil {
+			snap.Platform = parsePlatform(out)
+		} else {
+			staticOK = false
+			logx.Warn("esxi platform fetch failed", "err", err.Error())
 		}
-	} else {
-		logx.Warn("esxi cpu tjmax failed", "err", err.Error())
-	}
-	if out, err := runEsxiRetry(client, "memory", "esxcli hardware memory get", defaultCmdTimeout, 2, func(out string) bool {
-		return parseMemory(out).TotalBytes > 0
-	}); err == nil {
-		snap.Memory = parseMemory(out)
-	} else {
-		logx.Warn("esxi memory fetch failed", "err", err.Error())
-	}
-	// vsish 拿可用内存(esxcli 没这字段);同时兜底总内存。
-	if out, err := runEsxiRetry(client, "memory comprehensive", "vsish -e cat /memory/comprehensive", defaultCmdTimeout, 2, func(out string) bool {
-		var m MemoryInfo
-		fillMemoryFromVsish(&m, out)
-		return m.TotalBytes > 0 || m.FreeBytes > 0
-	}); err == nil {
-		fillMemoryFromVsish(&snap.Memory, out)
-	} else {
-		logx.Warn("esxi memory comprehensive failed", "err", err.Error())
+		if out, err := runEsxiRetry(client, "version", "vmware -v; esxcli system version get", defaultCmdTimeout, 2, func(out string) bool {
+			return versionRe.MatchString(out)
+		}); err == nil {
+			parseVersionInto(&snap.Platform, out)
+		} else {
+			staticOK = false
+			logx.Warn("esxi version fetch failed", "err", err.Error())
+		}
+		if out, err := runEsxiRetry(client, "cpu list", "esxcli hardware cpu list", defaultCmdTimeout, 2, func(out string) bool {
+			c := parseCPUStatic(out)
+			return c.Brand != "" || c.Family > 0 || c.ModelID > 0
+		}); err == nil {
+			snap.CPU = parseCPUStatic(out)
+		} else {
+			staticOK = false
+			logx.Warn("esxi cpu list failed", "err", err.Error())
+		}
+		// 补核心数(cpu list 没这字段)。
+		if out, err := runEsxiRetry(client, "cpu global", "esxcli hardware cpu global get", defaultCmdTimeout, 2, func(out string) bool {
+			kv := parseKV(out)
+			return parseIntDefault(kv["cpu_cores"], 0) > 0
+		}); err == nil {
+			fillCoresFromGlobal(&snap.CPU, out)
+		} else {
+			staticOK = false
+			logx.Warn("esxi cpu global failed", "err", err.Error())
+		}
+		// smbiosDump 给真实 CPU 型号/当前频率/核心数,覆盖 esxcli 的 vendor 名。
+		// 远端 awk 裁出 Type 4 块(约 30 行) —— smbiosDump 全量约 700 行/35 KiB,
+		// 没必要全拉回来,且大输出在 SSH 窗口流控下偶发拖慢。
+		smbiosCmd := `smbiosDump 2>/dev/null | awk '/Processor Info \(Type 4\)/{p=NR+30} NR<=p'`
+		if out, err := runEsxiRetry(client, "smbios cpu", smbiosCmd, 12*time.Second, 2, func(out string) bool {
+			return strings.Contains(out, "Processor Info") && strings.Contains(out, "Type 4")
+		}); err == nil {
+			logx.Debug("esxi smbios slice", "bytes", len(out))
+			fillFromSmbios(&snap.CPU, out)
+		} else {
+			staticOK = false
+			logx.Warn("esxi smbios fetch failed", "err", err.Error())
+		}
+		if out, err := runEsxiRetry(client, "cpu tjmax", "vsish -e get /hardware/msr/pcpu/0/addr/0x1A2", defaultCmdTimeout, 2, func(out string) bool {
+			return decodeTjMax(out) > 0
+		}); err == nil {
+			if tj := decodeTjMax(out); tj > 0 {
+				snap.CPU.TjMaxC = tj
+			}
+		} else {
+			staticOK = false
+			logx.Warn("esxi cpu tjmax failed", "err", err.Error())
+		}
+		if out, err := runEsxiRetry(client, "memory", "esxcli hardware memory get", defaultCmdTimeout, 2, func(out string) bool {
+			return parseMemory(out).TotalBytes > 0
+		}); err == nil {
+			snap.Memory = parseMemory(out)
+		} else {
+			staticOK = false
+			logx.Warn("esxi memory fetch failed", "err", err.Error())
+		}
+		// vsish 拿可用内存(esxcli 没这字段);同时兜底总内存。
+		if out, err := runEsxiRetry(client, "memory comprehensive", "vsish -e cat /memory/comprehensive", defaultCmdTimeout, 2, func(out string) bool {
+			var m MemoryInfo
+			fillMemoryFromVsish(&m, out)
+			return m.TotalBytes > 0 || m.FreeBytes > 0
+		}); err == nil {
+			fillMemoryFromVsish(&snap.Memory, out)
+		} else {
+			staticOK = false
+			logx.Warn("esxi memory comprehensive failed", "err", err.Error())
+		}
+		if staticOK && platformUsable(snap.Platform) && cpuStaticUsable(snap.CPU) && memoryUsable(snap.Memory) {
+			snap.Platform.StaticLastFullSuccessAt = time.Now()
+		}
 	}
 	if out, err := runEsxiRetry(client, "host summary runtime", "vim-cmd hostsvc/hostsummary", 12*time.Second, 2, func(out string) bool {
 		u := parseRuntimeUsage(out, snap.CPU, snap.Memory)
@@ -392,7 +428,7 @@ func CollectAllWithOptions(client *ssh.Client, opts CollectOptions) HostMetrics 
 	}
 
 	// 磁盘 SMART(逐盘遍历)。
-	snap.Disks = collectDisks(client)
+	snap.Disks = collectDisks(client, opts)
 
 	// vim-cmd vmsvc/getallvms 跑一次,USB owned 和 VM 列表共用,
 	// 省一次 session 也避免两边对 VM 列表看法不一致。
@@ -411,16 +447,16 @@ func CollectAllWithOptions(client *ssh.Client, opts CollectOptions) HostMetrics 
 	}
 
 	// USB:控制器 + arbitrator + 可直通 + VM 持有。
-	snap.USB = collectUSB(client, vmsShallow)
+	snap.USB = collectUSB(client, vmsShallow, opts)
 
 	// VM 列表 + 电源态。
-	snap.VMs = collectVMs(client, vmsShallow, guestOS)
+	snap.VMs = collectVMs(client, vmsShallow, guestOS, opts)
 
 	// 主机启动信息(uptime / boot epoch / crash dump)。
 	snap.Boot = collectHostBoot(client)
 
 	// 网卡列表 + 收发计数。
-	snap.NICs = collectNICs(client)
+	snap.NICs = collectNICs(client, opts)
 
 	// 网络拓扑(vSwitch / Portgroup / VM vNIC 边)。
 	// 传入开机 VM 名单做交叉验证:`esxcli network vm list` 偶发输出截断时,
@@ -951,7 +987,7 @@ type diskUsage struct {
 	Datastores []string
 }
 
-func collectDisks(client *ssh.Client) []DiskHealth {
+func collectDisks(client *ssh.Client, opts CollectOptions) []DiskHealth {
 	// list 命令本身在多盘机器上偶发 5-10s(要走 SCSI inquiry),给 15s 留余量。
 	listOut, err := runEsxiRetry(client, "disk device list", "esxcli storage core device list", 15*time.Second, 2, func(out string) bool {
 		return len(deviceIDRe.FindAllString(out, -1)) > 0
@@ -992,38 +1028,48 @@ func collectDisks(client *ssh.Client) []DiskHealth {
 		return nil
 	}
 
-	// 把所有盘的 SMART 合并到一次 SSH session,用 `===DEV===<id>` 行做分段标志。
-	// 远端逐盘跑 esxcli smart get,stderr 已被外层 runEsxi 重定向丢掉。
-	// SMART 单盘 1~2s,N 盘合批后总耗时随盘数线性增长(8 盘可能 12-15s),
-	// 这里给到 25s 上限,远高于默认 8s 单命令超时,避免被截断成空结果。
-	var b strings.Builder
-	for _, id := range ids {
-		b.WriteString(`printf '===DEV===%s\n' `)
-		b.WriteString(sshx.ShellQuote(id))
-		b.WriteString("; esxcli storage core device smart get -d ")
-		b.WriteString(sshx.ShellQuote(id))
-		b.WriteString("; ")
-	}
-	smartAll, err := runEsxiRetry(client, "disk smart batch", b.String(), 30*time.Second, 2, func(out string) bool {
-		return strings.Count(out, "===DEV===") >= len(ids)
-	})
-	if err != nil {
-		// 即便 ssh.Run 返回非零(NVMe 等盘的 smart get 偶尔以 status 2 退出),
-		// stdout 里大概率已经吐出了大半 `===DEV===` 段,优先按 stdout 是否含分段判定。
-		if !strings.Contains(smartAll, "===DEV===") {
-			logx.Warn("esxi collectDisks: smart batch failed", "err", err.Error(), "n_dev", len(ids))
-			return nil
+	prevByDevice := diskHealthByDevice(opts.PreviousDisks)
+	smartByID := map[string]string{}
+	ataAttrsByID := map[string]ataSMARTAttrs{}
+	smartFull := false
+	if opts.SkipDiskSMART {
+		logx.Debug("esxi disk smart collection skipped")
+	} else {
+		// 把所有盘的 SMART 合并到一次 SSH session,用 `===DEV===<id>` 行做分段标志。
+		// 远端逐盘跑 esxcli smart get,stderr 已被外层 runEsxi 重定向丢掉。
+		// SMART 单盘 1~2s,N 盘合批后总耗时随盘数线性增长(8 盘可能 12-15s),
+		// 这里给到 25s 上限,远高于默认 8s 单命令超时,避免被截断成空结果。
+		var b strings.Builder
+		for _, id := range ids {
+			b.WriteString(`printf '===DEV===%s\n' `)
+			b.WriteString(sshx.ShellQuote(id))
+			b.WriteString("; esxcli storage core device smart get -d ")
+			b.WriteString(sshx.ShellQuote(id))
+			b.WriteString("; ")
 		}
-		logx.Warn("esxi collectDisks: smart batch partial", "err", err.Error(), "n_dev", len(ids), "bytes", len(smartAll))
+		smartAll, err := runEsxiRetry(client, "disk smart batch", b.String(), 30*time.Second, 2, func(out string) bool {
+			return strings.Count(out, "===DEV===") >= len(ids)
+		})
+		if err != nil {
+			// 即便 ssh.Run 返回非零(NVMe 等盘的 smart get 偶尔以 status 2 退出),
+			// stdout 里大概率已经吐出了大半 `===DEV===` 段,优先按 stdout 是否含分段判定。
+			if !strings.Contains(smartAll, "===DEV===") {
+				logx.Warn("esxi collectDisks: smart batch failed", "err", err.Error(), "n_dev", len(ids))
+			} else {
+				logx.Warn("esxi collectDisks: smart batch partial", "err", err.Error(), "n_dev", len(ids), "bytes", len(smartAll))
+			}
+		}
+		smartByID = splitSMARTOutput(smartAll)
+		retryMissingSMART(client, ids, smartByID)
+		smartFull = diskSMARTComplete(ids, smartByID)
+		// ATA 盘走 vsish 拿真实 6-byte raw,修正 esxcli 截断到 1 字节的 attribute 9/12 等。
+		// NVMe 不支持 vsish smart 路径,这里直接跳过(返回 map 不包含 NVMe 盘)。
+		ataAttrsByID = collectATASmartBuffers(client, ids)
+		logx.Debug("esxi collectDisks", "n_dev", len(ids), "smart_bytes", len(smartAll), "smart_segments", len(smartByID), "ata_vsish", len(ataAttrsByID), "smart_full", smartFull)
 	}
-	smartByID := splitSMARTOutput(smartAll)
-	retryMissingSMART(client, ids, smartByID)
-	// ATA 盘走 vsish 拿真实 6-byte raw,修正 esxcli 截断到 1 字节的 attribute 9/12 等。
-	// NVMe 不支持 vsish smart 路径,这里直接跳过(返回 map 不包含 NVMe 盘)。
-	ataAttrsByID := collectATASmartBuffers(client, ids)
-	logx.Debug("esxi collectDisks", "n_dev", len(ids), "smart_bytes", len(smartAll), "smart_segments", len(smartByID), "ata_vsish", len(ataAttrsByID))
 
 	var out []DiskHealth
+	now := time.Now()
 	for _, id := range ids {
 		smart := smartByID[id]
 		attrs := parseSMARTAttrs(smart)
@@ -1053,7 +1099,7 @@ func collectDisks(client *ssh.Client) []DiskHealth {
 			usedBytes = usage.UsedBytes
 			freeBytes = usage.FreeBytes
 		}
-		out = append(out, DiskHealth{
+		d := DiskHealth{
 			Device:                    id,
 			Model:                     info.Model,
 			Type:                      info.Type,
@@ -1072,9 +1118,77 @@ func collectDisks(client *ssh.Client) []DiskHealth {
 			MediaWearoutValue:         attrs.MediaWearoutValue,
 			ReadErrorCount:            attrs.ReadErrorCount,
 			PendingSectorReallocation: attrs.PendingSectorReallocation,
-		})
+		}
+		if smartFull {
+			d.SMARTLastFullSuccessAt = now
+		}
+		if prev, ok := prevByDevice[id]; ok {
+			fillMissingDiskSMARTFromPrev(&d, prev)
+			if !smartFull {
+				d.SMARTLastFullSuccessAt = prev.SMARTLastFullSuccessAt
+			}
+		}
+		out = append(out, d)
 	}
 	return out
+}
+
+func diskHealthByDevice(disks []DiskHealth) map[string]DiskHealth {
+	m := make(map[string]DiskHealth, len(disks))
+	for _, d := range disks {
+		if d.Device != "" {
+			m[d.Device] = d
+		}
+	}
+	return m
+}
+
+func diskSMARTComplete(ids []string, smartByID map[string]string) bool {
+	if len(ids) == 0 {
+		return false
+	}
+	for _, id := range ids {
+		if parseSMARTAttrs(smartByID[id]).TempC < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func fillMissingDiskSMARTFromPrev(d *DiskHealth, prev DiskHealth) {
+	if d.TempC < 0 {
+		d.TempC = prev.TempC
+	}
+	if d.ThresholdC < 0 {
+		d.ThresholdC = prev.ThresholdC
+	}
+	if d.Status == "" || d.Status == "unknown" {
+		d.Status = prev.Status
+	}
+	if d.HealthStatus == "" {
+		d.HealthStatus = prev.HealthStatus
+	}
+	if d.PowerOnHours < 0 {
+		d.PowerOnHours = prev.PowerOnHours
+	}
+	if d.PowerCycleCount < 0 {
+		d.PowerCycleCount = prev.PowerCycleCount
+	}
+	if d.ReallocatedSectors < 0 {
+		d.ReallocatedSectors = prev.ReallocatedSectors
+	}
+	if d.UncorrectableErrors < 0 {
+		d.UncorrectableErrors = prev.UncorrectableErrors
+	}
+	if d.MediaWearoutValue < 0 {
+		d.MediaWearoutValue = prev.MediaWearoutValue
+	}
+	if d.ReadErrorCount < 0 {
+		d.ReadErrorCount = prev.ReadErrorCount
+	}
+	if d.PendingSectorReallocation < 0 {
+		d.PendingSectorReallocation = prev.PendingSectorReallocation
+	}
 }
 
 func isDiskDevice(info diskDeviceInfo) bool {
@@ -1630,7 +1744,7 @@ func classifyDisk(devType string, temp int) string {
 
 // collectUSB 拉控制器 / arbitrator / 可直通设备,VM 持有部分用调用方共享的 VMShallow 列表
 // (避免在这里再跑一次 getallvms)。
-func collectUSB(client *ssh.Client, vms []VMShallow) USBState {
+func collectUSB(client *ssh.Client, vms []VMShallow, opts CollectOptions) USBState {
 	u := USBState{}
 	if out, err := runEsxiRetry(client, "usb controllers", "lspci | grep -i usb", defaultCmdTimeout, 2, func(out string) bool {
 		return len(parseUSBControllers(out)) > 0
@@ -1660,7 +1774,20 @@ func collectUSB(client *ssh.Client, vms []VMShallow) USBState {
 	} else {
 		logx.Warn("esxi usb passthrough list failed", "err", err.Error())
 	}
-	u.VMOwned = collectUSBVMOwned(client, vms)
+	if opts.SkipUSBVMOwned {
+		u.VMOwned = opts.PreviousUSB.VMOwned
+		u.VMOwnedLastFullSuccessAt = opts.PreviousUSB.VMOwnedLastFullSuccessAt
+		u.vmOwnedKnown = true
+	} else {
+		var ok bool
+		u.VMOwned, ok = collectUSBVMOwned(client, vms)
+		u.vmOwnedKnown = ok
+		if ok {
+			u.VMOwnedLastFullSuccessAt = time.Now()
+		} else {
+			u.VMOwnedLastFullSuccessAt = opts.PreviousUSB.VMOwnedLastFullSuccessAt
+		}
+	}
 	if len(u.VMOwned) > 0 && len(u.AvailableForPassthrough) > 0 {
 		u.AvailableForPassthrough = filterVMOwnedUSB(u.AvailableForPassthrough, u.VMOwned)
 	}
@@ -1717,11 +1844,14 @@ func parseUSBPassthrough(out string) []USBPassthroughDevice {
 //
 // 以前是「for VM 各起 1 个 SSH session」,14 VM 会被 ESXi sshd 的 MaxStartups 限速;
 // 现在把所有 VM 的 device.getdevices 合到一次 session,用 `===VM===<id>` 行分段。
-func collectUSBVMOwned(client *ssh.Client, vms []VMShallow) []USBVMOwned {
-	if len(vms) == 0 {
-		return nil
+func collectUSBVMOwned(client *ssh.Client, vms []VMShallow) ([]USBVMOwned, bool) {
+	if vms == nil {
+		return nil, false
 	}
-	devByVM := batchVMDevices(client, vms)
+	if len(vms) == 0 {
+		return nil, true
+	}
+	devByVM, full := batchVMDevices(client, vms)
 	var out []USBVMOwned
 	for _, v := range vms {
 		devOut, ok := devByVM[v.ID]
@@ -1730,16 +1860,16 @@ func collectUSBVMOwned(client *ssh.Client, vms []VMShallow) []USBVMOwned {
 		}
 		out = append(out, extractVirtualUSB(v.ID, v.Name, devOut)...)
 	}
-	return out
+	return out, full
 }
 
 // batchVMDevices 把所有 VM 的 vim-cmd vmsvc/device.getdevices 合到一次 session,
 // 用 `===VM===<id>` 行做分段标志。device.getdevices 单次几百毫秒,N VM 串起来很贵。
 // 输出可能很大(每 VM 几 KB),给 20s 超时留余量。
-func batchVMDevices(client *ssh.Client, vms []VMShallow) map[int]string {
+func batchVMDevices(client *ssh.Client, vms []VMShallow) (map[int]string, bool) {
 	res := map[int]string{}
 	if len(vms) == 0 {
-		return res
+		return res, true
 	}
 	var b strings.Builder
 	for _, v := range vms {
@@ -1770,7 +1900,7 @@ func batchVMDevices(client *ssh.Client, vms []VMShallow) map[int]string {
 		}
 		res[v.ID] = devOut
 	}
-	return res
+	return res, len(res) >= len(vms)
 }
 
 func parseBatchVMDevices(out string) map[int]string {
@@ -1960,34 +2090,58 @@ type VMShallow struct {
 //
 //	Vmid  Name  File  Guest OS  Version  Annotation
 //	"Name" 可能含空格 —— 由 vim-cmd 用空格对齐,这里偷懒按"首数字 + 空格 + 名字 + 空格 + 路径开始[/vmfs/...]"切。
-func collectVMs(client *ssh.Client, shallow []VMShallow, guestOS map[int]string) []VM {
+func collectVMs(client *ssh.Client, shallow []VMShallow, guestOS map[int]string, opts CollectOptions) []VM {
+	if opts.SkipVMPower {
+		return opts.PreviousVMs
+	}
 	if shallow == nil {
 		// 调用方拿到的 getallvms 失败 —— 返回 nil,buildSample 会写 vm_total/vm_powered_on=-1。
 		return nil
 	}
-	powerByID := batchVMPowerState(client, shallow)
+	powerByID, full := batchVMPowerState(client, shallow)
 	vms := make([]VM, 0, len(shallow))
+	now := time.Now()
+	prevByID := vmByID(opts.PreviousVMs)
 	for _, s := range shallow {
 		state, ok := powerByID[s.ID]
 		if !ok {
 			state = "unknown"
 		}
-		vms = append(vms, VM{
+		vm := VM{
 			ID:      s.ID,
 			Name:    s.Name,
 			GuestOS: guestOS[s.ID],
 			State:   state,
-		})
+		}
+		if full {
+			vm.PowerStateLastFullSuccessAt = now
+		} else if prev, ok := prevByID[s.ID]; ok {
+			vm.PowerStateLastFullSuccessAt = prev.PowerStateLastFullSuccessAt
+			if vm.State == "unknown" {
+				vm.State = prev.State
+			}
+		}
+		vms = append(vms, vm)
 	}
 	return vms
 }
 
+func vmByID(vms []VM) map[int]VM {
+	m := make(map[int]VM, len(vms))
+	for _, v := range vms {
+		if v.ID != 0 {
+			m[v.ID] = v
+		}
+	}
+	return m
+}
+
 // batchVMPowerState 把多 VM 的 power.getstate 合并到一次 SSH session,
 // 远端用 `===VM===<id>` 行作分段标志。每次 vim-cmd 启动很慢(~1s),合批省得最明显。
-func batchVMPowerState(client *ssh.Client, vms []VMShallow) map[int]string {
+func batchVMPowerState(client *ssh.Client, vms []VMShallow) (map[int]string, bool) {
 	res := map[int]string{}
 	if len(vms) == 0 {
-		return res
+		return res, true
 	}
 	var b strings.Builder
 	for _, v := range vms {
@@ -2019,7 +2173,7 @@ func batchVMPowerState(client *ssh.Client, vms []VMShallow) map[int]string {
 		}
 		res[v.ID] = mapVMPowerState(powerOut)
 	}
-	return res
+	return res, knownPowerCount(res) == len(vms)
 }
 
 func parseBatchVMPowerState(out string) map[int]string {
@@ -2336,7 +2490,7 @@ func parseHostBoot(out string) HostBoot {
 // collectNICs 抓物理网卡列表 + 每张卡的 stats。
 // list 给基本/链路信息一次拿全,stats 按设备名循环。
 // vmnic 数量个位数,串行调用足够,无需 batch。
-func collectNICs(client *ssh.Client) []NIC {
+func collectNICs(client *ssh.Client, opts CollectOptions) []NIC {
 	listOut, err := runEsxiRetry(client, "nic list", "esxcli network nic list", defaultCmdTimeout, 2, func(s string) bool {
 		return strings.Contains(s, "vmnic")
 	})
@@ -2348,18 +2502,66 @@ func collectNICs(client *ssh.Client) []NIC {
 	if len(nics) == 0 {
 		return nil
 	}
+	prevByName := nicByName(opts.PreviousNICs)
+	if opts.SkipNICStats {
+		for i := range nics {
+			if prev, ok := prevByName[nics[i].Name]; ok {
+				fillNICStatsFromPrev(&nics[i], prev)
+			}
+		}
+		return nics
+	}
+	statsFull := true
 	for i := range nics {
 		statsCmd := "esxcli network nic stats get -n " + sshx.ShellQuote(nics[i].Name)
 		out, err := runEsxiRetry(client, "nic stats "+nics[i].Name, statsCmd, defaultCmdTimeout, 2, func(s string) bool {
 			return strings.Contains(s, "Packets received") || strings.Contains(s, "Bytes received")
 		})
 		if err != nil {
+			statsFull = false
 			logx.Warn("esxi nic stats failed", "nic", nics[i].Name, "err", err.Error())
+			if prev, ok := prevByName[nics[i].Name]; ok {
+				fillNICStatsFromPrev(&nics[i], prev)
+			}
 			continue
 		}
 		fillNICStats(&nics[i], out)
 	}
+	if statsFull {
+		now := time.Now()
+		for i := range nics {
+			nics[i].StatsLastFullSuccessAt = now
+		}
+	} else {
+		for i := range nics {
+			if nics[i].StatsLastFullSuccessAt.IsZero() {
+				if prev, ok := prevByName[nics[i].Name]; ok {
+					nics[i].StatsLastFullSuccessAt = prev.StatsLastFullSuccessAt
+				}
+			}
+		}
+	}
 	return nics
+}
+
+func nicByName(nics []NIC) map[string]NIC {
+	m := make(map[string]NIC, len(nics))
+	for _, n := range nics {
+		if n.Name != "" {
+			m[n.Name] = n
+		}
+	}
+	return m
+}
+
+func fillNICStatsFromPrev(n *NIC, prev NIC) {
+	n.RxBytes = prev.RxBytes
+	n.TxBytes = prev.TxBytes
+	n.RxErrors = prev.RxErrors
+	n.TxErrors = prev.TxErrors
+	n.RxDropped = prev.RxDropped
+	n.TxDropped = prev.TxDropped
+	n.StatsLastFullSuccessAt = prev.StatsLastFullSuccessAt
 }
 
 // parseNICList 解析 `esxcli network nic list`。

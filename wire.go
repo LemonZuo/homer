@@ -143,7 +143,7 @@ func buildUPSService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*ups
 func buildEsxiService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*esximon.Service, *esximon.Sampler, *esximon.HostStore, *esximon.CredentialStore) {
 	hosts := esximon.NewHostStore(gormDB)
 	creds := esximon.NewCredentialStore(gormDB, hosts)
-	sampler := esximon.NewSampler(gormDB, hosts, creds, time.Duration(cfg.EsxiSSHTimeoutSec)*time.Second, time.Duration(cfg.EsxiTopologyRefreshIntervalMin)*time.Minute)
+	sampler := esximon.NewSampler(gormDB, hosts, creds, time.Duration(cfg.EsxiSSHTimeoutSec)*time.Second, time.Duration(cfg.EsxiSlowRefreshIntervalMin)*time.Minute)
 	store := esximon.NewStore(gormDB)
 	alertCfg := esximon.AlertConfig{
 		CPUTempC:           cfg.EsxiAlertCPUTempC,

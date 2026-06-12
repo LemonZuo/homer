@@ -539,7 +539,7 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 
 	m := r.Metrics
 	// 各子项判 "是否拿到有效数据";没拿到就 fallback prev 同名 JSON。
-	st.PlatformJSON = stickyJSON(m.Platform, m.Platform.Vendor != "" || m.Platform.UUID != "" || m.Platform.Product != "", prevJSON(prev, func(p *model.EsxiState) string { return p.PlatformJSON }))
+	st.PlatformJSON = stickyPlatformJSON(m.Platform, m.Platform.Vendor != "" || m.Platform.UUID != "" || m.Platform.Product != "", prevJSON(prev, func(p *model.EsxiState) string { return p.PlatformJSON }))
 	st.CPUStaticJSON = stickyJSON(m.CPU, m.CPU.Brand != "" || m.CPU.Cores > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.CPUStaticJSON }))
 	st.MemoryJSON = stickyJSON(m.Memory, m.Memory.TotalBytes > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.MemoryJSON }))
 	st.RuntimeJSON = stickyJSON(m.Runtime, runtimeUsable(m.Runtime), prevJSON(prev, func(p *model.EsxiState) string { return p.RuntimeJSON }))
@@ -563,6 +563,21 @@ func stickyJSON(v any, ok bool, prevJSON string) string {
 		return prevJSON
 	}
 	return mustJSON(v)
+}
+
+func stickyPlatformJSON(cur PlatformInfo, ok bool, prevJSON string) string {
+	if ok {
+		if cur.StaticLastFullSuccessAt.IsZero() && prevJSON != "" {
+			if prev, hasPrev := parsePrevPlatform(prevJSON); hasPrev {
+				cur.StaticLastFullSuccessAt = prev.StaticLastFullSuccessAt
+			}
+		}
+		return mustJSON(cur)
+	}
+	if prevJSON != "" {
+		return prevJSON
+	}
+	return mustJSON(cur)
 }
 
 func stickyTopologyJSON(cur NetTopology, ok bool, prevJSON string) string {
@@ -615,6 +630,72 @@ func parsePrevTopology(s string) (NetTopology, bool) {
 	return prev, true
 }
 
+func parsePrevPlatform(s string) (PlatformInfo, bool) {
+	if s == "" {
+		return PlatformInfo{}, false
+	}
+	var prev PlatformInfo
+	if json.Unmarshal([]byte(s), &prev) != nil {
+		return PlatformInfo{}, false
+	}
+	return prev, true
+}
+
+func parsePrevCPU(s string) (CPUStatic, bool) {
+	if s == "" {
+		return CPUStatic{}, false
+	}
+	var prev CPUStatic
+	if json.Unmarshal([]byte(s), &prev) != nil {
+		return CPUStatic{}, false
+	}
+	return prev, true
+}
+
+func parsePrevMemory(s string) (MemoryInfo, bool) {
+	if s == "" {
+		return MemoryInfo{}, false
+	}
+	var prev MemoryInfo
+	if json.Unmarshal([]byte(s), &prev) != nil {
+		return MemoryInfo{}, false
+	}
+	return prev, true
+}
+
+func parsePrevVMs(s string) ([]VM, bool) {
+	if s == "" {
+		return nil, false
+	}
+	var prev []VM
+	if json.Unmarshal([]byte(s), &prev) != nil {
+		return nil, false
+	}
+	return prev, true
+}
+
+func parsePrevDisks(s string) ([]DiskHealth, bool) {
+	if s == "" {
+		return nil, false
+	}
+	var prev []DiskHealth
+	if json.Unmarshal([]byte(s), &prev) != nil {
+		return nil, false
+	}
+	return prev, true
+}
+
+func parsePrevNICs(s string) ([]NIC, bool) {
+	if s == "" {
+		return nil, false
+	}
+	var prev []NIC
+	if json.Unmarshal([]byte(s), &prev) != nil {
+		return nil, false
+	}
+	return prev, true
+}
+
 func stickyUSBJSON(cur USBState, prevJSON string) string {
 	prev, hasPrev := parsePrevUSB(prevJSON)
 	merged := cur
@@ -628,8 +709,12 @@ func stickyUSBJSON(cur USBState, prevJSON string) string {
 		if !cur.passthroughKnown && len(cur.AvailableForPassthrough) == 0 && len(prev.AvailableForPassthrough) > 0 {
 			merged.AvailableForPassthrough = prev.AvailableForPassthrough
 		}
+		if !cur.vmOwnedKnown {
+			merged.VMOwned = prev.VMOwned
+			merged.VMOwnedLastFullSuccessAt = prev.VMOwnedLastFullSuccessAt
+		}
 	}
-	if usbHasData(merged) || cur.controllersKnown || cur.arbitratorKnown || cur.passthroughKnown {
+	if usbHasData(merged) || cur.controllersKnown || cur.arbitratorKnown || cur.passthroughKnown || cur.vmOwnedKnown {
 		return mustJSON(merged)
 	}
 	if prevJSON != "" {

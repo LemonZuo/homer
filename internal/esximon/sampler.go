@@ -28,21 +28,21 @@ type HostResult struct {
 
 // Sampler 负责一轮"扫所有 esxi_host → 并发 SSH → 跑 esxcli/vsish → 聚合结果"。
 type Sampler struct {
-	db                      *gorm.DB
-	hosts                   *HostStore
-	credentials             sshlike.CredentialResolver
-	timeout                 time.Duration
-	topologyRefreshInterval time.Duration
+	db                  *gorm.DB
+	hosts               *HostStore
+	credentials         sshlike.CredentialResolver
+	timeout             time.Duration
+	slowRefreshInterval time.Duration
 }
 
-func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshlike.CredentialResolver, sshTimeout, topologyRefreshInterval time.Duration) *Sampler {
+func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshlike.CredentialResolver, sshTimeout, slowRefreshInterval time.Duration) *Sampler {
 	if sshTimeout <= 0 {
 		sshTimeout = 120 * time.Second
 	}
-	if topologyRefreshInterval <= 0 {
-		topologyRefreshInterval = 30 * time.Minute
+	if slowRefreshInterval <= 0 {
+		slowRefreshInterval = 30 * time.Minute
 	}
-	return &Sampler{db: db, hosts: hosts, credentials: credentials, timeout: sshTimeout, topologyRefreshInterval: topologyRefreshInterval}
+	return &Sampler{db: db, hosts: hosts, credentials: credentials, timeout: sshTimeout, slowRefreshInterval: slowRefreshInterval}
 }
 
 // Run 扫一轮所有启用的 esxi_host 并发采集,单机失败不影响其他。
@@ -110,12 +110,12 @@ func (s *Sampler) probeOne(h model.EsxiHost, prev *model.EsxiState) HostResult {
 			return
 		}
 		defer cleanup()
-		opts := topologyCollectOptions(prev, res.StartAt, s.topologyRefreshInterval)
+		opts := collectOptions(prev, res.StartAt, s.slowRefreshInterval)
 		if opts.SkipTopology {
 			logx.Debug("esxi topology collection skipped",
 				"host", h.Name,
 				"last_full_success_at", opts.PreviousTopology.LastFullSuccessAt.Format(time.RFC3339),
-				"interval", s.topologyRefreshInterval.String())
+				"interval", s.slowRefreshInterval.String())
 		}
 		metrics = CollectAllWithOptions(client, opts)
 		missing := probeMissing(metrics)
@@ -164,25 +164,107 @@ func (s *Sampler) loadPreviousStatesByHostID() map[int64]model.EsxiState {
 	return out
 }
 
-func topologyCollectOptions(prev *model.EsxiState, now time.Time, interval time.Duration) CollectOptions {
-	if prev == nil || prev.TopologyJSON == "" {
-		return CollectOptions{}
+func collectOptions(prev *model.EsxiState, now time.Time, interval time.Duration) CollectOptions {
+	opts := CollectOptions{}
+	if prev == nil {
+		return opts
 	}
-	topo, ok := parsePrevTopology(prev.TopologyJSON)
-	if !ok {
-		return CollectOptions{}
+	var hasPlatform bool
+	if p, ok := parsePrevPlatform(prev.PlatformJSON); ok {
+		opts.PreviousPlatform = p
+		hasPlatform = true
 	}
-	if topologyRefreshDue(topo, now, interval) {
-		return CollectOptions{PreviousTopology: topo}
+	if c, ok := parsePrevCPU(prev.CPUStaticJSON); ok {
+		opts.PreviousCPU = c
 	}
-	return CollectOptions{SkipTopology: true, PreviousTopology: topo}
+	if m, ok := parsePrevMemory(prev.MemoryJSON); ok {
+		opts.PreviousMemory = m
+	}
+	if hasPlatform && platformUsable(opts.PreviousPlatform) && cpuStaticUsable(opts.PreviousCPU) && memoryUsable(opts.PreviousMemory) {
+		opts.SkipStatic = !slowRefreshDue(opts.PreviousPlatform.StaticLastFullSuccessAt, now, interval)
+	}
+	if vms, ok := parsePrevVMs(prev.VMJSON); ok {
+		opts.PreviousVMs = vms
+		if vmStatesComplete(vms) {
+			opts.SkipVMPower = !slowRefreshDue(vmsPowerLastFullSuccessAt(vms), now, interval)
+		}
+	}
+	if usb, ok := parsePrevUSB(prev.USBJSON); ok {
+		opts.PreviousUSB = usb
+		opts.SkipUSBVMOwned = !slowRefreshDue(usb.VMOwnedLastFullSuccessAt, now, interval)
+	}
+	if disks, ok := parsePrevDisks(prev.DiskJSON); ok {
+		opts.PreviousDisks = disks
+		if diskTempsComplete(disks) {
+			opts.SkipDiskSMART = !slowRefreshDue(disksSMARTLastFullSuccessAt(disks), now, interval)
+		}
+	}
+	if nics, ok := parsePrevNICs(prev.NICJSON); ok {
+		opts.PreviousNICs = nics
+		if len(nics) > 0 {
+			opts.SkipNICStats = !slowRefreshDue(nicsStatsLastFullSuccessAt(nics), now, interval)
+		}
+	}
+	if topo, ok := parsePrevTopology(prev.TopologyJSON); ok {
+		opts.PreviousTopology = topo
+		opts.SkipTopology = !slowRefreshDue(topo.LastFullSuccessAt, now, interval)
+	}
+	return opts
 }
 
-func topologyRefreshDue(topo NetTopology, now time.Time, interval time.Duration) bool {
-	if interval <= 0 || topo.LastFullSuccessAt.IsZero() {
+func slowRefreshDue(last time.Time, now time.Time, interval time.Duration) bool {
+	if interval <= 0 || last.IsZero() {
 		return true
 	}
-	return now.Sub(topo.LastFullSuccessAt) > interval
+	return now.Sub(last) > interval
+}
+
+func vmsPowerLastFullSuccessAt(vms []VM) time.Time {
+	if len(vms) == 0 {
+		return time.Time{}
+	}
+	last := vms[0].PowerStateLastFullSuccessAt
+	for _, vm := range vms {
+		if vm.PowerStateLastFullSuccessAt.IsZero() {
+			return time.Time{}
+		}
+		if vm.PowerStateLastFullSuccessAt.Before(last) {
+			last = vm.PowerStateLastFullSuccessAt
+		}
+	}
+	return last
+}
+
+func disksSMARTLastFullSuccessAt(disks []DiskHealth) time.Time {
+	if len(disks) == 0 {
+		return time.Time{}
+	}
+	last := disks[0].SMARTLastFullSuccessAt
+	for _, disk := range disks {
+		if disk.SMARTLastFullSuccessAt.IsZero() {
+			return time.Time{}
+		}
+		if disk.SMARTLastFullSuccessAt.Before(last) {
+			last = disk.SMARTLastFullSuccessAt
+		}
+	}
+	return last
+}
+
+func nicsStatsLastFullSuccessAt(nics []NIC) time.Time {
+	if len(nics) == 0 {
+		return time.Time{}
+	}
+	last := nics[0].StatsLastFullSuccessAt
+	for _, nic := range nics {
+		if nic.StatsLastFullSuccessAt.IsZero() {
+			return time.Time{}
+		}
+		if nic.StatsLastFullSuccessAt.Before(last) {
+			last = nic.StatsLastFullSuccessAt
+		}
+	}
+	return last
 }
 
 // probeMissing 在 sampleMissingMetrics 基础上追加拓扑完整性,驱动同一轮内的整轮重试。
@@ -197,20 +279,27 @@ func probeMissing(m HostMetrics) []string {
 }
 
 func mergeHostMetrics(base, next HostMetrics) HostMetrics {
-	if !platformUsable(base.Platform) && platformUsable(next.Platform) {
+	staticNewer := next.Platform.StaticLastFullSuccessAt.After(base.Platform.StaticLastFullSuccessAt)
+	if staticNewer {
+		base.Platform = next.Platform
+		base.CPU = next.CPU
+		base.Memory = next.Memory
+	} else if !platformUsable(base.Platform) && platformUsable(next.Platform) {
 		base.Platform = next.Platform
 	} else {
 		base.Platform = mergePlatform(base.Platform, next.Platform)
 	}
-	if !cpuStaticUsable(base.CPU) && cpuStaticUsable(next.CPU) {
-		base.CPU = next.CPU
-	} else {
-		base.CPU = mergeCPUStatic(base.CPU, next.CPU)
-	}
-	if !memoryUsable(base.Memory) && memoryUsable(next.Memory) {
-		base.Memory = next.Memory
-	} else {
-		base.Memory = mergeMemory(base.Memory, next.Memory)
+	if !staticNewer {
+		if !cpuStaticUsable(base.CPU) && cpuStaticUsable(next.CPU) {
+			base.CPU = next.CPU
+		} else {
+			base.CPU = mergeCPUStatic(base.CPU, next.CPU)
+		}
+		if !memoryUsable(base.Memory) && memoryUsable(next.Memory) {
+			base.Memory = next.Memory
+		} else {
+			base.Memory = mergeMemory(base.Memory, next.Memory)
+		}
 	}
 	if !runtimeUsable(base.Runtime) && runtimeUsable(next.Runtime) {
 		base.Runtime = next.Runtime
@@ -237,9 +326,7 @@ func mergeHostMetrics(base, next HostMetrics) HostMetrics {
 	if base.Boot.UptimeSeconds < 0 && next.Boot.UptimeSeconds >= 0 {
 		base.Boot = next.Boot
 	}
-	if len(base.NICs) == 0 && len(next.NICs) > 0 {
-		base.NICs = next.NICs
-	}
+	base.NICs = mergeNICList(base.NICs, next.NICs)
 	base.Topology = mergeTopology(base.Topology, next.Topology)
 	return base
 }
@@ -472,6 +559,20 @@ func mergeDiskHealthList(base, next []DiskHealth) []DiskHealth {
 }
 
 func mergeDiskHealth(base, next DiskHealth) DiskHealth {
+	if next.SMARTLastFullSuccessAt.After(base.SMARTLastFullSuccessAt) {
+		base.TempC = next.TempC
+		base.ThresholdC = next.ThresholdC
+		base.Status = next.Status
+		base.HealthStatus = next.HealthStatus
+		base.PowerOnHours = next.PowerOnHours
+		base.PowerCycleCount = next.PowerCycleCount
+		base.ReallocatedSectors = next.ReallocatedSectors
+		base.UncorrectableErrors = next.UncorrectableErrors
+		base.MediaWearoutValue = next.MediaWearoutValue
+		base.ReadErrorCount = next.ReadErrorCount
+		base.PendingSectorReallocation = next.PendingSectorReallocation
+		base.SMARTLastFullSuccessAt = next.SMARTLastFullSuccessAt
+	}
 	if base.Model == "" {
 		base.Model = next.Model
 	}
@@ -499,6 +600,9 @@ func mergeDiskHealth(base, next DiskHealth) DiskHealth {
 	if base.Status == "" || base.Status == "unknown" {
 		base.Status = next.Status
 	}
+	if base.SMARTLastFullSuccessAt.IsZero() {
+		base.SMARTLastFullSuccessAt = next.SMARTLastFullSuccessAt
+	}
 	return base
 }
 
@@ -518,6 +622,13 @@ func mergeUSBState(base, next USBState) USBState {
 	if len(base.VMOwned) == 0 && len(next.VMOwned) > 0 {
 		base.VMOwned = next.VMOwned
 	}
+	if next.VMOwnedLastFullSuccessAt.After(base.VMOwnedLastFullSuccessAt) {
+		base.VMOwned = next.VMOwned
+		base.VMOwnedLastFullSuccessAt = next.VMOwnedLastFullSuccessAt
+		base.vmOwnedKnown = true
+	} else if base.VMOwnedLastFullSuccessAt.IsZero() {
+		base.VMOwnedLastFullSuccessAt = next.VMOwnedLastFullSuccessAt
+	}
 	return base
 }
 
@@ -535,6 +646,10 @@ func mergeVMStates(base, next []VM) []VM {
 	out := make([]VM, 0, len(base))
 	for _, v := range base {
 		if nv, ok := byID[v.ID]; ok {
+			if nv.PowerStateLastFullSuccessAt.After(v.PowerStateLastFullSuccessAt) {
+				v.State = nv.State
+				v.PowerStateLastFullSuccessAt = nv.PowerStateLastFullSuccessAt
+			}
 			if v.Name == "" {
 				v.Name = nv.Name
 			}
@@ -544,10 +659,82 @@ func mergeVMStates(base, next []VM) []VM {
 			if v.State == "" || v.State == "unknown" {
 				v.State = nv.State
 			}
+			if v.PowerStateLastFullSuccessAt.IsZero() {
+				v.PowerStateLastFullSuccessAt = nv.PowerStateLastFullSuccessAt
+			}
 		}
 		out = append(out, v)
 	}
 	return out
+}
+
+func mergeNICList(base, next []NIC) []NIC {
+	if len(base) == 0 {
+		return next
+	}
+	if len(next) == 0 {
+		return base
+	}
+	byName := map[string]NIC{}
+	for _, n := range next {
+		byName[n.Name] = n
+	}
+	out := make([]NIC, 0, len(base))
+	for _, n := range base {
+		if nn, ok := byName[n.Name]; ok {
+			n = mergeNIC(n, nn)
+		}
+		out = append(out, n)
+	}
+	seen := map[string]struct{}{}
+	for _, n := range out {
+		seen[n.Name] = struct{}{}
+	}
+	for _, n := range next {
+		if _, ok := seen[n.Name]; !ok {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func mergeNIC(base, next NIC) NIC {
+	if next.Driver != "" {
+		base.Driver = next.Driver
+	}
+	if next.MAC != "" {
+		base.MAC = next.MAC
+	}
+	if next.MTU >= 0 {
+		base.MTU = next.MTU
+	}
+	if next.Description != "" {
+		base.Description = next.Description
+	}
+	if next.AdminStatus != "" {
+		base.AdminStatus = next.AdminStatus
+	}
+	if next.LinkStatus != "" {
+		base.LinkStatus = next.LinkStatus
+	}
+	if next.SpeedMbps >= 0 {
+		base.SpeedMbps = next.SpeedMbps
+	}
+	if next.Duplex != "" {
+		base.Duplex = next.Duplex
+	}
+	if next.StatsLastFullSuccessAt.After(base.StatsLastFullSuccessAt) {
+		base.RxBytes = next.RxBytes
+		base.TxBytes = next.TxBytes
+		base.RxErrors = next.RxErrors
+		base.TxErrors = next.TxErrors
+		base.RxDropped = next.RxDropped
+		base.TxDropped = next.TxDropped
+		base.StatsLastFullSuccessAt = next.StatsLastFullSuccessAt
+	} else if base.StatsLastFullSuccessAt.IsZero() {
+		base.StatsLastFullSuccessAt = next.StatsLastFullSuccessAt
+	}
+	return base
 }
 
 // ProbeByHostID 给 handler 的 /esxi/hosts/:id/test 用:按 id 拉一条立即探测。

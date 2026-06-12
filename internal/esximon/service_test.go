@@ -195,17 +195,84 @@ func TestStickyTopologyJSONKeepsPreviousFullSuccessAt(t *testing.T) {
 	}
 }
 
-func TestTopologyRefreshDueUsesLastFullSuccessAt(t *testing.T) {
+func TestStickyPlatformJSONKeepsPreviousStaticSuccessAt(t *testing.T) {
+	lastSuccess := time.Date(2026, 6, 12, 10, 0, 0, 0, time.Local)
+	prev := PlatformInfo{Vendor: "Intel", Product: "NUC", StaticLastFullSuccessAt: lastSuccess}
+	cur := PlatformInfo{Vendor: "Intel", Product: "NUC"}
+	gotJSON := stickyPlatformJSON(cur, true, mustJSON(prev))
+
+	var got PlatformInfo
+	if err := json.Unmarshal([]byte(gotJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.StaticLastFullSuccessAt.Equal(lastSuccess) {
+		t.Fatalf("static success time should be preserved, got %s", got.StaticLastFullSuccessAt.Format(time.RFC3339))
+	}
+}
+
+func TestStickyUSBJSONKeepsPreviousVMOwnedWhenUnknown(t *testing.T) {
+	lastSuccess := time.Date(2026, 6, 12, 10, 0, 0, 0, time.Local)
+	prev := USBState{
+		VMOwned: []USBVMOwned{{
+			VMID:   101,
+			VMName: "fnOS",
+			Label:  "USB device",
+		}},
+		VMOwnedLastFullSuccessAt: lastSuccess,
+	}
+	cur := USBState{
+		ArbitratorRunning: true,
+		arbitratorKnown:   true,
+	}
+	gotJSON := stickyUSBJSON(cur, mustJSON(prev))
+
+	var got USBState
+	if err := json.Unmarshal([]byte(gotJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.VMOwned) != 1 || got.VMOwned[0].VMName != "fnOS" {
+		t.Fatalf("previous vm owned should be preserved, got %#v", got.VMOwned)
+	}
+	if !got.VMOwnedLastFullSuccessAt.Equal(lastSuccess) {
+		t.Fatalf("vm owned success time should be preserved, got %s", got.VMOwnedLastFullSuccessAt.Format(time.RFC3339))
+	}
+}
+
+func TestSlowRefreshDueUsesLastFullSuccessAt(t *testing.T) {
 	now := time.Date(2026, 6, 12, 11, 0, 0, 0, time.Local)
 	interval := 30 * time.Minute
-	if topologyRefreshDue(NetTopology{}, now, interval) != true {
-		t.Fatal("empty success time should force topology collection")
+	if slowRefreshDue(time.Time{}, now, interval) != true {
+		t.Fatal("empty success time should force slow collection")
 	}
-	if topologyRefreshDue(NetTopology{LastFullSuccessAt: now.Add(-29 * time.Minute)}, now, interval) {
-		t.Fatal("topology should be skipped before refresh interval")
+	if slowRefreshDue(now.Add(-29*time.Minute), now, interval) {
+		t.Fatal("slow collection should be skipped before refresh interval")
 	}
-	if !topologyRefreshDue(NetTopology{LastFullSuccessAt: now.Add(-31 * time.Minute)}, now, interval) {
-		t.Fatal("topology should be collected after refresh interval")
+	if !slowRefreshDue(now.Add(-31*time.Minute), now, interval) {
+		t.Fatal("slow collection should run after refresh interval")
+	}
+}
+
+func TestCollectOptionsSkipsSlowModulesIndependently(t *testing.T) {
+	now := time.Date(2026, 6, 12, 11, 0, 0, 0, time.Local)
+	recent := now.Add(-10 * time.Minute)
+	old := now.Add(-31 * time.Minute)
+	prev := model.EsxiState{
+		PlatformJSON:  mustJSON(PlatformInfo{Vendor: "Intel", StaticLastFullSuccessAt: recent}),
+		CPUStaticJSON: mustJSON(CPUStatic{Brand: "Xeon", Cores: 8}),
+		MemoryJSON:    mustJSON(MemoryInfo{TotalBytes: 1024}),
+		VMJSON:        mustJSON([]VM{{ID: 101, Name: "fnOS", State: "powered_on", PowerStateLastFullSuccessAt: recent}}),
+		USBJSON:       mustJSON(USBState{VMOwnedLastFullSuccessAt: recent}),
+		DiskJSON:      mustJSON([]DiskHealth{{Device: "naa.disk", TempC: 35, SMARTLastFullSuccessAt: old}}),
+		NICJSON:       mustJSON([]NIC{{Name: "vmnic0", StatsLastFullSuccessAt: recent}}),
+		TopologyJSON:  mustJSON(NetTopology{LastFullSuccessAt: recent}),
+	}
+
+	opts := collectOptions(&prev, now, 30*time.Minute)
+	if !opts.SkipStatic || !opts.SkipVMPower || !opts.SkipUSBVMOwned || !opts.SkipNICStats || !opts.SkipTopology {
+		t.Fatalf("recent slow modules should be skipped: %+v", opts)
+	}
+	if opts.SkipDiskSMART {
+		t.Fatal("old disk smart timestamp should force disk SMART collection")
 	}
 }
 
