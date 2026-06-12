@@ -6,6 +6,18 @@ import (
 	"testing"
 )
 
+func TestParseEsxiCommandDiagnostics(t *testing.T) {
+	stderr := "__HOMER_ESXI_BEGIN__\nwarning from esxcli\n__HOMER_ESXI_END__ rc=2\n"
+	clean, diag := parseEsxiCommandDiagnostics(stderr)
+
+	if clean != "warning from esxcli" {
+		t.Fatalf("stderr = %q", clean)
+	}
+	if !diag.started || !diag.finished || !diag.exitCodeKnown || diag.exitCode != 2 {
+		t.Fatalf("diag = %+v", diag)
+	}
+}
+
 func TestParseDeviceInventory(t *testing.T) {
 	out := `
 t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____

@@ -144,6 +144,24 @@ func Run(client *ssh.Client, cmd string, stdin []byte) (string, error) {
 	return out.String(), err
 }
 
+// RunStreams 在远端执行 cmd，分别返回 stdout 与 stderr。
+func RunStreams(client *ssh.Client, cmd string, stdin []byte) (string, string, error) {
+	session, err := client.NewSession()
+	if err != nil {
+		return "", "", err
+	}
+	defer session.Close()
+
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+	if stdin != nil {
+		session.Stdin = bytes.NewReader(stdin)
+	}
+	err = session.Run(cmd)
+	return stdout.String(), stderr.String(), err
+}
+
 func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
