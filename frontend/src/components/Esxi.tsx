@@ -27,234 +27,41 @@ import { EsxiHostEditDialog } from './esxi/EsxiHostEditDialog'
 import { EsxiCredentialsDrawer } from './esxi/EsxiCredentialsDrawer'
 import { EsxiCredentialEditDialog } from './esxi/EsxiCredentialEditDialog'
 import { NetTopologyFlow } from './esxi/NetTopologyFlow'
-import type { EsxiCredential, EsxiHost } from './esxi/types'
-
-// --- 后端 snapshot 数据形态(与 Go esximon.Snapshot 对齐) ---
-
-interface PlatformInfo {
-  vendor: string
-  product: string
-  serial: string
-  uuid: string
-  ipmi_supported: boolean
-  esxi_version: string
-  esxi_build: number
-}
-
-interface CPUStatic {
-  brand: string
-  family: number
-  model: number
-  stepping: number
-  cores: number
-  freq_mhz: number
-  l2_kb: number
-  l3_kb: number
-  tjmax_c: number
-}
-
-interface MemoryInfo {
-  mem_total_bytes: number
-  mem_free_bytes: number
-}
-
-interface RuntimeUsage {
-  cpu_used_mhz: number
-  cpu_capacity_mhz: number
-  cpu_usage_percent: number
-  memory_used_bytes: number
-  memory_total_bytes: number
-  memory_usage_percent: number
-}
-
-interface CPUCore {
-  id: number
-  temp_c: number
-  headroom_c: number
-}
-
-interface CPUTemperature {
-  tjmax_c: number
-  cores: CPUCore[]
-  max_c: number
-  avg_c: number
-}
-
-interface MCEHealth {
-  state: string
-  corrected_total: number
-  corrected_ewma: number
-  period_seconds: number
-  uncorrected_total: number
-}
-
-interface DiskHealth {
-  device: string
-  model: string
-  type: string
-  capacity_bytes?: number
-  used_bytes?: number
-  free_bytes?: number
-  datastores?: string[]
-  temp_c: number
-  threshold_c: number
-  status: string
-  smart_health?: string
-  smart_power_on_hours?: number
-  smart_power_cycle_count?: number
-  smart_reallocated_sectors?: number
-  smart_uncorrectable_errors?: number
-  smart_media_wearout?: number
-  smart_read_error_count?: number
-  smart_pending_sector_realloc?: number
-}
-
-interface USBController {
-  pci_addr: string
-  name: string
-}
-
-interface USBPassthroughDevice {
-  bus: number
-  dev: number
-  vid: string
-  pid: string
-  name: string
-  enabled: boolean
-}
-
-interface USBVMOwned {
-  vm_id: number
-  vm_name: string
-  label: string
-  summary: string
-  path: string
-}
-
-interface USBState {
-  controllers: USBController[]
-  arbitrator_running: boolean
-  available_for_passthrough: USBPassthroughDevice[]
-  vm_owned: USBVMOwned[]
-}
-
-interface VM {
-  id: number
-  name: string
-  guest_os: string
-  state: string
-}
-
-interface Snapshot {
-  host_kind: string
-  host_id: number
-  host_name: string
-  endpoint: string
-  reachable: boolean
-  error?: string
-  sampled_at?: string
-  platform?: PlatformInfo
-  cpu_static?: CPUStatic
-  memory?: MemoryInfo
-  runtime_usage?: RuntimeUsage
-  cpu_temperature?: CPUTemperature
-  mce_health?: MCEHealth
-  disk_health?: DiskHealth[]
-  usb?: USBState
-  vms?: VM[]
-  boot?: HostBoot
-  nics?: NIC[]
-  net_topology?: NetTopology
-}
-
-interface HostBoot {
-  uptime_seconds: number
-  booted_at: string
-  crash_dump_count: number
-  last_crash_at?: string
-}
-
-interface NIC {
-  name: string
-  driver: string
-  mac: string
-  mtu: number
-  description: string
-  admin_status: string
-  link_status: string
-  speed_mbps: number
-  duplex: string
-  rx_bytes: number
-  tx_bytes: number
-  rx_errors: number
-  tx_errors: number
-  rx_dropped: number
-  tx_dropped: number
-}
-
-interface VSwitchInfo {
-  name: string
-  uplinks: string[]
-  portgroups: string[]
-}
-
-interface VMNICLink {
-  vmid: number
-  vm_name: string
-  vswitch: string
-  portgroup: string
-  mac: string
-  ip?: string
-  team_uplink: string
-}
-
-interface VMKPort {
-  name: string
-  vswitch: string
-  portgroup: string
-  mac: string
-  ipv4?: string
-  enabled: boolean
-}
-
-interface NetTopology {
-  vswitches: VSwitchInfo[]
-  vm_nics: VMNICLink[]
-  vmk_ports?: VMKPort[]
-}
-
-interface CoreTempPoint {
-  id: number
-  temp_c: number
-}
-
-interface DiskTempPoint {
-  device: string
-  temp_c: number
-}
-
-interface DiskUsagePoint {
-  device: string
-  used_bytes: number
-  capacity_bytes: number
-}
-
-interface SeriesPoint {
-  bucket_start: string
-  cpu_max_c: number
-  cpu_avg_c: number
-  disk_max_c: number
-  cpu_usage_percent: number
-  memory_used_bytes: number
-  memory_total_bytes: number
-  memory_usage_percent: number
-  mce_corrected_total: number
-  mce_uncorrected_total: number
-  vm_powered_on: number
-  cpu_cores?: CoreTempPoint[]
-  disks?: DiskTempPoint[]
-  disk_usage?: DiskUsagePoint[]
-}
+import {
+  diskStatusPill,
+  diskUsageInfo,
+  extractErr,
+  fmtBitrate,
+  fmtBytes,
+  fmtBytesWithZero,
+  fmtDateTime,
+  fmtFreq,
+  fmtKB,
+  fmtStaleAge,
+  fmtUptime,
+  isStaleSample,
+  shortDeviceLabel,
+  tempTone,
+  useNowTick,
+  vmStatePill,
+} from './esxi/format'
+import type {
+  CPUStatic,
+  CPUTemperature,
+  DiskHealth,
+  EsxiCredential,
+  EsxiHost,
+  HostBoot,
+  MCEHealth,
+  MemoryInfo,
+  NIC,
+  PlatformInfo,
+  SeriesPoint,
+  Snapshot,
+  USBState,
+  VM,
+} from './esxi/types'
+import { EmptyCard, KV, SectionHead } from './esxi/ui'
 
 // 多线曲线的颜色色卡(色相循环);超过 10 条会循环复用。
 const LINE_COLORS = [
@@ -269,136 +76,6 @@ const LINE_COLORS = [
   'rgb(132 204 22)',
   'rgb(249 115 22)',
 ]
-
-// --- 小工具 ---
-
-const STALE_THRESHOLD_MS = 30 * 60_000
-
-function useNowTick(intervalMs = 10_000): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(id)
-  }, [intervalMs])
-  return now
-}
-
-function isStaleSample(sampledAt: string | undefined, now: number): boolean {
-  if (!sampledAt) return true
-  const t = new Date(sampledAt).getTime()
-  if (!isFinite(t)) return true
-  return now - t > STALE_THRESHOLD_MS
-}
-
-function fmtStaleAge(ms: number): string {
-  if (ms < 0) return ''
-  const sec = Math.floor(ms / 1000)
-  if (sec < 60) return `${sec}s`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m`
-  const h = Math.floor(min / 60)
-  return `${h}h ${min % 60}m`
-}
-
-function fmtDateTime(s: string | undefined): string {
-  if (!s) return '—'
-  const d = new Date(s)
-  if (isNaN(d.getTime())) return s
-  const pad = (n: number) => n.toString().padStart(2, '0')
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-function fmtBytes(n: number): string {
-  if (!isFinite(n) || n <= 0) return '—'
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`
-}
-
-function fmtBytesWithZero(n: number): string {
-  if (!isFinite(n) || n < 0) return '—'
-  if (n === 0) return '0 B'
-  return fmtBytes(n)
-}
-
-function fmtKB(n: number): string {
-  if (!isFinite(n) || n <= 0) return '—'
-  return fmtBytes(n * 1024)
-}
-
-function fmtFreq(mhz: number): string {
-  if (!isFinite(mhz) || mhz <= 0) return '—'
-  if (mhz >= 1000) return `${(mhz / 1000).toFixed(2)} GHz`
-  return `${mhz} MHz`
-}
-
-function extractErr(e: unknown, fallback: string): string {
-  if (e && typeof e === 'object') {
-    const obj = e as { response?: { data?: { error?: string } }; message?: string }
-    return obj.response?.data?.error || obj.message || fallback
-  }
-  return fallback
-}
-
-// --- CPU 温度色阶:依据 headroom(到 TjMax 的距离) ---
-function tempTone(temp: number, headroom: number): { text: string; bar: string } {
-  if (temp < 0) return { text: 'text-muted-foreground', bar: 'bg-muted-foreground/40' }
-  if (headroom >= 0 && headroom < 15) return { text: 'text-rose-600 dark:text-rose-400', bar: 'bg-rose-500' }
-  if (headroom >= 0 && headroom < 30) return { text: 'text-amber-600 dark:text-amber-400', bar: 'bg-amber-500' }
-  if (temp >= 85) return { text: 'text-rose-600 dark:text-rose-400', bar: 'bg-rose-500' }
-  if (temp >= 70) return { text: 'text-amber-600 dark:text-amber-400', bar: 'bg-amber-500' }
-  return { text: 'text-emerald-600 dark:text-emerald-400', bar: 'bg-emerald-500' }
-}
-
-// --- 卡片小标题 ---
-
-function SectionHead({ icon, title, suffix }: { icon: React.ReactNode; title: string; suffix?: React.ReactNode }) {
-  return (
-    <div className="mb-2 flex items-center justify-between gap-2">
-      <div className="flex items-center gap-1.5 text-[12px] font-semibold text-foreground/90">
-        {icon}
-        <span>{title}</span>
-      </div>
-      {suffix}
-    </div>
-  )
-}
-
-// EmptyCard 给单个模块"本次采样没拿到数据"时用,保持卡片网格的视觉骨架不掉块。
-// 只展示标题和虚线占位框,不强制造数据。state 已经做了"上次值兜底",
-// 这里实际会进入占位的情况主要是 1) 首次采样前 2) 该模块从未成功过。
-function EmptyCard({ icon, title, hint = '暂无数据' }: { icon: React.ReactNode; title: string; hint?: string }) {
-  return (
-    <Card className="px-3 py-3">
-      <SectionHead icon={icon} title={title} />
-      <div className="mt-3 rounded-md border border-dashed border-border/60 bg-muted/20 py-4 text-center text-[11.5px] text-muted-foreground">
-        {hint}
-      </div>
-    </Card>
-  )
-}
-
-function KV({ k, v, mono = false, title }: { k: string; v: React.ReactNode; mono?: boolean; title?: string }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">{k}</div>
-      <div
-        className={cn(
-          'mt-0.5 truncate text-[13px] font-medium text-foreground',
-          mono && 'font-mono text-[12px]',
-        )}
-        title={title}
-      >
-        {v}
-      </div>
-    </div>
-  )
-}
 
 // --- 子卡片 ---
 
@@ -457,22 +134,6 @@ function BootLine({ boot }: { boot: HostBoot }) {
       ) : null}
     </div>
   )
-}
-
-function fmtUptime(sec: number): string {
-  if (sec < 0) return '—'
-  const d = Math.floor(sec / 86400)
-  const h = Math.floor((sec % 86400) / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  if (d > 0) return `${d}d ${h}h`
-  if (h > 0) return `${h}h ${m}m`
-  return `${m}m`
-}
-
-function fmtBitrate(mbps: number): string {
-  if (mbps < 0) return '—'
-  if (mbps >= 1000) return `${(mbps / 1000).toFixed(mbps % 1000 === 0 ? 0 : 1)} Gbps`
-  return `${mbps} Mbps`
 }
 
 function NICsCard({ nics }: { nics: NIC[] }) {
@@ -672,34 +333,6 @@ function MCECard({ m }: { m: MCEHealth }) {
       </div>
     </Card>
   )
-}
-
-function diskStatusPill(status: string) {
-  switch (status) {
-    case 'ok':
-      return { cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300', label: '正常' }
-    case 'warning':
-      return { cls: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300', label: '偏高' }
-    case 'critical':
-      return { cls: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300', label: '过热' }
-    default:
-      return { cls: 'border-border bg-muted text-muted-foreground', label: '未知' }
-  }
-}
-
-function diskUsageInfo(d: DiskHealth) {
-  const capacity = d.capacity_bytes ?? 0
-  const used = d.used_bytes ?? -1
-  const free = d.free_bytes ?? -1
-  const usageKnown = used >= 0 && (used > 0 || free > 0)
-  const total = capacity > 0 ? capacity : usageKnown ? used + Math.max(0, free) : 0
-  const pct = usageKnown && total > 0 ? Math.max(0, Math.min(100, (used / total) * 100)) : null
-  const label = usageKnown && total > 0
-    ? `${fmtBytesWithZero(used)} / ${fmtBytes(total)}`
-    : capacity > 0
-      ? `总 ${fmtBytes(capacity)}`
-      : '容量 —'
-  return { pct, label, capacity, used, free }
 }
 
 function DisksCard({ disks }: { disks: DiskHealth[] }) {
@@ -952,19 +585,6 @@ function USBCard({ u }: { u: USBState }) {
       </div>
     </Card>
   )
-}
-
-function vmStatePill(state: string) {
-  switch (state) {
-    case 'powered_on':
-      return { cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300', label: '运行中', dot: 'bg-emerald-500' }
-    case 'powered_off':
-      return { cls: 'border-border bg-muted text-muted-foreground', label: '已关机', dot: 'bg-muted-foreground/60' }
-    case 'suspended':
-      return { cls: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300', label: '挂起', dot: 'bg-amber-500' }
-    default:
-      return { cls: 'border-border bg-muted text-muted-foreground', label: state || '未知', dot: 'bg-muted-foreground/60' }
-  }
 }
 
 function VMsCard({ vms }: { vms: VM[] }) {
@@ -1295,11 +915,6 @@ function buildDiskUsageLines(series: SeriesPoint[], ts: number[], disks?: DiskHe
       return { t: ts[i], v: d && d.used_bytes > 0 ? d.used_bytes / GiB : null }
     }),
   }))
-}
-
-function shortDeviceLabel(dev: string): string {
-  if (dev.length <= 14) return dev
-  return '…' + dev.slice(-12)
 }
 
 // MultiLineChart 多线版本的 mini chart。顶部 legend 横排,hover 时在 legend 上挂值;
