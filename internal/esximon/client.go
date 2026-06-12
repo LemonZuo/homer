@@ -2769,6 +2769,7 @@ func poweredOnVMByName(vms []VM) map[string]VM {
 // vSwitch list 一次拿全;`esxcli network vm list` 给出每台正在跑的 VM 的 World ID,
 // 再对每个 World ID 跑一次 `esxcli network vm port list -w <wid>`。
 // 注意:这里用的 ID 是 World ID(esxcli 体系),与 VMShallow.ID(vim-cmd 的 Vmid)不是同一个值。
+// 返回给前端的 VMNICLink.VMID 使用 vim-cmd VM ID,只在 VM 名称匹配失败时用 World ID 兜底。
 // expectVMs 是已知开机的 VM 名单(来自 vim-cmd 电源态):`esxcli network vm list`
 // 偶发把表输出截断时行数会变少,用名单做 validator 让 runEsxiRetry 能感知并重试。
 func collectNetTopology(client *ssh.Client, vms []VM) NetTopology {
@@ -2813,15 +2814,19 @@ func collectNetTopology(client *ssh.Client, vms []VM) NetTopology {
 			continue
 		}
 		links := parseVMPortList(out)
-		if vmInfo, ok := vmByName[vm.name]; ok && vmNICLinksNeedGuestIP(links) {
-			guestNICs, guestOK := collectVMGuestNIC(client, vmInfo)
-			links = fillVMNICGuestIPs(links, guestNICs)
-			if !guestOK {
-				topo.VMPortsCollected = false
+		vmID := vm.worldID
+		if vmInfo, ok := vmByName[vm.name]; ok {
+			vmID = vmInfo.ID
+			if vmNICLinksNeedGuestIP(links) {
+				guestNICs, guestOK := collectVMGuestNIC(client, vmInfo)
+				links = fillVMNICGuestIPs(links, guestNICs)
+				if !guestOK {
+					topo.VMPortsCollected = false
+				}
 			}
 		}
 		for _, link := range links {
-			link.VMID = vm.worldID
+			link.VMID = vmID
 			link.VMName = vm.name
 			topo.VMNICs = append(topo.VMNICs, link)
 		}

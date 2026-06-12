@@ -18,12 +18,17 @@ interface VSwitchInfo {
   portgroups: string[]
 }
 interface VMNICLink {
+  vmid: number
   vm_name: string
   vswitch: string
   portgroup: string
   mac: string
   ip?: string
   team_uplink: string
+}
+interface VMRef {
+  id: number
+  name: string
 }
 interface VMKPort {
   name: string
@@ -38,7 +43,7 @@ export interface NetTopology {
   vm_nics: VMNICLink[]
   vmk_ports?: VMKPort[]
 }
-type VMInfo = { vmName: string; teamUplink: string; mac: string; ip?: string }
+type VMInfo = { vmid: number; vmName: string; teamUplink: string; mac: string; ip?: string }
 type VMKInfo = { name: string; mac?: string; ipv4?: string; enabled: boolean }
 
 // 列宽/行高:整套像素布局都依赖这套常量。
@@ -608,11 +613,18 @@ function VSwitchBlock({
 export function NetTopologyFlow({
   topo,
   nics,
+  vms,
 }: {
   topo: NetTopology
   nics?: NIC[]
+  vms?: VMRef[]
 }) {
   const [expanded, setExpanded] = useState(false)
+
+  const vmIDByName = useMemo(
+    () => new Map<string, number>((vms ?? []).map((v) => [v.name, v.id])),
+    [vms],
+  )
 
   const vmsByPG = useMemo(() => {
     const m = new Map<string, VMInfo[]>()
@@ -621,6 +633,7 @@ export function NetTopologyFlow({
       const arr = m.get(key) ?? []
       if (!arr.find((v) => v.vmName === link.vm_name)) {
         arr.push({
+          vmid: vmIDByName.get(link.vm_name) ?? link.vmid,
           vmName: link.vm_name,
           teamUplink: link.team_uplink,
           mac: link.mac,
@@ -629,8 +642,14 @@ export function NetTopologyFlow({
       }
       m.set(key, arr)
     }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => {
+        if (a.vmid !== b.vmid) return a.vmid - b.vmid
+        return a.vmName.localeCompare(b.vmName)
+      })
+    }
     return m
-  }, [topo])
+  }, [topo, vmIDByName])
 
   const vmksByPG = useMemo(() => {
     const m = new Map<string, VMKInfo[]>()

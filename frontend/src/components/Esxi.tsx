@@ -1774,7 +1774,7 @@ function HostBlock({ host }: { host: Snapshot }) {
                 (host.net_topology.vm_nics?.length ?? 0) > 0 ||
                 (host.net_topology.vmk_ports?.length ?? 0) > 0) ? (
               <div className="md:col-span-2">
-                <NetTopologyFlow topo={host.net_topology} nics={host.nics} />
+                <NetTopologyFlow topo={host.net_topology} nics={host.nics} vms={host.vms} />
               </div>
             ) : null}
             <div className="md:col-span-2">
