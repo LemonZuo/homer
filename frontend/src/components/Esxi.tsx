@@ -437,8 +437,11 @@ function BootLine({ boot }: { boot: HostBoot }) {
       </span>
       {bootedText ? <span>启动于 {bootedText}</span> : null}
       {boot.crash_dump_count > 0 ? (
-        <span className="rounded-md border border-rose-500/40 bg-rose-500/10 px-1.5 py-0.5 text-rose-700 dark:text-rose-300">
-          zdump {boot.crash_dump_count}
+        <span
+          className="rounded-md border border-rose-500/40 bg-rose-500/10 px-1.5 py-0.5 text-rose-700 dark:text-rose-300"
+          title={`/var/core/ 下残留 ${boot.crash_dump_count} 个 VMkernel 崩溃转储 (PSOD 紫屏)。排查无误后可手动删除 /var/core/vmkernel-zdump.*`}
+        >
+          崩溃次数：{boot.crash_dump_count}
         </span>
       ) : null}
     </div>
