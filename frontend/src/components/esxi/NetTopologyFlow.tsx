@@ -22,6 +22,7 @@ interface VMNICLink {
   vswitch: string
   portgroup: string
   mac: string
+  ip?: string
   team_uplink: string
 }
 interface VMKPort {
@@ -37,7 +38,7 @@ export interface NetTopology {
   vm_nics: VMNICLink[]
   vmk_ports?: VMKPort[]
 }
-type VMInfo = { vmName: string; teamUplink: string; mac: string }
+type VMInfo = { vmName: string; teamUplink: string; mac: string; ip?: string }
 type VMKInfo = { name: string; mac?: string; ipv4?: string; enabled: boolean }
 
 // 列宽/行高:整套像素布局都依赖这套常量。
@@ -173,29 +174,36 @@ function PortgroupCard({ pg, vms, vmks }: { pg: string; vms: VMInfo[]; vmks: VMK
               ))}
             </div>
           ) : null}
-          {vms.map((v) => (
-            <div
-              key={v.vmName + v.mac}
-              className="flex flex-col justify-center px-2.5"
-              style={{ height: PG_VM_ROW }}
-              title={`MAC ${v.mac || '—'}${v.teamUplink ? ` · ${v.teamUplink}` : ''}`}
-            >
-              <div className="flex items-center gap-1 leading-tight">
-                <Box className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-[11.5px] text-foreground">
-                  {v.vmName}
-                </span>
-                {v.teamUplink ? (
-                  <span className="shrink-0 font-mono text-[9.5px] text-muted-foreground">
-                    {v.teamUplink}
+          {vms.map((v) => {
+            const detail = [v.ip, v.mac].filter(Boolean).join(' · ') || '—'
+            return (
+              <div
+                key={v.vmName + v.mac}
+                className="flex flex-col justify-center px-2.5"
+                style={{ height: PG_VM_ROW }}
+                title={[
+                  v.ip ? `IP ${v.ip}` : '',
+                  v.mac ? `MAC ${v.mac}` : '',
+                  v.teamUplink,
+                ].filter(Boolean).join(' · ')}
+              >
+                <div className="flex items-center gap-1 leading-tight">
+                  <Box className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-foreground">
+                    {v.vmName}
                   </span>
-                ) : null}
+                  {v.teamUplink ? (
+                    <span className="shrink-0 font-mono text-[9.5px] text-muted-foreground">
+                      {v.teamUplink}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="truncate pl-4 font-mono text-[9.5px] leading-tight text-muted-foreground">
+                  {detail}
+                </div>
               </div>
-              <div className="truncate pl-4 font-mono text-[9.5px] leading-tight text-muted-foreground">
-                {v.mac || '—'}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -616,6 +624,7 @@ export function NetTopologyFlow({
           vmName: link.vm_name,
           teamUplink: link.team_uplink,
           mac: link.mac,
+          ip: link.ip,
         })
       }
       m.set(key, arr)

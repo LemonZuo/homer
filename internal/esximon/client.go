@@ -409,7 +409,7 @@ func CollectAll(client *ssh.Client) HostMetrics {
 	// 网络拓扑(vSwitch / Portgroup / VM vNIC 边)。
 	// 传入开机 VM 名单做交叉验证:`esxcli network vm list` 偶发输出截断时,
 	// validator 能发现缺台并触发重试,避免拓扑图上 VM 时多时少。
-	snap.Topology = collectNetTopology(client, poweredOnVMNames(snap.VMs))
+	snap.Topology = collectNetTopology(client, snap.VMs)
 
 	return snap
 }
@@ -2418,8 +2418,10 @@ func poweredOnVMNames(vms []VM) []string {
 // 注意:这里用的 ID 是 World ID(esxcli 体系),与 VMShallow.ID(vim-cmd 的 Vmid)不是同一个值。
 // expectVMs 是已知开机的 VM 名单(来自 vim-cmd 电源态):`esxcli network vm list`
 // 偶发把表输出截断时行数会变少,用名单做 validator 让 runEsxiRetry 能感知并重试。
-func collectNetTopology(client *ssh.Client, expectVMs []string) NetTopology {
+func collectNetTopology(client *ssh.Client, vms []VM) NetTopology {
 	topo := NetTopology{}
+	expectVMs := poweredOnVMNames(vms)
+	guestNICs := collectVMGuestNICs(client, vms)
 	if out, err := runEsxiRetry(client, "vswitch list", "esxcli network vswitch standard list", defaultCmdTimeout, 2, func(s string) bool {
 		return strings.Contains(s, "Uplinks:") || strings.Contains(s, "vSwitch")
 	}); err == nil {
@@ -2452,13 +2454,57 @@ func collectNetTopology(client *ssh.Client, expectVMs []string) NetTopology {
 			logx.Warn("esxi vm port list failed", "vm", vm.name, "err", err.Error())
 			continue
 		}
-		for _, link := range parseVMPortList(out) {
+		links := fillVMNICGuestIPs(parseVMPortList(out), guestNICs[vm.name])
+		for _, link := range links {
 			link.VMID = vm.worldID
 			link.VMName = vm.name
 			topo.VMNICs = append(topo.VMNICs, link)
 		}
 	}
 	return topo
+}
+
+type vmGuestNIC struct {
+	MAC string
+	IP  string
+}
+
+func collectVMGuestNICs(client *ssh.Client, vms []VM) map[string][]vmGuestNIC {
+	res := map[string][]vmGuestNIC{}
+	var targets []VM
+	for _, v := range vms {
+		if v.State == "powered_on" {
+			targets = append(targets, v)
+		}
+	}
+	if len(targets) == 0 {
+		return res
+	}
+	var b strings.Builder
+	for _, v := range targets {
+		b.WriteString("printf '===VM===%d\\n' ")
+		b.WriteString(strconv.Itoa(v.ID))
+		b.WriteString("; vim-cmd vmsvc/get.guest ")
+		b.WriteString(strconv.Itoa(v.ID))
+		b.WriteString("; ")
+	}
+	out, err := runEsxiRetry(client, "vm guest batch", b.String(), 35*time.Second, 2, func(out string) bool {
+		return strings.Contains(out, "===VM===")
+	})
+	if err != nil {
+		logx.Warn("esxi vm guest batch failed", "err", err.Error(), "bytes", len(out))
+	}
+	byID := parseBatchVMGuestNICs(out)
+	nameByID := make(map[int]string, len(targets))
+	for _, v := range targets {
+		nameByID[v.ID] = v.Name
+	}
+	for id, nics := range byID {
+		if name := nameByID[id]; name != "" && len(nics) > 0 {
+			res[name] = nics
+		}
+	}
+	return res
 }
 
 func collectVMKPorts(client *ssh.Client) ([]VMKPort, bool) {
@@ -2737,6 +2783,124 @@ func parseVMPortList(out string) []VMNICLink {
 	}
 	flush()
 	return list
+}
+
+func parseBatchVMGuestNICs(out string) map[int][]vmGuestNIC {
+	res := map[int][]vmGuestNIC{}
+	currentID := -1
+	var buf strings.Builder
+	flush := func() {
+		if currentID >= 0 {
+			if nics := parseVMGuestNICs(buf.String()); len(nics) > 0 {
+				res[currentID] = nics
+			}
+		}
+		buf.Reset()
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "===VM===") {
+			flush()
+			idStr := strings.TrimRight(strings.TrimPrefix(line, "===VM==="), "\r")
+			if id, err := strconv.Atoi(idStr); err == nil {
+				currentID = id
+			} else {
+				currentID = -1
+			}
+			continue
+		}
+		if currentID < 0 {
+			continue
+		}
+		buf.WriteString(line)
+		buf.WriteByte('\n')
+	}
+	flush()
+	return res
+}
+
+func parseVMGuestNICs(out string) []vmGuestNIC {
+	var list []vmGuestNIC
+	var cur *vmGuestNIC
+	inIPList := false
+	flush := func() {
+		if cur != nil && cur.MAC != "" && cur.IP != "" {
+			list = append(list, *cur)
+		}
+		cur = nil
+		inIPList = false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.Contains(trim, "(vim.vm.GuestInfo.NicInfo)") && strings.HasSuffix(trim, "{") {
+			flush()
+			cur = &vmGuestNIC{}
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		if strings.HasPrefix(trim, "ipAddress = (string)") {
+			inIPList = true
+			continue
+		}
+		if inIPList {
+			if strings.HasPrefix(trim, "]") {
+				inIPList = false
+				continue
+			}
+			if ip := firstQuoted(trim); ip != "" && usefulGuestIP(ip) && cur.IP == "" {
+				cur.IP = ip
+			}
+			continue
+		}
+		if strings.HasPrefix(trim, "macAddress =") {
+			cur.MAC = firstQuoted(trim)
+			continue
+		}
+		if strings.HasPrefix(trim, "}") {
+			flush()
+		}
+	}
+	flush()
+	return list
+}
+
+func fillVMNICGuestIPs(links []VMNICLink, guestNICs []vmGuestNIC) []VMNICLink {
+	if len(links) == 0 || len(guestNICs) == 0 {
+		return links
+	}
+	ipByMAC := make(map[string]string, len(guestNICs))
+	for _, nic := range guestNICs {
+		if nic.MAC == "" || nic.IP == "" {
+			continue
+		}
+		ipByMAC[strings.ToLower(nic.MAC)] = nic.IP
+	}
+	for i := range links {
+		if links[i].IP != "" || links[i].MAC == "" {
+			continue
+		}
+		if ip := ipByMAC[strings.ToLower(links[i].MAC)]; ip != "" {
+			links[i].IP = ip
+		}
+	}
+	return links
+}
+
+func firstQuoted(s string) string {
+	if m := quotedRe.FindStringSubmatch(s); len(m) == 2 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+func usefulGuestIP(ip string) bool {
+	ip = strings.TrimSpace(ip)
+	if ip == "" || ip == "0.0.0.0" || ip == "::" {
+		return false
+	}
+	low := strings.ToLower(ip)
+	return !strings.HasPrefix(low, "fe80:")
 }
 
 // splitCSV 拆 "a, b, c" 风格的列表,去空格、丢空段。

@@ -261,7 +261,7 @@ const LINE_COLORS = [
 
 // --- 小工具 ---
 
-const STALE_THRESHOLD_MS = 10 * 60_000
+const STALE_THRESHOLD_MS = 30 * 60_000
 
 function useNowTick(intervalMs = 10_000): number {
   const [now, setNow] = useState(() => Date.now())
@@ -1963,6 +1963,7 @@ export default function Esxi() {
 
   const cs = getColorSet('purple')
   const empty = !loading && snapshots.length === 0
+  const now = useNowTick()
 
   const stats = useMemo(() => {
     const hostCnt = snapshots.length
@@ -1971,7 +1972,7 @@ export default function Esxi() {
     let runningVMs = 0
     let cpuPeak = -1
     for (const s of snapshots) {
-      if (s.reachable) onlineHosts++
+      if (s.reachable && !isStaleSample(s.sampled_at, now)) onlineHosts++
       if (s.vms) {
         totalVMs += s.vms.length
         for (const v of s.vms) {
@@ -1983,7 +1984,7 @@ export default function Esxi() {
       }
     }
     return { hostCnt, onlineHosts, totalVMs, runningVMs, cpuPeak }
-  }, [snapshots])
+  }, [now, snapshots])
 
   const lastSampled = useMemo(() => {
     let latest = ''

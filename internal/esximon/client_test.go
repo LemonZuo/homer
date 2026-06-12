@@ -542,6 +542,88 @@ vmk0  192.168.8.138  255.255.255.0  192.168.8.255   STATIC        192.168.8.1  f
 	}
 }
 
+func TestParseVMPortListIncludesIP(t *testing.T) {
+	out := `Port ID: 33554442
+vSwitch: vSwitch0
+Portgroup: VM Network
+MAC Address: 00:0c:29:86:f2:a0
+IP Address: 192.168.8.21
+Team Uplink: vmnic0
+
+Port ID: 33554443
+vSwitch: vSwitch0
+Portgroup: VM Network
+MAC Address: 00:0c:29:72:3f:e3
+IP Address: 0.0.0.0
+Team Uplink: vmnic0
+`
+	got := parseVMPortList(out)
+	if len(got) != 2 {
+		t.Fatalf("links = %#v", got)
+	}
+	if got[0].IP != "192.168.8.21" {
+		t.Fatalf("first ip = %q", got[0].IP)
+	}
+	if got[1].IP != "" {
+		t.Fatalf("0.0.0.0 should be ignored, got %q", got[1].IP)
+	}
+}
+
+func TestParseBatchVMGuestNICs(t *testing.T) {
+	out := `===VM===130
+(vim.vm.GuestInfo) {
+   guestState = "running",
+   net = (vim.vm.GuestInfo.NicInfo) [
+      (vim.vm.GuestInfo.NicInfo) {
+         network = "VM Network",
+         ipAddress = (string) [
+            "fe80::250:56ff:fe86:f2a0",
+            "192.168.8.21"
+         ],
+         macAddress = "00:0c:29:86:f2:a0",
+         connected = true
+      }
+   ],
+}
+===VM===131
+(vim.vm.GuestInfo) {
+   net = (vim.vm.GuestInfo.NicInfo) [
+      (vim.vm.GuestInfo.NicInfo) {
+         ipAddress = (string) [
+            "10.0.0.5"
+         ],
+         macAddress = "00:0c:29:72:3f:e3",
+      }
+   ],
+}
+`
+	got := parseBatchVMGuestNICs(out)
+	if got[130][0].MAC != "00:0c:29:86:f2:a0" || got[130][0].IP != "192.168.8.21" {
+		t.Fatalf("vm 130 guest nics = %#v", got[130])
+	}
+	if got[131][0].IP != "10.0.0.5" {
+		t.Fatalf("vm 131 guest nics = %#v", got[131])
+	}
+}
+
+func TestFillVMNICGuestIPs(t *testing.T) {
+	links := []VMNICLink{
+		{MAC: "00:0c:29:86:f2:a0"},
+		{MAC: "00:0c:29:72:3f:e3", IP: "192.168.8.30"},
+	}
+	guest := []vmGuestNIC{
+		{MAC: "00:0c:29:86:f2:a0", IP: "192.168.8.21"},
+		{MAC: "00:0c:29:72:3f:e3", IP: "192.168.8.31"},
+	}
+	got := fillVMNICGuestIPs(links, guest)
+	if got[0].IP != "192.168.8.21" {
+		t.Fatalf("missing ip should be filled, got %#v", got[0])
+	}
+	if got[1].IP != "192.168.8.30" {
+		t.Fatalf("existing ip should win, got %#v", got[1])
+	}
+}
+
 func TestTopologyCompleteDoesNotRequireVMKPorts(t *testing.T) {
 	m := HostMetrics{
 		VMs: []VM{{Name: "fnOS", State: "powered_on"}},

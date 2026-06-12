@@ -263,10 +263,10 @@ const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     sampled_at: new Date().toISOString(),
   },
   {
-    // demo-offline:DemoSection 里会把 sampled_at 改写为 now - 5min,触发离线样式
+    // demo-offline:DemoSection 里会把 sampled_at 改写为 now - 15min,触发离线样式
     name: 'demo-offline',
     mfr: 'Demo',
-    model: '离线(5 分钟未上报)',
+    model: '离线(10 分钟未上报)',
     power_source: 'unknown',
     battery_percent: 60,
     runtime_minutes: 22,
@@ -309,8 +309,8 @@ function fmtNum(v: number, fractionDigits = 0): string {
   return v.toFixed(fractionDigits)
 }
 
-// 超过 5 分钟没拿到新一帧采样即视为离线(SSE 推送 + 后端调度通常每轮 < 30s)
-const STALE_THRESHOLD_MS = 5 * 60_000
+// 超过 10 分钟没拿到新一帧采样即视为离线(SSE 推送 + 后端调度通常每轮 < 30s)
+const STALE_THRESHOLD_MS = 10 * 60_000
 
 function useNowTick(intervalMs = 10_000): number {
   const [now, setNow] = useState(() => Date.now())
@@ -1135,14 +1135,14 @@ function HostEmptyCard({ host }: { host: Snapshot }) {
 
 function DemoSection({ onClose }: { onClose: () => void }) {
   // 演示卡的 sampled_at 跟着 useNowTick 滴答推进:
-  //   demo-offline → now - 10min,始终展示离线样式
+  //   demo-offline → now - 15min,始终展示离线样式
   //   其余卡        → now,始终保持新鲜
   const now = useNowTick()
   const demoUpses = useMemo<SnapshotUPS[]>(
     () =>
       DEMO_BATTERY_VARIANTS.map((u) => ({
         ...u,
-        sampled_at: new Date(u.name === 'demo-offline' ? now - 10 * 60 * 1000 : now).toISOString(),
+        sampled_at: new Date(u.name === 'demo-offline' ? now - 15 * 60 * 1000 : now).toISOString(),
       })),
     [now],
   )
@@ -1162,7 +1162,7 @@ function DemoSection({ onClose }: { onClose: () => void }) {
         <div>
           <div className="text-[14px] font-semibold">样式演示</div>
           <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-            非真实数据,仅展示聚合总览卡、不同电量 / 电源 / 充电状态、以及超过 5 分钟未上报的离线样式。
+            非真实数据,仅展示聚合总览卡、不同电量 / 电源 / 充电状态、以及超过 10 分钟未上报的离线样式。
           </div>
         </div>
         <Button variant="ghost" size="sm" onClick={onClose}>
