@@ -50,7 +50,7 @@
 | `GET` | `/api/scheduler/jobs` | 列出所有 job：cron、上次执行时间/结果、连续失败次数 |
 | `POST` | `/api/scheduler/jobs/:name/run` | 手动触发；`:name` 取下方任务名 |
 
-进程内当前注册 4 个 job：
+进程内当前注册 8 个 job：
 
 | name | cron 来源 | 默认值 | 行为 |
 | --- | --- | --- | --- |
@@ -58,8 +58,12 @@
 | `event` | `EVENT_REMIND_CRON` | `0 0 9 * * *` | 扫描启用事项，命中提醒窗口的推送（同日去重） |
 | `acme-renew` | `ACME_RENEW_CRON` | `0 0 3 * * *` | 剩余天数 ≤ `ACME_RENEW_BEFORE_DAYS` 的证书发起续期 |
 | `acme-deploy-retry` | `ACME_DEPLOY_RETRY_CRON` | `0 * * * * *` | 扫描 `status='retrying' AND next_retry_at<=now` 的部署任务择时拉起 |
+| `ups-sample` | `UPS_SAMPLE_CRON` | `*/30 * * * * *` | 对每台 `ups_host(enabled='1')` 跑一轮 `upsc` 采样并更新 `ups_state` |
+| `ups-cleanup` | `UPS_CLEANUP_CRON` | `0 0 4 * * *` | 按 `UPS_RETENTION_DAYS` 清理 `ups_sample` |
+| `esxi-sample` | `ESXI_SAMPLE_CRON` | `*/30 * * * * *` | 对每台 `esxi_host(enabled='1')` 跑一轮 esxcli/vsish/vim-cmd 采样，差集触发阈值告警 |
+| `esxi-cleanup` | `ESXI_CLEANUP_CRON` | `0 0 4 * * *` | 按 `ESXI_RETENTION_DAYS` 清理 `esxi_sample` |
 
-把对应 env **设为空字符串** 即把该 job 改为「仅手动触发」（`/api/scheduler/jobs/:name/run`）。
+把对应 env **设为空字符串** 即把该 job 改为「仅手动触发」（`/api/scheduler/jobs/:name/run`）。`ups-sample` / `esxi-sample` 还受 `ROUTER_MAINTENANCE_WINDOW` 影响：窗口内返回 `ErrSkipped`，**不计成功也不计失败**，避开路由器/网关定时重启的离线误报。
 
 ## 通知 (`/api/notify`)
 
@@ -94,6 +98,8 @@
 | `event` | 事项提醒 |
 | `bypass` | 12306Bypass 转发 |
 | `scheduler_alert` | 调度任务失败告警（阈值 `SCHEDULER_ALERT_FAIL_THRESHOLD`） |
+| `ups` | UPS 状态告警（离线/电池/低电状态机） |
+| `esxi` | ESXi 阈值告警（CPU 温度 / CPU 使用率 / 内存使用率 / 磁盘温度 / datastore 使用率；差集语义） |
 
 ## CDN 加速域名 (`/api/cdnops`)
 
@@ -130,6 +136,44 @@
 | Method | Path | 说明 |
 | --- | --- | --- |
 | `POST` | `/api/byPass/receive` | 分流抢票助手回调入口；按 `bypass` 模块绑定的通道扇出（典型：企业微信 + Resend 邮件） |
+
+## UPS 监控 (`/api/ups`)
+
+UPS 采样与 ACME 完全解耦，机器/凭证走独立的 `ups_host` / `ups_ssh_credential` 两张表。
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/ups/snapshot` | 当前所有启用 UPS 的最新状态快照 |
+| `GET` | `/api/ups/stream` | **SSE** 实时推送 snapshot 变更（替代轮询） |
+| `GET` | `/api/ups/series` | 历史曲线，query：`host_kind=ups`、`host_id`、`range=1h/6h/24h/3d/7d` |
+| `POST` | `/api/ups/refresh` | 立即触发一轮采样（同 `POST /api/scheduler/jobs/ups-sample/run` 但走 service 路径） |
+| `GET` | `/api/ups/hosts` | UPS 机器列表（独立于 ACME 部署目标） |
+| `POST` | `/api/ups/hosts` | 新建机器 |
+| `PUT` | `/api/ups/hosts/:id` | 更新机器 |
+| `DELETE` | `/api/ups/hosts/:id` | 删除机器 |
+| `POST` | `/api/ups/hosts/:id/toggle` | 切换 enabled 开关（即时影响下一轮采样） |
+| `POST` | `/api/ups/hosts/:id/test` | 连通性测试：拨通 SSH + `upsc -l` 试探 |
+| `GET / POST / PUT / DELETE` | `/api/ups/credentials`（`:id`） | UPS 专用 SSH 凭证（独立于 ACME 的 `ssh-credentials`） |
+
+## ESXi 监控 (`/api/esxi`)
+
+接口形态与 UPS 完全对称，机器/凭证走 `esxi_host` / `esxi_ssh_credential`。
+
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/esxi/snapshot` | 当前所有 ESXi 主机的最新状态快照（平台/CPU/内存/温度/磁盘/MCE/USB/VM/网络拓扑） |
+| `GET` | `/api/esxi/stream` | **SSE** 实时推送 snapshot 变更 |
+| `GET` | `/api/esxi/series` | 历史曲线，query：`host_kind=esxi`、`host_id`、`range=1h/6h/24h/3d/7d`。当前 7 个 metric：CPU 各核温度 / 各盘温度 / CPU 使用率 / 内存已用 GiB / 各盘已用 GiB / 运行 VM 数 / MCE 累计 |
+| `POST` | `/api/esxi/refresh` | 立即触发一轮采样 |
+| `GET` | `/api/esxi/hosts` | ESXi 机器列表 |
+| `POST` | `/api/esxi/hosts` | 新建机器 |
+| `PUT` | `/api/esxi/hosts/:id` | 更新机器 |
+| `DELETE` | `/api/esxi/hosts/:id` | 删除机器 |
+| `POST` | `/api/esxi/hosts/:id/toggle` | 切换 enabled 开关 |
+| `POST` | `/api/esxi/hosts/:id/test` | 连通性测试：拨通 SSH + 跑探测命令 |
+| `GET / POST / PUT / DELETE` | `/api/esxi/credentials`（`:id`） | ESXi 专用 SSH 凭证 |
+
+阈值告警走「新增超阈值」差集语义：连续 `ESXI_ALERT_CONSECUTIVE_SAMPLES` 轮命中阈值才推一次，已在告警集里的不重复推。详见 [development.md#esxi-监控](development.md#esxi-监控) 的阈值清单。
 
 ## ACME (`/api/acme`)
 

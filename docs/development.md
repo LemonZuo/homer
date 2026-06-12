@@ -45,8 +45,11 @@ homer/
 │   ├── router/             # API + SPA fallback
 │   ├── scheduler/          # 进程内 cron (robfig/cron v3，6 段秒级)
 │   ├── sms/                # SmsForwarder 适配
+│   ├── sshlike/、sshx/      # 公共 SSH 拨号 / 跳板工具（acme/upsmon/esximon 三方共享）
+│   ├── upsmon/             # UPS 监控：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
+│   ├── esximon/            # ESXi 监控：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler
 │   └── web/                # embedded SPA handler
-├── sql/                    # 00 全量建表 + 0X_* 增量迁移（幂等存储过程）
+├── sql/                    # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 18）
 ├── frontend/               # React 19 + Vite + TS + Tailwind v4
 │   ├── dist/               # vite 产物，被 //go:embed all:frontend/dist 引用
 │   └── src/
@@ -106,6 +109,44 @@ cp .env.example .env
 
 > 这些重试只对**持久化部署配置**触发的任务生效；临时部署（手动一次性测试）不进重试队列。
 
+### 维护窗口（UPS / ESXi 共用）
+
+| KEY | 代码默认 | 说明 |
+| --- | --- | --- |
+| `ROUTER_MAINTENANCE_WINDOW` | `""`（关） | 形如 `04:00-04:10` 的窗口内跳过 `ups-sample` / `esxi-sample`，避免路由器/网关定时重启造成的离线误报；跳过会返回 `ErrSkipped`，scheduler **不计成功也不计失败** |
+
+### UPS 监控
+
+| KEY | 代码默认 | 说明 |
+| --- | --- | --- |
+| `UPS_SAMPLE_CRON` | `*/30 * * * * *` | 6 段秒级 cron；空字符串改 manual-only |
+| `UPS_CLEANUP_CRON` | `0 0 4 * * *` | 清理过期 `ups_sample` |
+| `UPS_RETENTION_DAYS` | `7` | `ups_sample` 保留天数 |
+| `UPS_SSH_TIMEOUT_SEC` | `5` | 单机一轮采样整体超时 |
+| `UPS_OFFLINE_THRESHOLD` | `3` | 单台 UPS reading 连续失败几轮才告警「设备失联」 |
+| `UPS_NUT_OFFLINE_THRESHOLD` | `5` | 主机 `upsc -l` 连续失败几轮才告警「主机 NUT 不可用」 |
+
+机器与凭证库与 ACME 独立（`ups_host` / `ups_ssh_credential` 两张表），UI 抽屉里 CRUD。
+
+### ESXi 监控
+
+| KEY | 代码默认 | 说明 |
+| --- | --- | --- |
+| `ESXI_SAMPLE_CRON` | `*/30 * * * * *` | 6 段秒级 cron；空字符串改 manual-only |
+| `ESXI_CLEANUP_CRON` | `0 0 4 * * *` | 清理过期 `esxi_sample` |
+| `ESXI_RETENTION_DAYS` | `7` | `esxi_sample` 保留天数 |
+| `ESXI_SSH_TIMEOUT_SEC` | `120` | 单机一轮要跑多次 esxcli/vsish/vim-cmd，给得宽 |
+| `ESXI_SLOW_REFRESH_INTERVAL_MIN` | `30` | 慢采集器（拓扑等）独立节流间隔，分钟 |
+| `ESXI_COMMAND_SLOW_LOG_MS` | `1500` | SSH 命令耗时超过该毫秒数即日志告警；`0` 关掉 |
+| `ESXI_ALERT_CONSECUTIVE_SAMPLES` | `5` | 阈值告警去抖：连续 N 轮超阈值才推一次 |
+| `ESXI_ALERT_CPU_TEMP_C` | `85` | CPU 温度阈值（°C） |
+| `ESXI_ALERT_CPU_USAGE_PERCENT` | `90` | CPU 使用率阈值（%） |
+| `ESXI_ALERT_MEMORY_USAGE_PERCENT` | `90` | 内存使用率阈值（%） |
+| `ESXI_ALERT_DISK_TEMP_C` | `55` | 磁盘温度阈值（°C） |
+| `ESXI_ALERT_DISK_USAGE_PERCENT` | `90` | 磁盘 datastore 使用率阈值（%） |
+
+机器与凭证库独立（`esxi_host` / `esxi_ssh_credential` 两张表）。告警走「新增超阈值」差集语义：持续异常不刷屏，只在「新加入超阈值集合」时推一次。
+
 ### 阿里云 AK/SK（留空 → 接口返回 503）
 
 | KEY | 用途 |
@@ -135,11 +176,11 @@ cp .env.example .env
 1. `config.Load()` → `logx.Init` → 日志打印 `homer starting`
 2. `fs.Sub(frontendFS, "frontend/dist")`（embed），失败 fatal
 3. `db.New(cfg)` 连 MySQL，失败 fatal
-4. `gormDB.AutoMigrate(...)` 14 张表（含 birthday / event / sms / notify / scheduler / ACME 全系列 / ssh_credential），失败 fatal
+4. `gormDB.AutoMigrate(...)` 22 张业务表（birthday / event / sms / notify / scheduler / ACME 全系列 / ssh_credential / UPS host+credential+sample+state / ESXi host+credential+sample+state），失败 fatal
 5. `notify.NewHub(db)` + `notify.NewStore(db)`
 6. `cdnops` / `certstore` service 构造（AK/SK 留空时标记未配置）
-7. `buildACMEService` 注册 4 个 deploy driver（ssh / safeline / alicas / fnos）
-8. `startScheduler` 注册 4 个 cron job → `mon.Hydrate(sched)` 预热历史 → `sched.Start()`，任一注册失败 fatal
+7. `buildACMEService` 注册 4 个 deploy driver（ssh / safeline / alicas / fnos）；`upsmon` / `esximon` 各装配 sampler + service + handler
+8. `startScheduler` 注册 8 个 cron job（birthday / event / acme-renew / acme-deploy-retry / ups-sample / ups-cleanup / esxi-sample / esxi-cleanup）→ `mon.Hydrate(sched)` 预热历史 → `sched.Start()`，任一注册失败 fatal
 9. `router.Setup(...)` 装 API + SPA fallback，再追加 `GET /healthz`
 10. `srv.Run(":<SERVER_PORT>")`；退出时 `sched.Stop()`
 
@@ -165,6 +206,18 @@ Schema 变更采取**双轨并行**：GORM `AutoMigrate` + `sql/` 增量脚本�
 | `04_acme_drop_main_domain_unique.sql` | 去掉 `acme_domain.main_domain` 唯一索引（允许并存证书） |
 | `05_acme_issue_task_retry.sql` | `acme_issue_task` 增加失败重试列 |
 | `06_acme_cas_decouple.sql` | CAS 改为通用 driver `upload_cas`，老 `cas_enabled` / `cas_cert_id` 不再使用 |
+| `07_ups_monitor.sql` | UPS 监控初版：`ups_sample` + `ups_state` |
+| `08_ups_state_detail.sql` | UPS state 增补字段（电池电压/标称/类型等） |
+| `09_ups_battery_meta.sql` | UPS 电池元数据补全 |
+| `10_ups_host_decouple.sql` | UPS 与 ACME 解耦：新增 `ups_host` + `ups_ssh_credential`，删 `acme_deploy_target.ups_monitor` |
+| `11_esxi.sql` | ESXi 监控初版建表：`esxi_host` + `esxi_ssh_credential` + `esxi_sample` + `esxi_state` |
+| `12_esxi_sample_detail.sql` | `esxi_sample` 详情列（CPU 各核 / 各盘温度 JSON 等） |
+| `13_esxi_runtime_usage.sql` | `esxi_state.runtime_json` runtime 使用率快照 |
+| `14_bastion_key_rename.sql` | `config_json` 里 bastion 外键统一为 `bastion_id`（acme / ups / esxi 三家共用 sshlike） |
+| `15_esxi_state_boot_nic.sql` | `esxi_state` 增补 boot/NIC 列 |
+| `16_esxi_state_topology.sql` | `esxi_state.topology_json` 网络拓扑快照 |
+| `17_esxi_alert_state.sql` | ESXi 阈值告警差集状态 |
+| `18_esxi_sample_usage.sql` | `esxi_sample` 历史曲线 3 项指标：`cpu_usage_percent` / `memory_used_bytes` / `disk_usage_json` |
 
 `0X_*.sql` 全部用存储过程做幂等保护，重复执行无副作用。新装库按编号依次跑一遍即可（也可只跑 00，跳过 0X，因为 00 已含最新列）。已有数据的库只跑 0X 增量。
 

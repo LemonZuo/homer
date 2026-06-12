@@ -39,7 +39,7 @@ done
 
 ### AutoMigrate
 
-后端启动时会 `AutoMigrate` 14 张业务表，只做**追加式**变更（加列、加索引），不会 drop。这层是兜底，新加字段不至于因为漏跑迁移就启动失败。**真正的 schema 变更仍要写到 `sql/0X_*.sql`**，AutoMigrate 不能依赖。
+后端启动时会 `AutoMigrate` 22 张业务表（含 ACME / 通知 / 调度 / SMS / UPS / ESXi 全系列），只做**追加式**变更（加列、加索引），不会 drop。这层是兜底，新加字段不至于因为漏跑迁移就启动失败。**真正的 schema 变更仍要写到 `sql/0X_*.sql`**，AutoMigrate 不能依赖。
 
 ## Docker Compose
 
