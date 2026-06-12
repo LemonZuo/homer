@@ -351,13 +351,10 @@ function Chassis({
         </div>
       ))}
 
-      {/* 名字徽章 */}
+      {/* vSwitch 名嵌入到机箱右上角 (z-10 浮于 strip 之上) */}
       <div
-        className="absolute left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded border bg-background px-1.5 py-[1px] font-mono text-[10px] font-medium text-foreground shadow-sm"
-        style={{
-          top: 6,
-          borderColor: CHASSIS_BORDER,
-        }}
+        className="pointer-events-auto absolute z-10 whitespace-nowrap font-mono text-[10px] font-medium leading-none text-foreground"
+        style={{ top: 4, right: 4 }}
         title={name}
       >
         {name}
@@ -443,7 +440,7 @@ function VSwitchBlock({
   const upTopOffset = (innerH - upColH) / 2
 
   return (
-    <div className="flex items-start" style={{ height: innerH }}>
+    <div className="flex items-start">
       <div
         className="flex flex-col"
         style={{
@@ -587,7 +584,7 @@ export function NetTopologyFlow({
       {expanded ? (
         <div className="mt-2 w-full overflow-x-auto rounded-md border border-border bg-muted/10 p-3">
           <div
-            className="flex flex-col"
+            className="flex flex-col items-center"
             style={{ rowGap: SW_GAP, minWidth: COL_W_PG + LINE_ZONE_W * 2 + COL_W_CH + COL_W_UP }}
           >
             {vswitches.map((sw) => (
