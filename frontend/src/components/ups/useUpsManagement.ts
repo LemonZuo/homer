@@ -138,3 +138,5 @@ export function useUpsManagement({ reloadSnapshots }: UseUpsManagementArgs) {
     onDeleteCredential,
   }
 }
+
+export type UpsManagement = ReturnType<typeof useUpsManagement>

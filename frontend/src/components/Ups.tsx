@@ -1,14 +1,11 @@
 import { useCallback, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Card } from './ui/card'
-import { UpsHostsDrawer } from './ups/UpsHostsDrawer'
-import { UpsHostEditDialog } from './ups/UpsHostEditDialog'
-import { UpsCredentialsDrawer } from './ups/UpsCredentialsDrawer'
-import { UpsCredentialEditDialog } from './ups/UpsCredentialEditDialog'
 import { DemoSection } from './ups/DemoSection'
 import { HostSection } from './ups/HostSection'
 import { SummaryCard } from './ups/SummaryCard'
 import { UpsEmptyState } from './ups/UpsEmptyState'
+import { UpsManagementDialogs } from './ups/UpsManagementDialogs'
 import { UpsPageHeader } from './ups/UpsPageHeader'
 import { useUpsManagement } from './ups/useUpsManagement'
 import { useUpsSnapshots } from './ups/useUpsSnapshots'
@@ -24,31 +21,7 @@ export default function Ups() {
     reload: reloadSnapshots,
     triggerSample,
   } = useUpsSnapshots()
-  const {
-    hostsOpen,
-    setHostsOpen,
-    hostEditOpen,
-    setHostEditOpen,
-    editingHost,
-    credsOpen,
-    setCredsOpen,
-    credEditOpen,
-    setCredEditOpen,
-    editingCred,
-    hosts,
-    credentials,
-    loadHosts,
-    loadCredentials,
-    openHostsDrawer,
-    openCredsDrawer,
-    onAddHost,
-    onEditHost,
-    onDeleteHost,
-    onTestHost,
-    onAddCredential,
-    onEditCredential,
-    onDeleteCredential,
-  } = useUpsManagement({ reloadSnapshots })
+  const management = useUpsManagement({ reloadSnapshots })
   const [demoMode, setDemoMode] = useState(false)
   const demoTapRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({
     count: 0,
@@ -79,7 +52,7 @@ export default function Ups() {
         lastSampled={lastSampled}
         refreshing={refreshing}
         onRefresh={triggerSample}
-        onOpenHosts={openHostsDrawer}
+        onOpenHosts={management.openHostsDrawer}
         onDemoTap={bumpDemoTap}
       />
 
@@ -91,7 +64,7 @@ export default function Ups() {
           加载中
         </Card>
       ) : empty ? (
-        <UpsEmptyState onOpenHosts={openHostsDrawer} />
+        <UpsEmptyState onOpenHosts={management.openHostsDrawer} />
       ) : (
         <div className="grid grid-cols-1 gap-x-6 gap-y-6 lg:grid-cols-2">
           {snapshots.map((s) => (
@@ -102,42 +75,7 @@ export default function Ups() {
 
       {demoMode && <DemoSection onClose={() => setDemoMode(false)} />}
 
-      <UpsHostsDrawer
-        open={hostsOpen}
-        onOpenChange={setHostsOpen}
-        hosts={hosts}
-        onAdd={onAddHost}
-        onEdit={onEditHost}
-        onDelete={onDeleteHost}
-        onTest={onTestHost}
-        onManageCredentials={openCredsDrawer}
-      />
-      <UpsHostEditDialog
-        open={hostEditOpen}
-        onOpenChange={setHostEditOpen}
-        target={editingHost}
-        hosts={hosts}
-        credentials={credentials}
-        onManageCredentials={openCredsDrawer}
-        onSaved={() => {
-          void loadHosts()
-          void reloadSnapshots()
-        }}
-      />
-      <UpsCredentialsDrawer
-        open={credsOpen}
-        onOpenChange={setCredsOpen}
-        credentials={credentials}
-        onAdd={onAddCredential}
-        onEdit={onEditCredential}
-        onDelete={onDeleteCredential}
-      />
-      <UpsCredentialEditDialog
-        open={credEditOpen}
-        onOpenChange={setCredEditOpen}
-        target={editingCred}
-        onSaved={loadCredentials}
-      />
+      <UpsManagementDialogs management={management} onHostSaved={reloadSnapshots} />
     </div>
   )
 }
