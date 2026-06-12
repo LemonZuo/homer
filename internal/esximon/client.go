@@ -212,11 +212,24 @@ type VMNICLink struct {
 	TeamUplink string `json:"team_uplink"`
 }
 
-// NetTopology 网络拓扑:vSwitch 全集 + 所有 VM 的 vNIC 边。
-// 前端按 pNIC → vSwitch → Portgroup → VMs 四列渲染。
+// VMKPort 是 VMkernel 网卡(vmk0/vmk1...)接入的 Portgroup。
+// IPv4 为空表示只拿到接口归属,没拿到 IPv4 地址。
+type VMKPort struct {
+	Name      string `json:"name"`
+	VSwitch   string `json:"vswitch"`
+	Portgroup string `json:"portgroup"`
+	MAC       string `json:"mac"`
+	IPv4      string `json:"ipv4,omitempty"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// NetTopology 网络拓扑:vSwitch 全集 + VM vNIC 边 + VMkernel 端口。
+// 前端按 pNIC → vSwitch → Portgroup → VMs/VMkernel → pNIC 渲染。
 type NetTopology struct {
-	VSwitches []VSwitchInfo `json:"vswitches"`
-	VMNICs    []VMNICLink   `json:"vm_nics"`
+	VSwitches    []VSwitchInfo `json:"vswitches"`
+	VMNICs       []VMNICLink   `json:"vm_nics"`
+	VMKPorts     []VMKPort     `json:"vmk_ports,omitempty"`
+	VMKCollected bool          `json:"-"`
 }
 
 func newHostBoot() HostBoot {
@@ -2399,7 +2412,7 @@ func poweredOnVMNames(vms []VM) []string {
 	return names
 }
 
-// collectNetTopology 抓 vSwitch + 每个 VM 的 vNIC 边。
+// collectNetTopology 抓 vSwitch + 每个 VM 的 vNIC 边 + VMkernel 端口。
 // vSwitch list 一次拿全;`esxcli network vm list` 给出每台正在跑的 VM 的 World ID,
 // 再对每个 World ID 跑一次 `esxcli network vm port list -w <wid>`。
 // 注意:这里用的 ID 是 World ID(esxcli 体系),与 VMShallow.ID(vim-cmd 的 Vmid)不是同一个值。
@@ -2414,6 +2427,7 @@ func collectNetTopology(client *ssh.Client, expectVMs []string) NetTopology {
 	} else {
 		logx.Warn("esxi vswitch list failed", "err", err.Error())
 	}
+	topo.VMKPorts, topo.VMKCollected = collectVMKPorts(client)
 	listOut, err := runEsxiRetry(client, "vm net list", "esxcli network vm list", defaultCmdTimeout, 3, func(s string) bool {
 		if strings.TrimSpace(s) == "" {
 			// 没有开机 VM 时输出为空是合法的;有 VM 该开机却输出为空就是截断
@@ -2445,6 +2459,32 @@ func collectNetTopology(client *ssh.Client, expectVMs []string) NetTopology {
 		}
 	}
 	return topo
+}
+
+func collectVMKPorts(client *ssh.Client) ([]VMKPort, bool) {
+	out, err := runEsxiRetry(client, "vmkernel interface list", "esxcli network ip interface list", defaultCmdTimeout, 2, func(s string) bool {
+		return strings.Contains(s, "Name:") || strings.Contains(s, "vmk")
+	})
+	if err != nil {
+		logx.Warn("esxi vmkernel interface list failed", "err", err.Error())
+		return nil, false
+	}
+	ports := parseIPInterfaceList(out)
+	for i := range ports {
+		if ports[i].Name == "" {
+			continue
+		}
+		cmd := "esxcli network ip interface ipv4 get -i " + sshx.ShellQuote(ports[i].Name)
+		ipOut, err := runEsxiRetry(client, "vmkernel ipv4 "+ports[i].Name, cmd, defaultCmdTimeout, 2, func(s string) bool {
+			return strings.Contains(s, ports[i].Name) || strings.Contains(s, "IPv4 Address")
+		})
+		if err != nil {
+			logx.Warn("esxi vmkernel ipv4 get failed", "vmk", ports[i].Name, "err", err.Error())
+			continue
+		}
+		ports[i].IPv4 = parseIPv4Get(ipOut, ports[i].Name)
+	}
+	return ports, true
 }
 
 // vmNetListCovers 检查 `esxcli network vm list` 的解析结果是否覆盖了全部期望 VM。
@@ -2558,6 +2598,91 @@ func parseVSwitchList(out string) []VSwitchInfo {
 	}
 	flush()
 	return list
+}
+
+// parseIPInterfaceList 解析 `esxcli network ip interface list`。
+// 输出按 vmk 分块,每块内是 KV 行;标准 vSwitch 下 Portset 就是 vSwitch 名。
+func parseIPInterfaceList(out string) []VMKPort {
+	var list []VMKPort
+	var cur *VMKPort
+	flush := func() {
+		if cur != nil && cur.Name != "" {
+			list = append(list, *cur)
+		}
+		cur = nil
+	}
+	for _, line := range strings.Split(out, "\n") {
+		raw := line
+		trim := strings.TrimSpace(raw)
+		if trim == "" {
+			flush()
+			continue
+		}
+		if !strings.HasPrefix(raw, " ") && !strings.HasPrefix(raw, "\t") && !strings.Contains(trim, ":") {
+			flush()
+			if strings.HasPrefix(trim, "vmk") {
+				cur = &VMKPort{Name: trim}
+			}
+			continue
+		}
+		colon := strings.Index(trim, ":")
+		if colon < 0 {
+			continue
+		}
+		key := strings.TrimSpace(trim[:colon])
+		val := strings.TrimSpace(trim[colon+1:])
+		if cur == nil && (key == "Name" || strings.HasPrefix(val, "vmk")) {
+			cur = &VMKPort{}
+		}
+		if cur == nil {
+			continue
+		}
+		switch key {
+		case "Name":
+			if cur.Name != "" && cur.Name != val {
+				flush()
+				cur = &VMKPort{}
+			}
+			cur.Name = val
+		case "Portset":
+			cur.VSwitch = val
+		case "Portgroup":
+			cur.Portgroup = val
+		case "MAC Address":
+			cur.MAC = val
+		case "Enabled":
+			cur.Enabled = strings.EqualFold(val, "true") || strings.EqualFold(val, "yes")
+		}
+	}
+	flush()
+	return list
+}
+
+// parseIPv4Get 解析 `esxcli network ip interface ipv4 get -i vmkX` 的表格输出。
+func parseIPv4Get(out, name string) string {
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "----") || strings.HasPrefix(trim, "Name ") {
+			continue
+		}
+		fields := strings.Fields(trim)
+		if len(fields) >= 2 && fields[0] == name {
+			if fields[1] != "0.0.0.0" && fields[1] != "N/A" {
+				return fields[1]
+			}
+			return ""
+		}
+		colon := strings.Index(trim, ":")
+		if colon < 0 {
+			continue
+		}
+		key := strings.TrimSpace(trim[:colon])
+		val := strings.TrimSpace(trim[colon+1:])
+		if key == "IPv4 Address" && val != "0.0.0.0" && val != "N/A" {
+			return val
+		}
+	}
+	return ""
 }
 
 // parseVMPortList 解析 `esxcli network vm port list -w <wid>`。

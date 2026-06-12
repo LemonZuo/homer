@@ -189,7 +189,8 @@ func mergeHostMetrics(base, next HostMetrics) HostMetrics {
 	return base
 }
 
-// mergeTopology 两轮采集的拓扑做并集:vSwitch 按整组补,vm_nics 按 vm_name+mac 去重合并。
+// mergeTopology 两轮采集的拓扑做并集:vSwitch 按整组补,vm_nics 按 vm_name+mac 去重合并,
+// vmk_ports 按 vmk 名称合并。
 // `esxcli network vm list` 偶发截断会让单轮只抓到部分 VM,并集能把两轮各自抓到的拼全。
 func mergeTopology(base, next NetTopology) NetTopology {
 	if len(base.VSwitches) == 0 {
@@ -206,7 +207,46 @@ func mergeTopology(base, next NetTopology) NetTopology {
 			seen[key] = true
 		}
 	}
+	if next.VMKCollected {
+		base.VMKPorts = mergeVMKPorts(base.VMKPorts, next.VMKPorts)
+		base.VMKCollected = true
+	}
 	return base
+}
+
+func mergeVMKPorts(base, next []VMKPort) []VMKPort {
+	idx := make(map[string]int, len(base))
+	for i, p := range base {
+		idx[p.Name] = i
+	}
+	for _, p := range next {
+		if p.Name == "" {
+			continue
+		}
+		if i, ok := idx[p.Name]; ok {
+			base[i] = mergeVMKPort(base[i], p)
+			continue
+		}
+		idx[p.Name] = len(base)
+		base = append(base, p)
+	}
+	return base
+}
+
+func mergeVMKPort(base, next VMKPort) VMKPort {
+	if next.VSwitch == "" {
+		next.VSwitch = base.VSwitch
+	}
+	if next.Portgroup == "" {
+		next.Portgroup = base.Portgroup
+	}
+	if next.MAC == "" {
+		next.MAC = base.MAC
+	}
+	if next.IPv4 == "" {
+		next.IPv4 = base.IPv4
+	}
+	return next
 }
 
 func platformUsable(p PlatformInfo) bool {

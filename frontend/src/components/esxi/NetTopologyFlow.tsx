@@ -24,11 +24,21 @@ interface VMNICLink {
   mac: string
   team_uplink: string
 }
+interface VMKPort {
+  name: string
+  vswitch: string
+  portgroup: string
+  mac?: string
+  ipv4?: string
+  enabled: boolean
+}
 export interface NetTopology {
   vswitches: VSwitchInfo[]
   vm_nics: VMNICLink[]
+  vmk_ports?: VMKPort[]
 }
 type VMInfo = { vmName: string; teamUplink: string; mac: string }
+type VMKInfo = { name: string; mac?: string; ipv4?: string; enabled: boolean }
 
 // 列宽/行高:整套像素布局都依赖这套常量。
 // 关键尺寸严格对齐 ESXi vswitch-diagram CSS:
@@ -49,12 +59,15 @@ const ICON_SIZE = 12
 const ICON_HALF = ICON_SIZE / 2
 const PG_HEADER = 30
 const PG_VM_ROW = 36
+const PG_VMK_SECTION = 22
+const PG_VMK_ROW = 30
 const PG_FOOTER = 6
 const PG_EMPTY = 50
 const UP_CARD_H = 62
 const COL_GAP = 10
 const SW_GAP = 28
 const VM_ROW_CENTER = 12
+const VMK_ROW_CENTER = 15
 
 // ESXi UI 实际配色
 const CHASSIS_BG = '#ccccd0'
@@ -63,9 +76,14 @@ const STRIP_BG = '#bababa'
 const STRIP_BORDER = '#8d8d8f'
 const LINE_COLOR = '#000'
 
-function pgHeight(vms: number) {
-  if (vms === 0) return PG_EMPTY
-  return PG_HEADER + PG_VM_ROW * vms + PG_FOOTER
+function pgHeight(vms: number, vmks: number) {
+  if (vms === 0 && vmks === 0) return PG_EMPTY
+  return (
+    PG_HEADER +
+    (vmks > 0 ? PG_VMK_SECTION + PG_VMK_ROW * vmks : 0) +
+    PG_VM_ROW * vms +
+    PG_FOOTER
+  )
 }
 
 function fmtBitrate(mbps?: number): string {
@@ -102,7 +120,8 @@ function PortIcon({
   )
 }
 
-function PortgroupCard({ pg, vms }: { pg: string; vms: VMInfo[] }) {
+function PortgroupCard({ pg, vms, vmks }: { pg: string; vms: VMInfo[]; vmks: VMKInfo[] }) {
+  const empty = vms.length === 0 && vmks.length === 0
   return (
     <div
       className="rounded-md border border-border bg-background shadow-sm"
@@ -120,12 +139,40 @@ function PortgroupCard({ pg, vms }: { pg: string; vms: VMInfo[] }) {
           {vms.length} 虚机
         </span>
       </div>
-      {vms.length === 0 ? (
+      {empty ? (
         <div className="px-2.5 py-1.5 text-[10.5px] text-muted-foreground">
           无虚机
         </div>
       ) : (
         <div className="pb-1.5 pt-0">
+          {vmks.length > 0 ? (
+            <div className={vms.length > 0 ? 'border-b border-border/70 pb-0.5' : ''}>
+              <div
+                className="flex items-center gap-1.5 px-2.5 text-[10.5px] font-medium text-muted-foreground"
+                style={{ height: PG_VMK_SECTION }}
+              >
+                <ChevronDown className="h-3 w-3 shrink-0" />
+                <span>VMkernel 端口 ({vmks.length})</span>
+              </div>
+              {vmks.map((vmk) => (
+                <div
+                  key={vmk.name}
+                  className="flex items-center gap-1.5 px-2.5"
+                  style={{ height: PG_VMK_ROW }}
+                  title={[
+                    vmk.ipv4 ? `${vmk.name}: ${vmk.ipv4}` : vmk.name,
+                    vmk.mac ? `MAC ${vmk.mac}` : '',
+                  ].filter(Boolean).join(' · ')}
+                >
+                  <Network className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+                    {vmk.name}
+                    {vmk.ipv4 ? `: ${vmk.ipv4}` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {vms.map((v) => (
             <div
               key={v.vmName + v.mac}
@@ -368,10 +415,12 @@ function Chassis({
 function VSwitchBlock({
   sw,
   vmsByPG,
+  vmksByPG,
   nicByName,
 }: {
   sw: VSwitchInfo
   vmsByPG: Map<string, VMInfo[]>
+  vmksByPG: Map<string, VMKInfo[]>
   nicByName: Map<string, NIC>
 }) {
   const pgs = sw.portgroups ?? []
@@ -379,7 +428,8 @@ function VSwitchBlock({
 
   const pgInfos = pgs.map((pg) => {
     const vms = vmsByPG.get(sw.name + '||' + pg) ?? []
-    return { pg, vms, height: pgHeight(vms.length) }
+    const vmks = vmksByPG.get(sw.name + '||' + pg) ?? []
+    return { pg, vms, vmks, height: pgHeight(vms.length, vmks.length) }
   })
 
   const pgColH =
@@ -395,14 +445,32 @@ function VSwitchBlock({
   {
     let pgY = (innerH - pgColH) / 2
     for (const info of pgInfos) {
-      if (info.vms.length === 0) {
+      if (info.vms.length === 0 && info.vmks.length === 0) {
         pgY += info.height + COL_GAP
         continue
       }
-      const blockAnchors: SideAnchor[] = info.vms.map((v, vi) => ({
-        y: pgY + PG_HEADER + PG_VM_ROW * vi + VM_ROW_CENTER,
-        active: !!v.teamUplink,
-      }))
+      const blockAnchors: SideAnchor[] = []
+      if (info.vmks.length > 0) {
+        const vmkStartY = pgY + PG_HEADER + PG_VMK_SECTION
+        for (let i = 0; i < info.vmks.length; i += 1) {
+          const vmk = info.vmks[i]
+          blockAnchors.push({
+            y: vmkStartY + PG_VMK_ROW * i + VMK_ROW_CENTER,
+            active: vmk.enabled === true,
+          })
+        }
+      }
+      const vmStartY =
+        pgY +
+        PG_HEADER +
+        (info.vmks.length > 0 ? PG_VMK_SECTION + PG_VMK_ROW * info.vmks.length : 0)
+      for (let i = 0; i < info.vms.length; i += 1) {
+        const v = info.vms[i]
+        blockAnchors.push({
+          y: vmStartY + PG_VM_ROW * i + VM_ROW_CENTER,
+          active: !!v.teamUplink,
+        })
+      }
       const firstY = blockAnchors[0].y
       const lastY = blockAnchors[blockAnchors.length - 1].y
       leftBlocks.push({
@@ -450,7 +518,7 @@ function VSwitchBlock({
         }}
       >
         {pgInfos.map((info) => (
-          <PortgroupCard key={info.pg} pg={info.pg} vms={info.vms} />
+          <PortgroupCard key={info.pg} pg={info.pg} vms={info.vms} vmks={info.vmks} />
         ))}
       </div>
 
@@ -555,6 +623,24 @@ export function NetTopologyFlow({
     return m
   }, [topo])
 
+  const vmksByPG = useMemo(() => {
+    const m = new Map<string, VMKInfo[]>()
+    for (const vmk of topo.vmk_ports ?? []) {
+      const key = vmk.vswitch + '||' + vmk.portgroup
+      const arr = m.get(key) ?? []
+      if (!arr.find((v) => v.name === vmk.name)) {
+        arr.push({
+          name: vmk.name,
+          mac: vmk.mac,
+          ipv4: vmk.ipv4,
+          enabled: vmk.enabled,
+        })
+      }
+      m.set(key, arr)
+    }
+    return m
+  }, [topo])
+
   const nicByName = useMemo(
     () => new Map<string, NIC>((nics ?? []).map((n) => [n.name, n])),
     [nics],
@@ -562,6 +648,7 @@ export function NetTopologyFlow({
 
   const vswitches = topo.vswitches ?? []
   const pNICCount = nics?.length ?? new Set(vswitches.flatMap((s) => s.uplinks ?? [])).size
+  const vmKernelCount = topo.vmk_ports?.length ?? 0
 
   return (
     <Card className="px-3 py-3">
@@ -573,7 +660,7 @@ export function NetTopologyFlow({
         <Waypoints className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[12.5px] font-medium text-foreground">网络拓扑</span>
         <span className="ml-auto rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-          {pNICCount} 物理 · {vswitches.length} vSwitch · {topo.vm_nics?.length ?? 0} vNIC
+          {pNICCount} 物理 · {vswitches.length} vSwitch · {topo.vm_nics?.length ?? 0} vNIC · {vmKernelCount} VMkernel
         </span>
         {expanded ? (
           <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
@@ -592,6 +679,7 @@ export function NetTopologyFlow({
                 key={sw.name}
                 sw={sw}
                 vmsByPG={vmsByPG}
+                vmksByPG={vmksByPG}
                 nicByName={nicByName}
               />
             ))}

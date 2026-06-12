@@ -208,9 +208,19 @@ interface VMNICLink {
   team_uplink: string
 }
 
+interface VMKPort {
+  name: string
+  vswitch: string
+  portgroup: string
+  mac: string
+  ipv4?: string
+  enabled: boolean
+}
+
 interface NetTopology {
   vswitches: VSwitchInfo[]
   vm_nics: VMNICLink[]
+  vmk_ports?: VMKPort[]
 }
 
 interface CoreTempPoint {
@@ -1761,7 +1771,8 @@ function HostBlock({ host }: { host: Snapshot }) {
             </div>
             {host.net_topology &&
               ((host.net_topology.vswitches?.length ?? 0) > 0 ||
-                (host.net_topology.vm_nics?.length ?? 0) > 0) ? (
+                (host.net_topology.vm_nics?.length ?? 0) > 0 ||
+                (host.net_topology.vmk_ports?.length ?? 0) > 0) ? (
               <div className="md:col-span-2">
                 <NetTopologyFlow topo={host.net_topology} nics={host.nics} />
               </div>

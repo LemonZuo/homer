@@ -539,7 +539,7 @@ func buildState(r HostResult, prev *model.EsxiState, now time.Time, sampleComple
 	st.VMJSON = stickyJSON(m.VMs, vmStatesComplete(m.VMs), prevJSON(prev, func(p *model.EsxiState) string { return p.VMJSON }))
 	st.BootJSON = stickyJSON(m.Boot, m.Boot.UptimeSeconds >= 0, prevJSON(prev, func(p *model.EsxiState) string { return p.BootJSON }))
 	st.NICJSON = stickyJSON(m.NICs, len(m.NICs) > 0, prevJSON(prev, func(p *model.EsxiState) string { return p.NICJSON }))
-	st.TopologyJSON = stickyJSON(m.Topology, topologyComplete(m), prevJSON(prev, func(p *model.EsxiState) string { return p.TopologyJSON }))
+	st.TopologyJSON = stickyTopologyJSON(m.Topology, topologyComplete(m), prevJSON(prev, func(p *model.EsxiState) string { return p.TopologyJSON }))
 	return st
 }
 
@@ -552,6 +552,32 @@ func stickyJSON(v any, ok bool, prevJSON string) string {
 		return prevJSON
 	}
 	return mustJSON(v)
+}
+
+func stickyTopologyJSON(cur NetTopology, ok bool, prevJSON string) string {
+	if ok {
+		if !cur.VMKCollected && prevJSON != "" {
+			if prev, hasPrev := parsePrevTopology(prevJSON); hasPrev && len(prev.VMKPorts) > 0 {
+				cur.VMKPorts = prev.VMKPorts
+			}
+		}
+		return mustJSON(cur)
+	}
+	if prevJSON != "" {
+		return prevJSON
+	}
+	return mustJSON(cur)
+}
+
+func parsePrevTopology(s string) (NetTopology, bool) {
+	if s == "" {
+		return NetTopology{}, false
+	}
+	var prev NetTopology
+	if json.Unmarshal([]byte(s), &prev) != nil {
+		return NetTopology{}, false
+	}
+	return prev, true
 }
 
 func stickyUSBJSON(cur USBState, prevJSON string) string {

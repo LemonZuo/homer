@@ -77,6 +77,71 @@ func TestStickyUSBJSONClearsKnownEmptyPassthrough(t *testing.T) {
 	}
 }
 
+func TestStickyTopologyJSONKeepsPreviousVMKPortsOnly(t *testing.T) {
+	prev := NetTopology{
+		VSwitches: []VSwitchInfo{{Name: "oldSwitch"}},
+		VMNICs: []VMNICLink{{
+			VMName:    "oldVM",
+			VSwitch:   "oldSwitch",
+			Portgroup: "Old Network",
+			MAC:       "00:0c:29:00:00:01",
+		}},
+		VMKPorts: []VMKPort{{
+			Name:      "vmk0",
+			VSwitch:   "vSwitch0",
+			Portgroup: "Management Network",
+			MAC:       "00:50:56:6a:11:22",
+			IPv4:      "192.168.8.138",
+			Enabled:   true,
+		}},
+	}
+	cur := NetTopology{
+		VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
+		VMNICs: []VMNICLink{{
+			VMName:    "fnOS",
+			VSwitch:   "vSwitch0",
+			Portgroup: "VM Network",
+			MAC:       "00:0c:29:86:f2:a0",
+		}},
+	}
+	gotJSON := stickyTopologyJSON(cur, true, mustJSON(prev))
+
+	var got NetTopology
+	if err := json.Unmarshal([]byte(gotJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.VSwitches) != 1 || got.VSwitches[0].Name != "vSwitch0" {
+		t.Fatalf("current vswitch should be kept, got %#v", got.VSwitches)
+	}
+	if len(got.VMNICs) != 1 || got.VMNICs[0].VMName != "fnOS" {
+		t.Fatalf("current vm_nics should be kept, got %#v", got.VMNICs)
+	}
+	if len(got.VMKPorts) != 1 || got.VMKPorts[0].Name != "vmk0" || got.VMKPorts[0].IPv4 != "192.168.8.138" {
+		t.Fatalf("previous vmk_ports should be preserved, got %#v", got.VMKPorts)
+	}
+}
+
+func TestStickyTopologyJSONUsesKnownEmptyVMKPorts(t *testing.T) {
+	prev := NetTopology{
+		VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
+		VMKPorts:  []VMKPort{{Name: "vmk0", IPv4: "192.168.8.138", Enabled: true}},
+	}
+	cur := NetTopology{
+		VSwitches:    []VSwitchInfo{{Name: "vSwitch0"}},
+		VMNICs:       []VMNICLink{{VMName: "fnOS", VSwitch: "vSwitch0", Portgroup: "VM Network", MAC: "00:0c:29:86:f2:a0"}},
+		VMKCollected: true,
+	}
+	gotJSON := stickyTopologyJSON(cur, true, mustJSON(prev))
+
+	var got NetTopology
+	if err := json.Unmarshal([]byte(gotJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.VMKPorts) != 0 {
+		t.Fatalf("known empty vmk_ports should clear previous values: %#v", got.VMKPorts)
+	}
+}
+
 func TestSampleMissingMetricsRequiresCompleteCurrentData(t *testing.T) {
 	m := HostMetrics{
 		CPU:     CPUStatic{Cores: 2},

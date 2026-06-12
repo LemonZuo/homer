@@ -502,6 +502,114 @@ vmnic1  0000:01:00.0  igc-community  Up            Up            2500  Full    1
 	}
 }
 
+func TestParseIPInterfaceList(t *testing.T) {
+	out := `vmk0
+   Name: vmk0
+   MAC Address: 00:50:56:6a:11:22
+   Enabled: true
+   Portset: vSwitch0
+   Portgroup: Management Network
+   Netstack Instance: defaultTcpipStack
+   VDS Name: N/A
+
+vmk1
+   Name: vmk1
+   MAC Address: 00:50:56:6a:33:44
+   Enabled: true
+   Portset: vSwitch0
+   Portgroup: vMotion Network
+   Netstack Instance: defaultTcpipStack
+`
+	got := parseIPInterfaceList(out)
+	if len(got) != 2 {
+		t.Fatalf("want 2 vmkernel ports, got %d: %#v", len(got), got)
+	}
+	if got[0].Name != "vmk0" || got[0].VSwitch != "vSwitch0" || got[0].Portgroup != "Management Network" || got[0].MAC != "00:50:56:6a:11:22" || !got[0].Enabled {
+		t.Fatalf("vmk0 = %+v", got[0])
+	}
+	if got[1].Name != "vmk1" || got[1].Portgroup != "vMotion Network" || !got[1].Enabled {
+		t.Fatalf("vmk1 = %+v", got[1])
+	}
+}
+
+func TestParseIPv4Get(t *testing.T) {
+	out := `Name  IPv4 Address   IPv4 Netmask   IPv4 Broadcast  Address Type  Gateway      DHCP DNS
+----  -------------  -------------  --------------  ------------  -----------  --------
+vmk0  192.168.8.138  255.255.255.0  192.168.8.255   STATIC        192.168.8.1  false
+`
+	if got := parseIPv4Get(out, "vmk0"); got != "192.168.8.138" {
+		t.Fatalf("ipv4 = %q", got)
+	}
+}
+
+func TestTopologyCompleteDoesNotRequireVMKPorts(t *testing.T) {
+	m := HostMetrics{
+		VMs: []VM{{Name: "fnOS", State: "powered_on"}},
+		Topology: NetTopology{
+			VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
+			VMNICs:    []VMNICLink{{VMName: "fnOS", MAC: "00:0c:29:00:00:01"}},
+		},
+	}
+	if !topologyComplete(m) {
+		t.Fatal("topology should be complete when VM vNICs are collected, even if VMkernel ports are absent")
+	}
+}
+
+func TestMergeTopologyMergesVMKPorts(t *testing.T) {
+	base := NetTopology{
+		VMKPorts: []VMKPort{{
+			Name:      "vmk0",
+			VSwitch:   "vSwitch0",
+			Portgroup: "Management Network",
+			MAC:       "00:50:56:6a:11:22",
+			Enabled:   true,
+		}},
+	}
+	next := NetTopology{
+		VMKCollected: true,
+		VMKPorts: []VMKPort{{
+			Name:      "vmk0",
+			VSwitch:   "vSwitch0",
+			Portgroup: "Management Network",
+			MAC:       "00:50:56:6a:11:22",
+			IPv4:      "192.168.8.138",
+			Enabled:   true,
+		}},
+	}
+	got := mergeTopology(base, next)
+	if len(got.VMKPorts) != 1 {
+		t.Fatalf("vmk ports = %#v", got.VMKPorts)
+	}
+	vmk := got.VMKPorts[0]
+	if vmk.VSwitch != "vSwitch0" || vmk.Portgroup != "Management Network" || vmk.MAC == "" || vmk.IPv4 != "192.168.8.138" || !vmk.Enabled {
+		t.Fatalf("merged vmk = %+v", vmk)
+	}
+}
+
+func TestMergeTopologySkipsVMKPortsWhenCollectionFailed(t *testing.T) {
+	base := NetTopology{
+		VMKCollected: true,
+		VMKPorts: []VMKPort{{
+			Name:      "vmk0",
+			VSwitch:   "vSwitch0",
+			Portgroup: "Management Network",
+			IPv4:      "192.168.8.138",
+			Enabled:   true,
+		}},
+	}
+	next := NetTopology{
+		VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
+		VMNICs:    []VMNICLink{{VMName: "fnOS", MAC: "00:0c:29:86:f2:a0"}},
+	}
+	got := mergeTopology(base, next)
+	if len(got.VMKPorts) != 1 || got.VMKPorts[0].IPv4 != "192.168.8.138" {
+		t.Fatalf("vmk ports should remain from previous collected attempt: %#v", got.VMKPorts)
+	}
+	if !got.VMKCollected {
+		t.Fatal("vmk collected flag should remain true from base")
+	}
+}
+
 func TestFillNICStats(t *testing.T) {
 	out := `NIC statistics for vmnic0
    Packets received: 638456
