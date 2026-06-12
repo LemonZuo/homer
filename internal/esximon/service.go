@@ -325,28 +325,40 @@ type DiskTempPoint struct {
 	TempC  int    `json:"temp_c"`
 }
 
+// DiskUsagePoint 是 esxi_sample.disk_usage_json 的最小形态,
+// 只留历史曲线画「单盘已用容量」需要的字段,沿用 sample 表里 -1/0 哨兵约定。
+type DiskUsagePoint struct {
+	Device        string `json:"device"`
+	UsedBytes     int64  `json:"used_bytes"`
+	CapacityBytes int64  `json:"capacity_bytes"`
+}
+
 func buildSample(r HostResult, now time.Time) model.EsxiSample {
 	m := r.Metrics
 	cpu := makeSampleCPU(m.CPUTemp)
 	disks := makeSampleDisks(m.Disks)
 	vms := makeSampleVMs(m.VMs)
+	usage := makeSampleDiskUsage(m.Disks)
 
 	return model.EsxiSample{
-		HostKind:            r.HostKind,
-		HostID:              r.HostID,
-		HostName:            r.HostName,
-		CPUMaxC:             cpu.MaxC,
-		CPUAvgC:             cpu.AvgC,
-		CPUTjMaxC:           cpu.TjMaxC,
-		MCEState:            m.MCE.State,
-		MCECorrectedTotal:   m.MCE.CorrectedTotal,
-		MCEUncorrectedTotal: m.MCE.UncorrectedTotal,
-		DiskMaxC:            disks.MaxC,
-		VMTotal:             vms.Total,
-		VMPoweredOn:         vms.PoweredOn,
-		CPUTempPerCoreJSON:  cpu.JSON,
-		DiskTempPerDiskJSON: disks.JSON,
-		SampledAt:           now,
+		HostKind:             r.HostKind,
+		HostID:               r.HostID,
+		HostName:             r.HostName,
+		CPUMaxC:              cpu.MaxC,
+		CPUAvgC:              cpu.AvgC,
+		CPUTjMaxC:            cpu.TjMaxC,
+		MCEState:             m.MCE.State,
+		MCECorrectedTotal:    m.MCE.CorrectedTotal,
+		MCEUncorrectedTotal:  m.MCE.UncorrectedTotal,
+		DiskMaxC:             disks.MaxC,
+		CPUUsagePercent:      m.Runtime.CPUUsagePercent,
+		MemoryUsagePercent:   m.Runtime.MemoryUsagePercent,
+		VMTotal:              vms.Total,
+		VMPoweredOn:          vms.PoweredOn,
+		CPUTempPerCoreJSON:   cpu.JSON,
+		DiskTempPerDiskJSON:  disks.JSON,
+		DiskUsagePerDiskJSON: usage,
+		SampledAt:            now,
 	}
 }
 
@@ -404,6 +416,26 @@ func makeSampleDisks(disks []DiskHealth) sampleDiskResult {
 		return sampleDiskResult{MaxC: -1}
 	}
 	return sampleDiskResult{MaxC: maxC, JSON: mustJSON(points)}
+}
+
+// makeSampleDiskUsage 把每块盘的 used/capacity 摘成精简 JSON。
+// 任何一块盘只要 used/capacity 有效就纳入,全无数据则返回空串。
+func makeSampleDiskUsage(disks []DiskHealth) string {
+	points := make([]DiskUsagePoint, 0, len(disks))
+	for _, d := range disks {
+		if d.CapacityBytes <= 0 && d.UsedBytes <= 0 {
+			continue
+		}
+		points = append(points, DiskUsagePoint{
+			Device:        d.Device,
+			UsedBytes:     d.UsedBytes,
+			CapacityBytes: d.CapacityBytes,
+		})
+	}
+	if len(points) == 0 {
+		return ""
+	}
+	return mustJSON(points)
 }
 
 func makeSampleVMs(vms []VM) sampleVMResult {

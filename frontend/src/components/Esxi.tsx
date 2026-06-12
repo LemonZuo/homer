@@ -233,16 +233,25 @@ interface DiskTempPoint {
   temp_c: number
 }
 
+interface DiskUsagePoint {
+  device: string
+  used_bytes: number
+  capacity_bytes: number
+}
+
 interface SeriesPoint {
   bucket_start: string
   cpu_max_c: number
   cpu_avg_c: number
   disk_max_c: number
+  cpu_usage_percent: number
+  memory_usage_percent: number
   mce_corrected_total: number
   mce_uncorrected_total: number
   vm_powered_on: number
   cpu_cores?: CoreTempPoint[]
   disks?: DiskTempPoint[]
+  disk_usage?: DiskUsagePoint[]
 }
 
 // 多线曲线的颜色色卡(色相循环);超过 10 条会循环复用。
@@ -1006,10 +1015,20 @@ function VMsCard({ vms }: { vms: VM[] }) {
 
 // --- 历史曲线 ---
 
-type MetricKey = 'cpu_cores' | 'disk_per_disk' | 'vm_on' | 'mce'
+type MetricKey =
+  | 'cpu_cores'
+  | 'disk_per_disk'
+  | 'cpu_usage'
+  | 'memory_usage'
+  | 'disk_usage'
+  | 'vm_on'
+  | 'mce'
 const METRIC_OPTIONS: { value: MetricKey; label: string }[] = [
   { value: 'cpu_cores', label: 'CPU 各核' },
   { value: 'disk_per_disk', label: '各盘温度' },
+  { value: 'cpu_usage', label: 'CPU 使用率' },
+  { value: 'memory_usage', label: '内存使用率' },
+  { value: 'disk_usage', label: '各盘已用' },
   { value: 'vm_on', label: '运行 VM' },
   { value: 'mce', label: 'MCE 累计' },
 ]
@@ -1135,25 +1154,61 @@ function EsxiSeriesChart({
   const ts = series.map((p) => new Date(p.bucket_start).getTime())
 
   // 多线场景:每核 / 每盘各画一条线。
-  if (metric === 'cpu_cores' || metric === 'disk_per_disk') {
-    const lines =
-      metric === 'cpu_cores' ? buildCoreLines(series, ts) : buildDiskLines(series, ts, disks)
+  if (metric === 'cpu_cores' || metric === 'disk_per_disk' || metric === 'disk_usage') {
+    let lines: LineSeries[]
+    let unit = '°C'
+    let format: (v: number) => string = (v) => v.toFixed(0)
+    let missingLabel = '每核'
+    if (metric === 'cpu_cores') {
+      lines = buildCoreLines(series, ts)
+    } else if (metric === 'disk_per_disk') {
+      lines = buildDiskLines(series, ts, disks)
+      missingLabel = '每盘'
+    } else {
+      lines = buildDiskUsageLines(series, ts, disks)
+      unit = 'GiB'
+      format = (v) => (v >= 100 ? v.toFixed(0) : v.toFixed(1))
+      missingLabel = '每盘已用'
+    }
     if (lines.length === 0) {
       return (
         <div className="flex h-32 items-center justify-center text-[12px] text-muted-foreground">
-          暂无{metric === 'cpu_cores' ? '每核' : '每盘'}明细
+          暂无{missingLabel}明细
         </div>
       )
     }
-    return <MultiLineChart lines={lines} unit="°C" yMin={0} format={(v) => v.toFixed(0)} />
+    return <MultiLineChart lines={lines} unit={unit} yMin={0} format={format} />
   }
 
   let data: MiniPoint[]
   let unit: string
   let stroke: string
   let yMin: number | undefined
+  let yMax: number | undefined
   let format: (v: number) => string
   switch (metric) {
+    case 'cpu_usage':
+      data = series.map((p, i) => ({
+        t: ts[i],
+        v: p.cpu_usage_percent < 0 ? null : p.cpu_usage_percent,
+      }))
+      unit = '%'
+      stroke = 'rgb(79 137 192)'
+      yMin = 0
+      yMax = 100
+      format = (v) => v.toFixed(0)
+      break
+    case 'memory_usage':
+      data = series.map((p, i) => ({
+        t: ts[i],
+        v: p.memory_usage_percent < 0 ? null : p.memory_usage_percent,
+      }))
+      unit = '%'
+      stroke = 'rgb(20 184 166)'
+      yMin = 0
+      yMax = 100
+      format = (v) => v.toFixed(0)
+      break
     case 'vm_on':
       data = series.map((p, i) => ({ t: ts[i], v: p.vm_powered_on < 0 ? null : p.vm_powered_on }))
       unit = ''
@@ -1172,7 +1227,7 @@ function EsxiSeriesChart({
       format = (v) => v.toFixed(0)
       break
   }
-  return <MiniChart data={data} unit={unit} stroke={stroke} yMin={yMin} format={format} />
+  return <MiniChart data={data} unit={unit} stroke={stroke} yMin={yMin} yMax={yMax} format={format} />
 }
 
 // --- 多线曲线辅助 ---
@@ -1217,6 +1272,26 @@ function buildDiskLines(series: SeriesPoint[], ts: number[], disks?: DiskHealth[
     points: series.map((p, i) => {
       const d = (p.disks ?? []).find((x) => x.device === dev)
       return { t: ts[i], v: d && d.temp_c >= 0 ? d.temp_c : null }
+    }),
+  }))
+}
+
+// buildDiskUsageLines 按 device 维度把 disk_usage(已用字节) 转为 GiB 多线;旧桶或缺失值落 null。
+function buildDiskUsageLines(series: SeriesPoint[], ts: number[], disks?: DiskHealth[]): LineSeries[] {
+  const devSet = new Set<string>()
+  for (const p of series) {
+    for (const d of p.disk_usage ?? []) devSet.add(d.device)
+  }
+  const devs = [...devSet].sort()
+  const labelByDevice = new Map((disks ?? []).map((d) => [d.device, d.model || d.type || shortDeviceLabel(d.device)]))
+  const GiB = 1024 ** 3
+  return devs.map((dev, idx) => ({
+    id: `disk-usage-${dev}`,
+    label: labelByDevice.get(dev) ?? shortDeviceLabel(dev),
+    color: LINE_COLORS[idx % LINE_COLORS.length],
+    points: series.map((p, i) => {
+      const d = (p.disk_usage ?? []).find((x) => x.device === dev)
+      return { t: ts[i], v: d && d.used_bytes > 0 ? d.used_bytes / GiB : null }
     }),
   }))
 }
@@ -1474,12 +1549,14 @@ function MiniChart({
   data,
   stroke,
   yMin,
+  yMax,
   format,
 }: {
   unit: string
   data: MiniPoint[]
   stroke: string
   yMin?: number
+  yMax?: number
   format: (v: number) => string
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -1531,6 +1608,7 @@ function MiniChart({
       yHi = mx + pad
     }
     if (yMin != null) yLo = yMin
+    if (yMax != null) yHi = yMax
   }
   const ySpan = Math.max(0.001, yHi - yLo)
   const yOf = (v: number) => padT + (1 - (v - yLo) / ySpan) * innerH

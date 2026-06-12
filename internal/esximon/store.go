@@ -76,15 +76,18 @@ func (s *Store) LoadStates() ([]model.EsxiState, error) {
 // 让前端能按核 / 按盘单独画线;旧行(改造前的样本)这两列为 NULL,
 // 桶代表为空即数组为 nil,前端跳过该桶不画线。
 type SeriesPoint struct {
-	BucketStart         time.Time       `json:"bucket_start"`
-	CPUMaxC             int             `json:"cpu_max_c"`             // °C,桶内 max(峰值更有意义)
-	CPUAvgC             int             `json:"cpu_avg_c"`             // °C,桶内 avg
-	DiskMaxC            int             `json:"disk_max_c"`            // °C,桶内 max
-	MCECorrectedTotal   int64           `json:"mce_corrected_total"`   // 桶内 max(累计单调)
-	MCEUncorrectedTotal int64           `json:"mce_uncorrected_total"` // 桶内 max
-	VMPoweredOn         int             `json:"vm_powered_on"`         // 桶内 max
-	CPUCores            []CoreTempPoint `json:"cpu_cores,omitempty"`   // 每核温度明细
-	Disks               []DiskTempPoint `json:"disks,omitempty"`       // 每盘温度明细
+	BucketStart         time.Time        `json:"bucket_start"`
+	CPUMaxC             int              `json:"cpu_max_c"`             // °C,桶内 max(峰值更有意义)
+	CPUAvgC             int              `json:"cpu_avg_c"`             // °C,桶内 avg
+	DiskMaxC            int              `json:"disk_max_c"`            // °C,桶内 max
+	CPUUsagePercent     int              `json:"cpu_usage_percent"`     // 桶内 avg(连续值取均值更稳)
+	MemoryUsagePercent  int              `json:"memory_usage_percent"`  // 桶内 avg
+	MCECorrectedTotal   int64            `json:"mce_corrected_total"`   // 桶内 max(累计单调)
+	MCEUncorrectedTotal int64            `json:"mce_uncorrected_total"` // 桶内 max
+	VMPoweredOn         int              `json:"vm_powered_on"`         // 桶内 max
+	CPUCores            []CoreTempPoint  `json:"cpu_cores,omitempty"`   // 每核温度明细
+	Disks               []DiskTempPoint  `json:"disks,omitempty"`       // 每盘温度明细
+	DiskUsage           []DiskUsagePoint `json:"disk_usage,omitempty"`  // 每盘容量明细
 }
 
 // Series 按时间桶聚合某台 ESXi 的采样序列。
@@ -101,6 +104,8 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 		MaxCPUMax    *int
 		AvgCPUAvg    *float64
 		MaxDiskMax   *int
+		AvgCPUUsage  *float64
+		AvgMemUsage  *float64
 		MaxMCECorr   *int64
 		MaxMCEUncorr *int64
 		MaxVMOn      *int
@@ -112,6 +117,8 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 			" MAX(CASE WHEN cpu_max_c>=0 THEN cpu_max_c ELSE NULL END) AS max_cpu_max,"+
 			" AVG(CASE WHEN cpu_avg_c>=0 THEN cpu_avg_c ELSE NULL END) AS avg_cpu_avg,"+
 			" MAX(CASE WHEN disk_max_c>=0 THEN disk_max_c ELSE NULL END) AS max_disk_max,"+
+			" AVG(CASE WHEN cpu_usage_percent>=0 THEN cpu_usage_percent ELSE NULL END) AS avg_cpu_usage,"+
+			" AVG(CASE WHEN memory_usage_percent>=0 THEN memory_usage_percent ELSE NULL END) AS avg_mem_usage,"+
 			" MAX(mce_corrected_total) AS max_mce_corr,"+
 			" MAX(mce_uncorrected_total) AS max_mce_uncorr,"+
 			" MAX(CASE WHEN vm_powered_on>=0 THEN vm_powered_on ELSE NULL END) AS max_vm_on").
@@ -124,7 +131,15 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 	}
 	points := make([]SeriesPoint, 0, len(rows))
 	for _, r := range rows {
-		p := SeriesPoint{BucketStart: r.BucketTime, CPUMaxC: -1, CPUAvgC: -1, DiskMaxC: -1, VMPoweredOn: -1}
+		p := SeriesPoint{
+			BucketStart:        r.BucketTime,
+			CPUMaxC:            -1,
+			CPUAvgC:            -1,
+			DiskMaxC:           -1,
+			CPUUsagePercent:    -1,
+			MemoryUsagePercent: -1,
+			VMPoweredOn:        -1,
+		}
 		if r.MaxCPUMax != nil {
 			p.CPUMaxC = *r.MaxCPUMax
 		}
@@ -133,6 +148,12 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 		}
 		if r.MaxDiskMax != nil {
 			p.DiskMaxC = *r.MaxDiskMax
+		}
+		if r.AvgCPUUsage != nil {
+			p.CPUUsagePercent = int(*r.AvgCPUUsage)
+		}
+		if r.AvgMemUsage != nil {
+			p.MemoryUsagePercent = int(*r.AvgMemUsage)
 		}
 		if r.MaxMCECorr != nil {
 			p.MCECorrectedTotal = *r.MaxMCECorr
@@ -150,8 +171,9 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 	// 让前端能按核 / 按盘单独画线。bucketSec 是程序内固定整数,无注入风险。
 	detailSQL := fmt.Sprintf(`
 SELECT FROM_UNIXTIME((UNIX_TIMESTAMP(s.sampled_at) DIV %d) * %d) AS bucket_time,
-       s.cpu_temp_json  AS cpu_temp_json,
-       s.disk_temp_json AS disk_temp_json
+       s.cpu_temp_json   AS cpu_temp_json,
+       s.disk_temp_json  AS disk_temp_json,
+       s.disk_usage_json AS disk_usage_json
 FROM esxi_sample s
 INNER JOIN (
   SELECT MAX(id) AS max_id
@@ -162,9 +184,10 @@ INNER JOIN (
 ORDER BY bucket_time ASC
 `, bucketSec, bucketSec, bucketSec, bucketSec)
 	type detailRow struct {
-		BucketTime   time.Time
-		CPUTempJSON  string
-		DiskTempJSON string
+		BucketTime    time.Time
+		CPUTempJSON   string
+		DiskTempJSON  string
+		DiskUsageJSON string
 	}
 	var details []detailRow
 	if err := s.db.Raw(detailSQL, hostKind, hostID, since).Scan(&details).Error; err != nil {
@@ -189,6 +212,12 @@ ORDER BY bucket_time ASC
 			var disks []DiskTempPoint
 			if json.Unmarshal([]byte(d.DiskTempJSON), &disks) == nil {
 				points[i].Disks = disks
+			}
+		}
+		if d.DiskUsageJSON != "" {
+			var usage []DiskUsagePoint
+			if json.Unmarshal([]byte(d.DiskUsageJSON), &usage) == nil {
+				points[i].DiskUsage = usage
 			}
 		}
 	}

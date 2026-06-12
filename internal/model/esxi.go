@@ -60,15 +60,19 @@ type EsxiSample struct {
 	MCECorrectedTotal   int64  `gorm:"column:mce_corrected_total;comment:MCE 可纠正错误" json:"mce_corrected_total"`
 	MCEUncorrectedTotal int64  `gorm:"column:mce_uncorrected_total;comment:MCE 不可纠正错误" json:"mce_uncorrected_total"`
 	DiskMaxC            int    `gorm:"column:disk_max_c;comment:磁盘最高温" json:"disk_max_c"`
+	CPUUsagePercent     int    `gorm:"column:cpu_usage_percent;comment:CPU 使用率" json:"cpu_usage_percent"`
+	MemoryUsagePercent  int    `gorm:"column:memory_usage_percent;comment:内存使用率" json:"memory_usage_percent"`
 	VMTotal             int    `gorm:"column:vm_total;comment:VM 总数" json:"vm_total"`
 	VMPoweredOn         int    `gorm:"column:vm_powered_on;comment:已开机 VM 数" json:"vm_powered_on"`
 	// 明细 JSON 列,给历史曲线"每核 / 每盘单独画线"用。
 	// CPUTempPerCoreJSON:[{"id":0,"temp_c":54}, ...]
 	// DiskTempPerDiskJSON:[{"device":"t10.XXX","temp_c":35}, ...]
+	// DiskUsagePerDiskJSON:[{"device":"t10.XXX","used_bytes":N,"capacity_bytes":N}, ...]
 	// 缺数据落空字符串 ""(不是 NULL),与 EsxiState 的 *_json 列约定一致。
-	CPUTempPerCoreJSON  string    `gorm:"column:cpu_temp_json;type:text;comment:每核温度明细" json:"cpu_temp_json"`
-	DiskTempPerDiskJSON string    `gorm:"column:disk_temp_json;type:text;comment:每盘温度明细" json:"disk_temp_json"`
-	SampledAt           time.Time `gorm:"column:sampled_at;index:idx_host_time,priority:3,sort:desc;index:idx_sampled_at;comment:采样时刻" json:"sampled_at"`
+	CPUTempPerCoreJSON   string    `gorm:"column:cpu_temp_json;type:text;comment:每核温度明细" json:"cpu_temp_json"`
+	DiskTempPerDiskJSON  string    `gorm:"column:disk_temp_json;type:text;comment:每盘温度明细" json:"disk_temp_json"`
+	DiskUsagePerDiskJSON string    `gorm:"column:disk_usage_json;type:text;comment:每盘容量明细" json:"disk_usage_json"`
+	SampledAt            time.Time `gorm:"column:sampled_at;index:idx_host_time,priority:3,sort:desc;index:idx_sampled_at;comment:采样时刻" json:"sampled_at"`
 }
 
 func (EsxiSample) TableName() string { return "esxi_sample" }
