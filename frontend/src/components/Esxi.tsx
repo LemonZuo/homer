@@ -1696,42 +1696,38 @@ function HostBlock({ host }: { host: Snapshot }) {
     >
       <div className="p-4 sm:p-5">
         {/* 头部 */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <Server className="h-4 w-4 text-muted-foreground" />
-              <span className="text-[15px] font-semibold tracking-tight">{host.host_name}</span>
-              <span className="font-mono text-[11.5px] text-muted-foreground">{host.endpoint}</span>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-muted-foreground">
-              {host.platform?.vendor && (
-                <span>
-                  {host.platform.vendor} {host.platform.product}
-                </span>
-              )}
-              {host.platform?.esxi_version && <span>ESXi {host.platform.esxi_version}</span>}
-              {host.sampled_at && <span>最近采样 {fmtDateTime(host.sampled_at)}</span>}
-            </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="truncate text-[15px] font-semibold tracking-tight">{host.host_name}</span>
+            <span className="truncate font-mono text-[11.5px] text-muted-foreground">{host.endpoint}</span>
           </div>
-          {isStale ? (
-            <span
-              className="shrink-0 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-              title={host.error ? `失败:${host.error}` : '尚未拿到采样'}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
-                {host.error ? '采样失败' : '已离线'}
-                {staleAge && ` · ${staleAge}`}
+          <div className="flex shrink-0 items-center gap-2">
+            {host.sampled_at && (
+              <span className="hidden text-[11.5px] text-muted-foreground sm:inline">
+                最近采样 {fmtDateTime(host.sampled_at)}
               </span>
-            </span>
-          ) : (
-            <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                在线
+            )}
+            {isStale ? (
+              <span
+                className="rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                title={host.error ? `失败:${host.error}` : '尚未拿到采样'}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+                  {host.error ? '采样失败' : '已离线'}
+                  {staleAge && ` · ${staleAge}`}
+                </span>
               </span>
-            </span>
-          )}
+            ) : (
+              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  在线
+                </span>
+              </span>
+            )}
+          </div>
         </div>
 
         {host.error && (
@@ -2002,24 +1998,26 @@ export default function Esxi() {
             <span className={cn('h-2 w-2 rounded-full', cs.dot)} aria-hidden />
             <h1 className="text-[28px] font-bold leading-none tracking-tight">ESXi 状态</h1>
           </div>
-          <p className="mt-2 text-[12.5px] text-muted-foreground">
-            {stats.hostCnt} 台机器
-            {stats.onlineHosts < stats.hostCnt && (
-              <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="h-3 w-3" />
-                {stats.hostCnt - stats.onlineHosts} 台离线
-              </span>
-            )}
-            {stats.totalVMs > 0 && (
-              <span className="ml-2">· {stats.runningVMs} / {stats.totalVMs} VM 运行中</span>
-            )}
-            {stats.cpuPeak >= 0 && (
-              <span className="ml-2">· CPU 峰值 {stats.cpuPeak}°C</span>
-            )}
-            {lastSampled && (
-              <span className="ml-2 text-muted-foreground/70">· 最近采样 {fmtDateTime(lastSampled)}</span>
-            )}
-          </p>
+          {stats.hostCnt > 1 && (
+            <p className="mt-2 text-[12.5px] text-muted-foreground">
+              {stats.hostCnt} 台机器
+              {stats.onlineHosts < stats.hostCnt && (
+                <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-3 w-3" />
+                  {stats.hostCnt - stats.onlineHosts} 台离线
+                </span>
+              )}
+              {stats.totalVMs > 0 && (
+                <span className="ml-2">· {stats.runningVMs} / {stats.totalVMs} VM 运行中</span>
+              )}
+              {stats.cpuPeak >= 0 && (
+                <span className="ml-2">· CPU 峰值 {stats.cpuPeak}°C</span>
+              )}
+              {lastSampled && (
+                <span className="ml-2 text-muted-foreground/70">· 最近采样 {fmtDateTime(lastSampled)}</span>
+              )}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 gap-2">
           <Button
