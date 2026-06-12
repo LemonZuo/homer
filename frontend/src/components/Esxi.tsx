@@ -245,6 +245,8 @@ interface SeriesPoint {
   cpu_avg_c: number
   disk_max_c: number
   cpu_usage_percent: number
+  memory_used_bytes: number
+  memory_total_bytes: number
   memory_usage_percent: number
   mce_corrected_total: number
   mce_uncorrected_total: number
@@ -1019,16 +1021,16 @@ type MetricKey =
   | 'cpu_cores'
   | 'disk_per_disk'
   | 'cpu_usage'
-  | 'memory_usage'
+  | 'memory_used'
   | 'disk_usage'
   | 'vm_on'
   | 'mce'
 const METRIC_OPTIONS: { value: MetricKey; label: string }[] = [
-  { value: 'cpu_cores', label: 'CPU 各核' },
-  { value: 'disk_per_disk', label: '各盘温度' },
-  { value: 'cpu_usage', label: 'CPU 使用率' },
-  { value: 'memory_usage', label: '内存使用率' },
-  { value: 'disk_usage', label: '各盘已用' },
+  { value: 'cpu_cores', label: 'CPU 温度' },
+  { value: 'disk_per_disk', label: '磁盘温度' },
+  { value: 'cpu_usage', label: 'CPU 使用量' },
+  { value: 'memory_used', label: '内存使用量' },
+  { value: 'disk_usage', label: '磁盘使用量' },
   { value: 'vm_on', label: '运行 VM' },
   { value: 'mce', label: 'MCE 累计' },
 ]
@@ -1198,16 +1200,15 @@ function EsxiSeriesChart({
       yMax = 100
       format = (v) => v.toFixed(0)
       break
-    case 'memory_usage':
+    case 'memory_used':
       data = series.map((p, i) => ({
         t: ts[i],
-        v: p.memory_usage_percent < 0 ? null : p.memory_usage_percent,
+        v: p.memory_used_bytes < 0 ? null : p.memory_used_bytes / 1024 ** 3,
       }))
-      unit = '%'
+      unit = 'GiB'
       stroke = 'rgb(20 184 166)'
       yMin = 0
-      yMax = 100
-      format = (v) => v.toFixed(0)
+      format = (v) => (v >= 100 ? v.toFixed(0) : v.toFixed(1))
       break
     case 'vm_on':
       data = series.map((p, i) => ({ t: ts[i], v: p.vm_powered_on < 0 ? null : p.vm_powered_on }))

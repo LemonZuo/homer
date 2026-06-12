@@ -61,11 +61,12 @@ type EsxiSample struct {
 	MCEUncorrectedTotal int64  `gorm:"column:mce_uncorrected_total;comment:MCE 不可纠正错误" json:"mce_uncorrected_total"`
 	DiskMaxC            int    `gorm:"column:disk_max_c;comment:磁盘最高温" json:"disk_max_c"`
 	CPUUsagePercent     int    `gorm:"column:cpu_usage_percent;comment:CPU 使用率" json:"cpu_usage_percent"`
-	MemoryUsagePercent  int    `gorm:"column:memory_usage_percent;comment:内存使用率" json:"memory_usage_percent"`
+	MemoryUsageJSON     string `gorm:"column:memory_usage_json;type:text;comment:内存使用明细" json:"memory_usage_json"`
 	VMTotal             int    `gorm:"column:vm_total;comment:VM 总数" json:"vm_total"`
 	VMPoweredOn         int    `gorm:"column:vm_powered_on;comment:已开机 VM 数" json:"vm_powered_on"`
 	// 明细 JSON 列,给历史曲线"每核 / 每盘单独画线"用。
 	// CPUTempPerCoreJSON:[{"id":0,"temp_c":54}, ...]
+	// MemoryUsageJSON:{"used_bytes":N,"total_bytes":N,"usage_percent":N}
 	// DiskTempPerDiskJSON:[{"device":"t10.XXX","temp_c":35}, ...]
 	// DiskUsagePerDiskJSON:[{"device":"t10.XXX","used_bytes":N,"capacity_bytes":N}, ...]
 	// 缺数据落空字符串 ""(不是 NULL),与 EsxiState 的 *_json 列约定一致。

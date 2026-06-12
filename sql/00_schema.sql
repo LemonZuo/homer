@@ -434,7 +434,7 @@ CREATE TABLE `esxi_sample` (
   `mce_uncorrected_total` BIGINT       NOT NULL DEFAULT 0      COMMENT 'MCE 不可纠正错误',
   `disk_max_c`            SMALLINT     NOT NULL DEFAULT -1     COMMENT '磁盘最高温',
   `cpu_usage_percent`     SMALLINT     NOT NULL DEFAULT -1     COMMENT 'CPU 使用率',
-  `memory_usage_percent`  SMALLINT     NOT NULL DEFAULT -1     COMMENT '内存使用率',
+  `memory_usage_json`     TEXT         NULL                    COMMENT '内存使用明细',
   `vm_total`              SMALLINT     NOT NULL DEFAULT -1     COMMENT 'VM 总数',
   `vm_powered_on`         SMALLINT     NOT NULL DEFAULT -1     COMMENT '已开机 VM 数',
   `cpu_temp_json`         TEXT         NULL                    COMMENT '每核温度明细',

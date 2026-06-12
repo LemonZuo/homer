@@ -333,12 +333,21 @@ type DiskUsagePoint struct {
 	CapacityBytes int64  `json:"capacity_bytes"`
 }
 
+// MemoryUsagePoint 是 esxi_sample.memory_usage_json 的最小形态。
+// 同时落 used/total/percent,后续历史图表要切换绝对值或比率都不需要重采样。
+type MemoryUsagePoint struct {
+	UsedBytes    int64 `json:"used_bytes"`
+	TotalBytes   int64 `json:"total_bytes"`
+	UsagePercent int   `json:"usage_percent"`
+}
+
 func buildSample(r HostResult, now time.Time) model.EsxiSample {
 	m := r.Metrics
 	cpu := makeSampleCPU(m.CPUTemp)
 	disks := makeSampleDisks(m.Disks)
 	vms := makeSampleVMs(m.VMs)
 	usage := makeSampleDiskUsage(m.Disks)
+	memory := makeSampleMemoryUsage(m.Runtime)
 
 	return model.EsxiSample{
 		HostKind:             r.HostKind,
@@ -352,7 +361,7 @@ func buildSample(r HostResult, now time.Time) model.EsxiSample {
 		MCEUncorrectedTotal:  m.MCE.UncorrectedTotal,
 		DiskMaxC:             disks.MaxC,
 		CPUUsagePercent:      m.Runtime.CPUUsagePercent,
-		MemoryUsagePercent:   m.Runtime.MemoryUsagePercent,
+		MemoryUsageJSON:      memory,
 		VMTotal:              vms.Total,
 		VMPoweredOn:          vms.PoweredOn,
 		CPUTempPerCoreJSON:   cpu.JSON,
@@ -436,6 +445,21 @@ func makeSampleDiskUsage(disks []DiskHealth) string {
 		return ""
 	}
 	return mustJSON(points)
+}
+
+func makeSampleMemoryUsage(runtime RuntimeUsage) string {
+	usage := MemoryUsagePoint{
+		UsedBytes:    runtime.MemoryUsedBytes,
+		TotalBytes:   runtime.MemoryTotalBytes,
+		UsagePercent: runtime.MemoryUsagePercent,
+	}
+	if usage.UsagePercent < 0 && usage.UsedBytes >= 0 && usage.TotalBytes > 0 {
+		usage.UsagePercent = percentInt(usage.UsedBytes, usage.TotalBytes)
+	}
+	if usage.UsedBytes < 0 && usage.TotalBytes <= 0 && usage.UsagePercent < 0 {
+		return ""
+	}
+	return mustJSON(usage)
 }
 
 func makeSampleVMs(vms []VM) sampleVMResult {

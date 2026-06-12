@@ -81,6 +81,8 @@ type SeriesPoint struct {
 	CPUAvgC             int              `json:"cpu_avg_c"`             // °C,桶内 avg
 	DiskMaxC            int              `json:"disk_max_c"`            // °C,桶内 max
 	CPUUsagePercent     int              `json:"cpu_usage_percent"`     // 桶内 avg(连续值取均值更稳)
+	MemoryUsedBytes     int64            `json:"memory_used_bytes"`     // 桶内 avg
+	MemoryTotalBytes    int64            `json:"memory_total_bytes"`    // 桶内 avg
 	MemoryUsagePercent  int              `json:"memory_usage_percent"`  // 桶内 avg
 	MCECorrectedTotal   int64            `json:"mce_corrected_total"`   // 桶内 max(累计单调)
 	MCEUncorrectedTotal int64            `json:"mce_uncorrected_total"` // 桶内 max
@@ -105,6 +107,8 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 		AvgCPUAvg    *float64
 		MaxDiskMax   *int
 		AvgCPUUsage  *float64
+		AvgMemUsed   *float64
+		AvgMemTotal  *float64
 		AvgMemUsage  *float64
 		MaxMCECorr   *int64
 		MaxMCEUncorr *int64
@@ -112,13 +116,19 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 	}
 	var rows []row
 	bucketExpr := fmt.Sprintf("FROM_UNIXTIME((UNIX_TIMESTAMP(sampled_at) DIV %d) * %d)", bucketSec, bucketSec)
+	memJSON := "CASE WHEN memory_usage_json IS NOT NULL AND memory_usage_json <> '' AND JSON_VALID(memory_usage_json) THEN memory_usage_json ELSE NULL END"
+	memUsedExpr := "CAST(JSON_UNQUOTE(JSON_EXTRACT(" + memJSON + ", '$.used_bytes')) AS DECIMAL(20,0))"
+	memTotalExpr := "CAST(JSON_UNQUOTE(JSON_EXTRACT(" + memJSON + ", '$.total_bytes')) AS DECIMAL(20,0))"
+	memUsageExpr := "CAST(JSON_UNQUOTE(JSON_EXTRACT(" + memJSON + ", '$.usage_percent')) AS DECIMAL(10,2))"
 	err := s.db.Model(&model.EsxiSample{}).
 		Select(bucketExpr+" AS bucket_time,"+
 			" MAX(CASE WHEN cpu_max_c>=0 THEN cpu_max_c ELSE NULL END) AS max_cpu_max,"+
 			" AVG(CASE WHEN cpu_avg_c>=0 THEN cpu_avg_c ELSE NULL END) AS avg_cpu_avg,"+
 			" MAX(CASE WHEN disk_max_c>=0 THEN disk_max_c ELSE NULL END) AS max_disk_max,"+
 			" AVG(CASE WHEN cpu_usage_percent>=0 THEN cpu_usage_percent ELSE NULL END) AS avg_cpu_usage,"+
-			" AVG(CASE WHEN memory_usage_percent>=0 THEN memory_usage_percent ELSE NULL END) AS avg_mem_usage,"+
+			" AVG(CASE WHEN "+memUsedExpr+">=0 THEN "+memUsedExpr+" ELSE NULL END) AS avg_mem_used,"+
+			" AVG(CASE WHEN "+memTotalExpr+">0 THEN "+memTotalExpr+" ELSE NULL END) AS avg_mem_total,"+
+			" AVG(CASE WHEN "+memUsageExpr+">=0 THEN "+memUsageExpr+" ELSE NULL END) AS avg_mem_usage,"+
 			" MAX(mce_corrected_total) AS max_mce_corr,"+
 			" MAX(mce_uncorrected_total) AS max_mce_uncorr,"+
 			" MAX(CASE WHEN vm_powered_on>=0 THEN vm_powered_on ELSE NULL END) AS max_vm_on").
@@ -137,6 +147,8 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 			CPUAvgC:            -1,
 			DiskMaxC:           -1,
 			CPUUsagePercent:    -1,
+			MemoryUsedBytes:    -1,
+			MemoryTotalBytes:   -1,
 			MemoryUsagePercent: -1,
 			VMPoweredOn:        -1,
 		}
@@ -151,6 +163,12 @@ func (s *Store) Series(hostKind string, hostID int64, since time.Time, bucketSec
 		}
 		if r.AvgCPUUsage != nil {
 			p.CPUUsagePercent = int(*r.AvgCPUUsage)
+		}
+		if r.AvgMemUsed != nil {
+			p.MemoryUsedBytes = int64(*r.AvgMemUsed)
+		}
+		if r.AvgMemTotal != nil {
+			p.MemoryTotalBytes = int64(*r.AvgMemTotal)
 		}
 		if r.AvgMemUsage != nil {
 			p.MemoryUsagePercent = int(*r.AvgMemUsage)
