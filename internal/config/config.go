@@ -73,6 +73,7 @@ type Config struct {
 	EsxiRetentionDays           int
 	EsxiSSHTimeoutSec           int
 	EsxiSlowRefreshIntervalMin  int
+	EsxiCommandSlowLogMS        int
 	EsxiAlertCPUTempC           int
 	EsxiAlertCPUUsagePercent    int
 	EsxiAlertMemoryUsagePercent int
@@ -128,6 +129,7 @@ func Load() *Config {
 		EsxiRetentionDays:           envInt("ESXI_RETENTION_DAYS", 7),
 		EsxiSSHTimeoutSec:           envInt("ESXI_SSH_TIMEOUT_SEC", 120),
 		EsxiSlowRefreshIntervalMin:  envInt("ESXI_SLOW_REFRESH_INTERVAL_MIN", 30),
+		EsxiCommandSlowLogMS:        envIntAllowZero("ESXI_COMMAND_SLOW_LOG_MS", 1500),
 		EsxiAlertCPUTempC:           envInt("ESXI_ALERT_CPU_TEMP_C", 85),
 		EsxiAlertCPUUsagePercent:    envInt("ESXI_ALERT_CPU_USAGE_PERCENT", 90),
 		EsxiAlertMemoryUsagePercent: envInt("ESXI_ALERT_MEMORY_USAGE_PERCENT", 90),
@@ -144,6 +146,18 @@ func envInt(key string, def int) int {
 	}
 	n := 0
 	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+func envIntAllowZero(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n := 0
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
 		return def
 	}
 	return n

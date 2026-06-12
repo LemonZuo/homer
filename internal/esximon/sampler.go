@@ -33,16 +33,18 @@ type Sampler struct {
 	credentials         sshlike.CredentialResolver
 	timeout             time.Duration
 	slowRefreshInterval time.Duration
+	commandSlowLog      time.Duration
 }
 
-func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshlike.CredentialResolver, sshTimeout, slowRefreshInterval time.Duration) *Sampler {
+func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshlike.CredentialResolver, sshTimeout, slowRefreshInterval, commandSlowLog time.Duration) *Sampler {
 	if sshTimeout <= 0 {
 		sshTimeout = 120 * time.Second
 	}
 	if slowRefreshInterval <= 0 {
 		slowRefreshInterval = 30 * time.Minute
 	}
-	return &Sampler{db: db, hosts: hosts, credentials: credentials, timeout: sshTimeout, slowRefreshInterval: slowRefreshInterval}
+	setCommandSlowLogThreshold(commandSlowLog)
+	return &Sampler{db: db, hosts: hosts, credentials: credentials, timeout: sshTimeout, slowRefreshInterval: slowRefreshInterval, commandSlowLog: commandSlowLog}
 }
 
 // Run 扫一轮所有启用的 esxi_host 并发采集,单机失败不影响其他。

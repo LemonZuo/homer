@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/LemonZuo/homer/internal/logx"
@@ -285,6 +286,27 @@ type HostMetrics struct {
 // 非交互非登录 SSH session 经常缺路径,统一显式注入(ESXi 实际不需要,
 // 但加上没坏处,并且如果走 bastion + Linux jump host 这里就能兜住)。
 const esxiPathPrefix = "export PATH=/bin:/sbin:/usr/lib/vmware/bin:/usr/lib/vmware/vsan/bin:$PATH; "
+
+var commandSlowLogThresholdMS atomic.Int64
+
+func init() {
+	setCommandSlowLogThreshold(1500 * time.Millisecond)
+}
+
+func setCommandSlowLogThreshold(threshold time.Duration) {
+	if threshold < 0 {
+		threshold = 0
+	}
+	commandSlowLogThresholdMS.Store(threshold.Milliseconds())
+}
+
+func commandSlowLogThreshold() time.Duration {
+	ms := commandSlowLogThresholdMS.Load()
+	if ms <= 0 {
+		return 0
+	}
+	return time.Duration(ms) * time.Millisecond
+}
 
 type CollectOptions struct {
 	SkipTopology     bool
@@ -566,6 +588,7 @@ func runEsxiRetry(client *ssh.Client, name, cmd string, timeout time.Duration, a
 		lastRes = res
 		lastOut = out
 		if err == nil && (ok == nil || ok(out)) {
+			logEsxiCommandSlow(name, timeout, res)
 			return out, nil
 		}
 		if err != nil {
@@ -580,6 +603,28 @@ func runEsxiRetry(client *ssh.Client, name, cmd string, timeout time.Duration, a
 	}
 	logx.Warn("esxi command failed", esxiCommandLogAttrs(name, attempts, timeout, lastErr, lastRes)...)
 	return lastOut, fmt.Errorf("%s failed after %d attempts: %w", name, attempts, lastErr)
+}
+
+func logEsxiCommandSlow(name string, timeout time.Duration, res esxiCommandResult) {
+	threshold := commandSlowLogThreshold()
+	if threshold <= 0 || res.duration < threshold {
+		return
+	}
+	attrs := []any{
+		"name", name,
+		"duration", res.duration.String(),
+		"threshold", threshold.String(),
+		"stdout_bytes", len(res.stdout),
+		"stderr_bytes", len(res.stderr),
+		"timeout", timeout.String(),
+		"timed_out", res.timedOut,
+		"remote_started", res.remoteStarted,
+		"remote_finished", res.remoteFinished,
+	}
+	if res.remoteExitCodeKnown {
+		attrs = append(attrs, "remote_exit_code", res.remoteExitCode)
+	}
+	logx.Info("esxi command slow", attrs...)
 }
 
 func esxiCommandLogAttrs(name string, attempt int, timeout time.Duration, err error, res esxiCommandResult) []any {
