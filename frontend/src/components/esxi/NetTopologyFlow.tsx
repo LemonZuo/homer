@@ -36,11 +36,15 @@ type VMInfo = { vmName: string; teamUplink: string; mac: string }
 //   LINE_ZONE_W = 21 ( .esx-networking-viz-center-port-container background-size 21px )
 //   PORT_INSET_IN_STRIP = 2 ( .esx-networking-viz-center-portgroup-container padding-left:2 )
 const COL_W_PG = 268
-const COL_W_CH = 200 // ESXi 的 chassis 宽得多,内部塞两根端口条 + 中央 BUS 线
+const COL_W_CH = 130 // 对齐 ESXi vSwitch 实物宽度,内部塞两根 strip + 中央 BUS
 const COL_W_UP = 248
-const LINE_ZONE_W = 21 // ESXi 的端口横线就是 21px,刚好走过 chassis 与 PG/UP 卡之间的间隙
+const LINE_ZONE_W = 21 // ESXi 的端口横线就是 21px,走在 PG/UP 卡和 chassis 之间
 const STRIP_W = 22 // 端口条
 const PORT_INSET_IN_STRIP = 2 // 端口图标距端口条外边沿的内边距
+// 线宽层级:BUS 最粗,PortGroup→BUS 横线次之,RJ45 (端口↔卡片) 最细
+const BUS_W = 3
+const PG_LINE_W = 2
+const PORT_LINE_W = 1
 const ICON_SIZE = 12
 const ICON_HALF = ICON_SIZE / 2
 const PG_HEADER = 30
@@ -220,11 +224,6 @@ function Chassis({
   leftBlocks: StripBlock[]
   rightBlocks: StripBlock[]
 }) {
-  const allY = [...leftBlocks, ...rightBlocks].flatMap((b) =>
-    b.anchors.map((a) => a.y),
-  )
-  const busYStart = allY.length > 0 ? Math.min(...allY) : 0
-  const busYEnd = allY.length > 0 ? Math.max(...allY) : 0
   const busX = COL_W_CH / 2
 
   return (
@@ -240,19 +239,57 @@ function Chassis({
           'linear-gradient(to bottom, rgba(255,255,255,0.18), transparent 60%)',
       }}
     >
-      {/* 中央 BUS 垂直线:1px 黑,只在第一个 anchor 到最后一个 anchor 之间 */}
-      {allY.length > 1 ? (
-        <div
-          className="absolute"
-          style={{
-            left: busX,
-            top: busYStart,
-            width: 1,
-            height: busYEnd - busYStart,
-            backgroundColor: LINE_COLOR,
-          }}
-        />
-      ) : null}
+      {/* 每个 strip block 只有一根从 strip 内沿到 BUS 的横线 (对齐 ESXi portgroup-block-border-horizontal,
+          按 PG/uplink 分组渲染,不按虚拟机数量渲染),y 取该 block 所有 anchor 的几何中心 */}
+      <svg
+        width={COL_W_CH}
+        height={height}
+        className="pointer-events-none absolute inset-0"
+        aria-hidden
+      >
+        {leftBlocks.map((b, bi) => {
+          const y = (b.anchors[0].y + b.anchors[b.anchors.length - 1].y) / 2
+          return (
+            <line
+              key={`lh-${bi}`}
+              x1={STRIP_W}
+              y1={y}
+              x2={busX}
+              y2={y}
+              stroke={LINE_COLOR}
+              strokeWidth={PG_LINE_W}
+              shapeRendering="crispEdges"
+            />
+          )
+        })}
+        {rightBlocks.map((b, bi) => {
+          const y = (b.anchors[0].y + b.anchors[b.anchors.length - 1].y) / 2
+          return (
+            <line
+              key={`rh-${bi}`}
+              x1={busX}
+              y1={y}
+              x2={COL_W_CH - STRIP_W}
+              y2={y}
+              stroke={LINE_COLOR}
+              strokeWidth={PG_LINE_W}
+              shapeRendering="crispEdges"
+            />
+          )
+        })}
+      </svg>
+
+      {/* 中央 BUS 垂直线:贯穿整个机箱,2px 黑,比横线粗 */}
+      <div
+        className="absolute"
+        style={{
+          left: busX - BUS_W / 2,
+          top: 0,
+          width: BUS_W,
+          height: '100%',
+          backgroundColor: LINE_COLOR,
+        }}
+      />
 
       {/* 左侧 strip blocks */}
       {leftBlocks.map((b, i) => (
@@ -439,7 +476,7 @@ function VSwitchBlock({
               x2={LINE_ZONE_W}
               y2={a.y}
               stroke={LINE_COLOR}
-              strokeWidth={1}
+              strokeWidth={PORT_LINE_W}
               shapeRendering="crispEdges"
             />
           ))}
@@ -472,7 +509,7 @@ function VSwitchBlock({
               x2={LINE_ZONE_W}
               y2={a.y}
               stroke={LINE_COLOR}
-              strokeWidth={1}
+              strokeWidth={PORT_LINE_W}
               shapeRendering="crispEdges"
             />
           ))}
