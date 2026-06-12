@@ -226,10 +226,17 @@ type VMKPort struct {
 // NetTopology 网络拓扑:vSwitch 全集 + VM vNIC 边 + VMkernel 端口。
 // 前端按 pNIC → vSwitch → Portgroup → VMs/VMkernel → pNIC 渲染。
 type NetTopology struct {
-	VSwitches    []VSwitchInfo `json:"vswitches"`
-	VMNICs       []VMNICLink   `json:"vm_nics"`
-	VMKPorts     []VMKPort     `json:"vmk_ports,omitempty"`
-	VMKCollected bool          `json:"-"`
+	VSwitches         []VSwitchInfo `json:"vswitches"`
+	VMNICs            []VMNICLink   `json:"vm_nics"`
+	VMKPorts          []VMKPort     `json:"vmk_ports,omitempty"`
+	LastFullSuccessAt time.Time     `json:"last_full_success_at,omitzero"`
+	Skipped           bool          `json:"-"`
+	Collected         bool          `json:"-"`
+	VSwitchCollected  bool          `json:"-"`
+	VMNetCollected    bool          `json:"-"`
+	VMPortsCollected  bool          `json:"-"`
+	VMKCollected      bool          `json:"-"`
+	VMKFullCollected  bool          `json:"-"`
 }
 
 func newHostBoot() HostBoot {
@@ -273,9 +280,18 @@ type HostMetrics struct {
 // 但加上没坏处,并且如果走 bastion + Linux jump host 这里就能兜住)。
 const esxiPathPrefix = "export PATH=/bin:/sbin:/usr/lib/vmware/bin:/usr/lib/vmware/vsan/bin:$PATH; "
 
+type CollectOptions struct {
+	SkipTopology     bool
+	PreviousTopology NetTopology
+}
+
 // CollectAll 在 client 上跑所有 ESXi 数据采集命令并解析。
 // 单条命令失败用空值兜底,不阻断后续。
 func CollectAll(client *ssh.Client) HostMetrics {
+	return CollectAllWithOptions(client, CollectOptions{})
+}
+
+func CollectAllWithOptions(client *ssh.Client, opts CollectOptions) HostMetrics {
 	snap := HostMetrics{
 		CPUTemp: CPUTemperature{TjMaxC: -1, MaxC: -1, AvgC: -1},
 		Runtime: RuntimeUsage{CPUUsagePercent: -1, MemoryUsagePercent: -1},
@@ -409,7 +425,15 @@ func CollectAll(client *ssh.Client) HostMetrics {
 	// 网络拓扑(vSwitch / Portgroup / VM vNIC 边)。
 	// 传入开机 VM 名单做交叉验证:`esxcli network vm list` 偶发输出截断时,
 	// validator 能发现缺台并触发重试,避免拓扑图上 VM 时多时少。
-	snap.Topology = collectNetTopology(client, snap.VMs)
+	if opts.SkipTopology {
+		snap.Topology = opts.PreviousTopology
+		snap.Topology.Skipped = true
+	} else {
+		snap.Topology = collectNetTopology(client, snap.VMs)
+		if topologyFullyCollected(snap) {
+			snap.Topology.LastFullSuccessAt = time.Now()
+		}
+	}
 
 	return snap
 }
@@ -2429,17 +2453,18 @@ func poweredOnVMByName(vms []VM) map[string]VM {
 // expectVMs 是已知开机的 VM 名单(来自 vim-cmd 电源态):`esxcli network vm list`
 // 偶发把表输出截断时行数会变少,用名单做 validator 让 runEsxiRetry 能感知并重试。
 func collectNetTopology(client *ssh.Client, vms []VM) NetTopology {
-	topo := NetTopology{}
+	topo := NetTopology{Collected: true, VMPortsCollected: true}
 	expectVMs := poweredOnVMNames(vms)
 	vmByName := poweredOnVMByName(vms)
 	if out, err := runEsxiRetry(client, "vswitch list", "esxcli network vswitch standard list", defaultCmdTimeout, 2, func(s string) bool {
 		return strings.Contains(s, "Uplinks:") || strings.Contains(s, "vSwitch")
 	}); err == nil {
 		topo.VSwitches = parseVSwitchList(out)
+		topo.VSwitchCollected = true
 	} else {
 		logx.Warn("esxi vswitch list failed", "err", err.Error())
 	}
-	topo.VMKPorts, topo.VMKCollected = collectVMKPorts(client)
+	topo.VMKPorts, topo.VMKCollected, topo.VMKFullCollected = collectVMKPorts(client)
 	listOut, err := runEsxiRetry(client, "vm net list", "esxcli network vm list", defaultCmdTimeout, 3, func(s string) bool {
 		if strings.TrimSpace(s) == "" {
 			// 没有开机 VM 时输出为空是合法的;有 VM 该开机却输出为空就是截断
@@ -2454,6 +2479,9 @@ func collectNetTopology(client *ssh.Client, vms []VM) NetTopology {
 		// 重试后依然缺台:照常解析已有的行(部分数据比没有强),
 		// 完整性由 service 层的 topologyComplete 判定并回退 prev。
 		logx.Warn("esxi vm net list incomplete", "err", err.Error())
+		topo.VMPortsCollected = false
+	} else {
+		topo.VMNetCollected = true
 	}
 	for _, vm := range parseVMNetList(listOut) {
 		cmd := fmt.Sprintf("esxcli network vm port list -w %d", vm.worldID)
@@ -2462,11 +2490,16 @@ func collectNetTopology(client *ssh.Client, vms []VM) NetTopology {
 		})
 		if err != nil {
 			logx.Warn("esxi vm port list failed", "vm", vm.name, "err", err.Error())
+			topo.VMPortsCollected = false
 			continue
 		}
 		links := parseVMPortList(out)
 		if vmInfo, ok := vmByName[vm.name]; ok && vmNICLinksNeedGuestIP(links) {
-			links = fillVMNICGuestIPs(links, collectVMGuestNIC(client, vmInfo))
+			guestNICs, guestOK := collectVMGuestNIC(client, vmInfo)
+			links = fillVMNICGuestIPs(links, guestNICs)
+			if !guestOK {
+				topo.VMPortsCollected = false
+			}
 		}
 		for _, link := range links {
 			link.VMID = vm.worldID
@@ -2491,9 +2524,9 @@ func vmNICLinksNeedGuestIP(links []VMNICLink) bool {
 	return false
 }
 
-func collectVMGuestNIC(client *ssh.Client, vm VM) []vmGuestNIC {
+func collectVMGuestNIC(client *ssh.Client, vm VM) ([]vmGuestNIC, bool) {
 	if vm.ID <= 0 || vm.State != "powered_on" {
-		return nil
+		return nil, true
 	}
 	cmd := "vim-cmd vmsvc/get.guest " + strconv.Itoa(vm.ID)
 	out, err := runEsxiRetry(client, "vm guest "+strconv.Itoa(vm.ID), cmd, 12*time.Second, 2, func(out string) bool {
@@ -2501,19 +2534,21 @@ func collectVMGuestNIC(client *ssh.Client, vm VM) []vmGuestNIC {
 	})
 	if err != nil {
 		logx.Warn("esxi vm guest fetch failed", "vm_id", vm.ID, "vm", vm.Name, "err", err.Error(), "bytes", len(out))
+		return parseVMGuestNICs(out), false
 	}
-	return parseVMGuestNICs(out)
+	return parseVMGuestNICs(out), true
 }
 
-func collectVMKPorts(client *ssh.Client) ([]VMKPort, bool) {
+func collectVMKPorts(client *ssh.Client) ([]VMKPort, bool, bool) {
 	out, err := runEsxiRetry(client, "vmkernel interface list", "esxcli network ip interface list", defaultCmdTimeout, 2, func(s string) bool {
 		return strings.Contains(s, "Name:") || strings.Contains(s, "vmk")
 	})
 	if err != nil {
 		logx.Warn("esxi vmkernel interface list failed", "err", err.Error())
-		return nil, false
+		return nil, false, false
 	}
 	ports := parseIPInterfaceList(out)
+	full := true
 	for i := range ports {
 		if ports[i].Name == "" {
 			continue
@@ -2524,11 +2559,12 @@ func collectVMKPorts(client *ssh.Client) ([]VMKPort, bool) {
 		})
 		if err != nil {
 			logx.Warn("esxi vmkernel ipv4 get failed", "vmk", ports[i].Name, "err", err.Error())
+			full = false
 			continue
 		}
 		ports[i].IPv4 = parseIPv4Get(ipOut, ports[i].Name)
 	}
-	return ports, true
+	return ports, true, full
 }
 
 // vmNetListCovers 检查 `esxcli network vm list` 的解析结果是否覆盖了全部期望 VM。

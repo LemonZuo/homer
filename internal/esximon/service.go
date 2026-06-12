@@ -486,6 +486,17 @@ func topologyComplete(m HostMetrics) bool {
 	return true
 }
 
+func topologyFullyCollected(m HostMetrics) bool {
+	t := m.Topology
+	return t.Collected &&
+		t.VSwitchCollected &&
+		t.VMNetCollected &&
+		t.VMPortsCollected &&
+		t.VMKCollected &&
+		t.VMKFullCollected &&
+		topologyComplete(m)
+}
+
 // buildState 把单台机器一轮采集结果转成 esxi_state 行。
 // 关键约定:当某个子项采集失败(整轮 SSH 挂 / 单个命令空返回)时,该 JSON 列不会被
 // "新的空值"覆盖,而是回退到 prev 的同名 JSON,让前端看到的快照保持上一次已知值。
@@ -559,6 +570,9 @@ func stickyTopologyJSON(cur NetTopology, ok bool, prevJSON string) string {
 		if prevJSON != "" {
 			if prev, hasPrev := parsePrevTopology(prevJSON); hasPrev {
 				cur = fillVMNICIPsFromPrev(cur, prev)
+				if cur.LastFullSuccessAt.IsZero() {
+					cur.LastFullSuccessAt = prev.LastFullSuccessAt
+				}
 				if !cur.VMKCollected && len(prev.VMKPorts) > 0 {
 					cur.VMKPorts = prev.VMKPorts
 				}

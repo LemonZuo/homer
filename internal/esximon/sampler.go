@@ -28,17 +28,21 @@ type HostResult struct {
 
 // Sampler 负责一轮"扫所有 esxi_host → 并发 SSH → 跑 esxcli/vsish → 聚合结果"。
 type Sampler struct {
-	db          *gorm.DB
-	hosts       *HostStore
-	credentials sshlike.CredentialResolver
-	timeout     time.Duration
+	db                      *gorm.DB
+	hosts                   *HostStore
+	credentials             sshlike.CredentialResolver
+	timeout                 time.Duration
+	topologyRefreshInterval time.Duration
 }
 
-func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshlike.CredentialResolver, sshTimeout time.Duration) *Sampler {
+func NewSampler(db *gorm.DB, hosts *HostStore, credentials sshlike.CredentialResolver, sshTimeout, topologyRefreshInterval time.Duration) *Sampler {
 	if sshTimeout <= 0 {
 		sshTimeout = 120 * time.Second
 	}
-	return &Sampler{db: db, hosts: hosts, credentials: credentials, timeout: sshTimeout}
+	if topologyRefreshInterval <= 0 {
+		topologyRefreshInterval = 30 * time.Minute
+	}
+	return &Sampler{db: db, hosts: hosts, credentials: credentials, timeout: sshTimeout, topologyRefreshInterval: topologyRefreshInterval}
 }
 
 // Run 扫一轮所有启用的 esxi_host 并发采集,单机失败不影响其他。
@@ -50,6 +54,7 @@ func (s *Sampler) Run() ([]HostResult, error) {
 	if len(targets) == 0 {
 		return nil, nil
 	}
+	prevStates := s.loadPreviousStatesByHostID()
 
 	results := make([]HostResult, len(targets))
 	var wg sync.WaitGroup
@@ -57,7 +62,11 @@ func (s *Sampler) Run() ([]HostResult, error) {
 		wg.Add(1)
 		go func(idx int, h model.EsxiHost) {
 			defer wg.Done()
-			results[idx] = s.probeOne(h)
+			var prev *model.EsxiState
+			if p, ok := prevStates[h.ID]; ok {
+				prev = &p
+			}
+			results[idx] = s.probeOne(h, prev)
 		}(i, targets[i])
 	}
 	wg.Wait()
@@ -65,7 +74,7 @@ func (s *Sampler) Run() ([]HostResult, error) {
 }
 
 // probeOne 单台机器一轮:连 SSH → 跑全套命令 → 关闭。任何关键步骤失败封装到 HostResult.Error。
-func (s *Sampler) probeOne(h model.EsxiHost) HostResult {
+func (s *Sampler) probeOne(h model.EsxiHost, prev *model.EsxiState) HostResult {
 	res := HostResult{
 		HostKind: model.EsxiHostKind,
 		HostID:   h.ID,
@@ -101,14 +110,24 @@ func (s *Sampler) probeOne(h model.EsxiHost) HostResult {
 			return
 		}
 		defer cleanup()
-		metrics = CollectAll(client)
+		opts := topologyCollectOptions(prev, res.StartAt, s.topologyRefreshInterval)
+		if opts.SkipTopology {
+			logx.Debug("esxi topology collection skipped",
+				"host", h.Name,
+				"last_full_success_at", opts.PreviousTopology.LastFullSuccessAt.Format(time.RFC3339),
+				"interval", s.topologyRefreshInterval.String())
+		}
+		metrics = CollectAllWithOptions(client, opts)
 		missing := probeMissing(metrics)
 		for attempt := 2; len(missing) > 0 && attempt <= 2; attempt++ {
 			logx.Warn("esxi probe incomplete, retrying",
 				"host", h.Name, "attempt", attempt, "missing", strings.Join(missing, ","))
-			next := CollectAll(client)
+			next := CollectAllWithOptions(client, opts)
 			metrics = mergeHostMetrics(metrics, next)
 			missing = probeMissing(metrics)
+		}
+		if topologyFullyCollected(metrics) && metrics.Topology.LastFullSuccessAt.IsZero() {
+			metrics.Topology.LastFullSuccessAt = time.Now()
 		}
 		if len(missing) > 0 {
 			logx.Warn("esxi probe incomplete after retries", "host", h.Name, "missing", strings.Join(missing, ","))
@@ -130,12 +149,48 @@ func (s *Sampler) probeOne(h model.EsxiHost) HostResult {
 	return res
 }
 
+func (s *Sampler) loadPreviousStatesByHostID() map[int64]model.EsxiState {
+	var rows []model.EsxiState
+	if err := s.db.Find(&rows).Error; err != nil {
+		logx.Warn("esxi previous state load failed", "err", err.Error())
+		return nil
+	}
+	out := make(map[int64]model.EsxiState, len(rows))
+	for _, row := range rows {
+		if row.HostKind == model.EsxiHostKind {
+			out[row.HostID] = row
+		}
+	}
+	return out
+}
+
+func topologyCollectOptions(prev *model.EsxiState, now time.Time, interval time.Duration) CollectOptions {
+	if prev == nil || prev.TopologyJSON == "" {
+		return CollectOptions{}
+	}
+	topo, ok := parsePrevTopology(prev.TopologyJSON)
+	if !ok {
+		return CollectOptions{}
+	}
+	if topologyRefreshDue(topo, now, interval) {
+		return CollectOptions{PreviousTopology: topo}
+	}
+	return CollectOptions{SkipTopology: true, PreviousTopology: topo}
+}
+
+func topologyRefreshDue(topo NetTopology, now time.Time, interval time.Duration) bool {
+	if interval <= 0 || topo.LastFullSuccessAt.IsZero() {
+		return true
+	}
+	return now.Sub(topo.LastFullSuccessAt) > interval
+}
+
 // probeMissing 在 sampleMissingMetrics 基础上追加拓扑完整性,驱动同一轮内的整轮重试。
 // 拓扑不写 esxi_sample,所以 sampleMissingMetrics 不含它(不挡时序入库),
 // 这里加上只为了重试时把缺的 VM 边补全;最终完整性兜底在 buildState 的 prev 回退。
 func probeMissing(m HostMetrics) []string {
 	missing := sampleMissingMetrics(m)
-	if !topologyComplete(m) {
+	if !m.Topology.Skipped && !topologyComplete(m) {
 		missing = append(missing, "net_topology")
 	}
 	return missing
@@ -213,6 +268,21 @@ func mergeTopology(base, next NetTopology) NetTopology {
 		base.VMKPorts = mergeVMKPorts(base.VMKPorts, next.VMKPorts)
 		base.VMKCollected = true
 	}
+	base = mergeTopologyCollectionState(base, next)
+	return base
+}
+
+func mergeTopologyCollectionState(base, next NetTopology) NetTopology {
+	if next.LastFullSuccessAt.After(base.LastFullSuccessAt) {
+		base.LastFullSuccessAt = next.LastFullSuccessAt
+	}
+	base.Skipped = base.Skipped && next.Skipped
+	base.Collected = base.Collected || next.Collected
+	base.VSwitchCollected = base.VSwitchCollected || next.VSwitchCollected
+	base.VMNetCollected = base.VMNetCollected || next.VMNetCollected
+	base.VMPortsCollected = base.VMPortsCollected || next.VMPortsCollected
+	base.VMKCollected = base.VMKCollected || next.VMKCollected
+	base.VMKFullCollected = base.VMKFullCollected || next.VMKFullCollected
 	return base
 }
 
@@ -486,5 +556,9 @@ func (s *Sampler) ProbeByHostID(id int64) (HostResult, error) {
 	if err != nil {
 		return HostResult{}, err
 	}
-	return s.probeOne(*h), nil
+	var prev *model.EsxiState
+	if row, ok := s.loadPreviousStatesByHostID()[h.ID]; ok {
+		prev = &row
+	}
+	return s.probeOne(*h, prev), nil
 }

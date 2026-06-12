@@ -173,6 +173,42 @@ func TestStickyTopologyJSONKeepsPreviousVMNICIP(t *testing.T) {
 	}
 }
 
+func TestStickyTopologyJSONKeepsPreviousFullSuccessAt(t *testing.T) {
+	lastSuccess := time.Date(2026, 6, 12, 10, 0, 0, 0, time.Local)
+	prev := NetTopology{
+		VSwitches:         []VSwitchInfo{{Name: "vSwitch0"}},
+		VMNICs:            []VMNICLink{{VMName: "fnOS", MAC: "00:0c:29:86:f2:a0"}},
+		LastFullSuccessAt: lastSuccess,
+	}
+	cur := NetTopology{
+		VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
+		VMNICs:    []VMNICLink{{VMName: "fnOS", MAC: "00:0c:29:86:f2:a0"}},
+	}
+	gotJSON := stickyTopologyJSON(cur, true, mustJSON(prev))
+
+	var got NetTopology
+	if err := json.Unmarshal([]byte(gotJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.LastFullSuccessAt.Equal(lastSuccess) {
+		t.Fatalf("last full success should be preserved, got %s", got.LastFullSuccessAt.Format(time.RFC3339))
+	}
+}
+
+func TestTopologyRefreshDueUsesLastFullSuccessAt(t *testing.T) {
+	now := time.Date(2026, 6, 12, 11, 0, 0, 0, time.Local)
+	interval := 30 * time.Minute
+	if topologyRefreshDue(NetTopology{}, now, interval) != true {
+		t.Fatal("empty success time should force topology collection")
+	}
+	if topologyRefreshDue(NetTopology{LastFullSuccessAt: now.Add(-29 * time.Minute)}, now, interval) {
+		t.Fatal("topology should be skipped before refresh interval")
+	}
+	if !topologyRefreshDue(NetTopology{LastFullSuccessAt: now.Add(-31 * time.Minute)}, now, interval) {
+		t.Fatal("topology should be collected after refresh interval")
+	}
+}
+
 func TestSampleMissingMetricsRequiresCompleteCurrentData(t *testing.T) {
 	m := HostMetrics{
 		CPU:     CPUStatic{Cores: 2},

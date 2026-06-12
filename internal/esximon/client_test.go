@@ -666,6 +666,29 @@ func TestTopologyCompleteDoesNotRequireVMKPorts(t *testing.T) {
 	}
 }
 
+func TestTopologyFullyCollectedRequiresAllTopologyParts(t *testing.T) {
+	m := HostMetrics{
+		VMs: []VM{{Name: "fnOS", State: "powered_on"}},
+		Topology: NetTopology{
+			VSwitches:        []VSwitchInfo{{Name: "vSwitch0"}},
+			VMNICs:           []VMNICLink{{VMName: "fnOS", MAC: "00:0c:29:00:00:01"}},
+			Collected:        true,
+			VSwitchCollected: true,
+			VMNetCollected:   true,
+			VMPortsCollected: true,
+			VMKCollected:     true,
+			VMKFullCollected: true,
+		},
+	}
+	if !topologyFullyCollected(m) {
+		t.Fatal("topology should be fully collected when every topology command succeeded")
+	}
+	m.Topology.VMKFullCollected = false
+	if topologyFullyCollected(m) {
+		t.Fatal("topology should not be fully collected when vmkernel ipv4 fetch is incomplete")
+	}
+}
+
 func TestMergeTopologyMergesVMKPorts(t *testing.T) {
 	base := NetTopology{
 		VMKPorts: []VMKPort{{
