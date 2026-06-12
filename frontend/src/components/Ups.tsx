@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   RefreshCw,
   Loader2,
@@ -17,15 +17,23 @@ import { UpsHostEditDialog } from './ups/UpsHostEditDialog'
 import { UpsCredentialsDrawer } from './ups/UpsCredentialsDrawer'
 import { UpsCredentialEditDialog } from './ups/UpsCredentialEditDialog'
 import { extractErr, fmtDateTime } from './ups/format'
-import type { Snapshot, SnapshotUPS, UpsCredential, UpsHost } from './ups/types'
+import type { UpsCredential, UpsHost } from './ups/types'
 import { DemoSection } from './ups/DemoSection'
 import { HostSection } from './ups/HostSection'
 import { SummaryCard } from './ups/SummaryCard'
+import { useUpsSnapshots } from './ups/useUpsSnapshots'
 
 export default function Ups() {
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const {
+    snapshots,
+    loading,
+    refreshing,
+    empty,
+    stats,
+    lastSampled,
+    reload: reloadSnapshots,
+    triggerSample,
+  } = useUpsSnapshots()
   const [hostsOpen, setHostsOpen] = useState(false)
   const [hostEditOpen, setHostEditOpen] = useState(false)
   const [editingHost, setEditingHost] = useState<UpsHost | null>(null)
@@ -56,26 +64,6 @@ export default function Ups() {
       setDemoMode(true)
     }
   }, [demoMode])
-
-  const normalize = (arr: unknown): Snapshot[] => {
-    if (!Array.isArray(arr)) return []
-    return arr.map((s) => {
-      const obj = (s ?? {}) as Snapshot & { upses?: SnapshotUPS[] }
-      return { ...obj, upses: obj.upses ?? [] }
-    })
-  }
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const { data } = await api.get('/ups/snapshot')
-      setSnapshots(normalize(data?.data))
-    } catch (e) {
-      toast.error(extractErr(e, '加载失败'))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
 
   const loadHosts = useCallback(async () => {
     try {
@@ -120,7 +108,7 @@ export default function Ups() {
       await api.delete(`/ups/hosts/${h.id}`)
       toast.success('已删除')
       void loadHosts()
-      void load()
+      void reloadSnapshots()
     } catch (e) {
       toast.error(extractErr(e, '删除失败'))
     }
@@ -165,67 +153,7 @@ export default function Ups() {
     }
   }
 
-  const triggerSample = useCallback(async () => {
-    setRefreshing(true)
-    try {
-      const { data } = await api.post('/ups/refresh')
-      setSnapshots(normalize(data?.data))
-      toast.success('已触发一次采样')
-    } catch (e) {
-      toast.error(extractErr(e, '采样失败'))
-    } finally {
-      setRefreshing(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      void load()
-    })
-  }, [load])
-
-  // SSE 推送替代 30 秒轮询。订阅时后端立即发首帧,之后每轮采样完推一帧;
-  // EventSource 内置断线重连(默认 3s),所以这里不用自己写 retry。
-  useEffect(() => {
-    const es = new EventSource('/api/ups/stream')
-    es.addEventListener('snapshot', (ev) => {
-      try {
-        const data = JSON.parse((ev as MessageEvent).data)
-        setSnapshots(normalize(data))
-        setLoading(false)
-      } catch {
-        // 忽略损坏的单帧,等下一帧
-      }
-    })
-    return () => es.close()
-  }, [])
-
   const cs = getColorSet('teal')
-  const empty = !loading && snapshots.length === 0
-
-  const stats = useMemo(() => {
-    const hosts = snapshots.length
-    let upses = 0
-    let alerts = 0
-    for (const s of snapshots) {
-      for (const u of s.upses) {
-        upses++
-        if (u.power_source === 'battery' || u.power_source === 'low_battery') alerts++
-      }
-    }
-    return { hosts, upses, alerts }
-  }, [snapshots])
-
-  // 最近一次采样时间(取所有 UPS 里最新的)
-  const lastSampled = useMemo(() => {
-    let latest = ''
-    for (const s of snapshots) {
-      for (const u of s.upses) {
-        if (!latest || u.sampled_at > latest) latest = u.sampled_at
-      }
-    }
-    return latest
-  }, [snapshots])
 
   return (
     <div className="mx-auto max-w-5xl px-4 pb-32 pt-4 sm:px-8 sm:pt-10">
@@ -331,7 +259,7 @@ export default function Ups() {
         onManageCredentials={openCredsDrawer}
         onSaved={() => {
           void loadHosts()
-          void load()
+          void reloadSnapshots()
         }}
       />
       <UpsCredentialsDrawer
