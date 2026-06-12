@@ -142,6 +142,37 @@ func TestStickyTopologyJSONUsesKnownEmptyVMKPorts(t *testing.T) {
 	}
 }
 
+func TestStickyTopologyJSONKeepsPreviousVMNICIP(t *testing.T) {
+	prev := NetTopology{
+		VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
+		VMNICs: []VMNICLink{{
+			VMName:    "fnOS",
+			VSwitch:   "vSwitch0",
+			Portgroup: "VM Network",
+			MAC:       "00:0c:29:86:f2:a0",
+			IP:        "192.168.8.21",
+		}},
+	}
+	cur := NetTopology{
+		VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
+		VMNICs: []VMNICLink{{
+			VMName:    "fnOS",
+			VSwitch:   "vSwitch0",
+			Portgroup: "VM Network",
+			MAC:       "00:0C:29:86:F2:A0",
+		}},
+	}
+	gotJSON := stickyTopologyJSON(cur, true, mustJSON(prev))
+
+	var got NetTopology
+	if err := json.Unmarshal([]byte(gotJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.VMNICs) != 1 || got.VMNICs[0].IP != "192.168.8.21" {
+		t.Fatalf("previous vmnic ip should be preserved, got %#v", got.VMNICs)
+	}
+}
+
 func TestSampleMissingMetricsRequiresCompleteCurrentData(t *testing.T) {
 	m := HostMetrics{
 		CPU:     CPUStatic{Cores: 2},

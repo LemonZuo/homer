@@ -624,6 +624,35 @@ func TestFillVMNICGuestIPs(t *testing.T) {
 	}
 }
 
+func TestMergeTopologyFillsVMNICIP(t *testing.T) {
+	base := NetTopology{
+		VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
+		VMNICs: []VMNICLink{{
+			VMName:    "fnOS",
+			VSwitch:   "vSwitch0",
+			Portgroup: "VM Network",
+			MAC:       "00:0c:29:86:f2:a0",
+		}},
+	}
+	next := NetTopology{
+		VMNICs: []VMNICLink{{
+			VMName:     "fnOS",
+			VSwitch:    "vSwitch0",
+			Portgroup:  "VM Network",
+			MAC:        "00:0C:29:86:F2:A0",
+			IP:         "192.168.8.21",
+			TeamUplink: "vmnic0",
+		}},
+	}
+	got := mergeTopology(base, next)
+	if len(got.VMNICs) != 1 {
+		t.Fatalf("vm_nics = %#v", got.VMNICs)
+	}
+	if got.VMNICs[0].IP != "192.168.8.21" || got.VMNICs[0].TeamUplink != "vmnic0" {
+		t.Fatalf("merged vmnic = %#v", got.VMNICs[0])
+	}
+}
+
 func TestTopologyCompleteDoesNotRequireVMKPorts(t *testing.T) {
 	m := HostMetrics{
 		VMs: []VM{{Name: "fnOS", State: "powered_on"}},

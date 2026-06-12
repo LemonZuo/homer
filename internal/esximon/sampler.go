@@ -196,20 +196,48 @@ func mergeTopology(base, next NetTopology) NetTopology {
 	if len(base.VSwitches) == 0 {
 		base.VSwitches = next.VSwitches
 	}
-	seen := make(map[string]bool, len(base.VMNICs))
-	for _, l := range base.VMNICs {
-		seen[l.VMName+"|"+l.MAC] = true
+	idx := make(map[string]int, len(base.VMNICs))
+	for i, l := range base.VMNICs {
+		idx[vmNICKey(l)] = i
 	}
 	for _, l := range next.VMNICs {
-		key := l.VMName + "|" + l.MAC
-		if !seen[key] {
-			base.VMNICs = append(base.VMNICs, l)
-			seen[key] = true
+		key := vmNICKey(l)
+		if i, ok := idx[key]; ok {
+			base.VMNICs[i] = mergeVMNICLink(base.VMNICs[i], l)
+			continue
 		}
+		idx[key] = len(base.VMNICs)
+		base.VMNICs = append(base.VMNICs, l)
 	}
 	if next.VMKCollected {
 		base.VMKPorts = mergeVMKPorts(base.VMKPorts, next.VMKPorts)
 		base.VMKCollected = true
+	}
+	return base
+}
+
+func vmNICKey(l VMNICLink) string {
+	return l.VMName + "|" + strings.ToLower(l.MAC)
+}
+
+func mergeVMNICLink(base, next VMNICLink) VMNICLink {
+	if next.VMID != 0 {
+		base.VMID = next.VMID
+	}
+	if next.VSwitch != "" {
+		base.VSwitch = next.VSwitch
+	}
+	if next.Portgroup != "" {
+		base.Portgroup = next.Portgroup
+	}
+	if next.MAC != "" {
+		base.MAC = next.MAC
+	}
+	if next.IP != "" {
+		base.IP = next.IP
+	}
+	if next.TeamUplink != "" {
+		base.TeamUplink = next.TeamUplink
 	}
 	return base
 }

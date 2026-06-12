@@ -2412,6 +2412,16 @@ func poweredOnVMNames(vms []VM) []string {
 	return names
 }
 
+func poweredOnVMByName(vms []VM) map[string]VM {
+	m := make(map[string]VM, len(vms))
+	for _, v := range vms {
+		if v.State == "powered_on" && v.Name != "" {
+			m[v.Name] = v
+		}
+	}
+	return m
+}
+
 // collectNetTopology 抓 vSwitch + 每个 VM 的 vNIC 边 + VMkernel 端口。
 // vSwitch list 一次拿全;`esxcli network vm list` 给出每台正在跑的 VM 的 World ID,
 // 再对每个 World ID 跑一次 `esxcli network vm port list -w <wid>`。
@@ -2421,7 +2431,7 @@ func poweredOnVMNames(vms []VM) []string {
 func collectNetTopology(client *ssh.Client, vms []VM) NetTopology {
 	topo := NetTopology{}
 	expectVMs := poweredOnVMNames(vms)
-	guestNICs := collectVMGuestNICs(client, vms)
+	vmByName := poweredOnVMByName(vms)
 	if out, err := runEsxiRetry(client, "vswitch list", "esxcli network vswitch standard list", defaultCmdTimeout, 2, func(s string) bool {
 		return strings.Contains(s, "Uplinks:") || strings.Contains(s, "vSwitch")
 	}); err == nil {
@@ -2454,7 +2464,10 @@ func collectNetTopology(client *ssh.Client, vms []VM) NetTopology {
 			logx.Warn("esxi vm port list failed", "vm", vm.name, "err", err.Error())
 			continue
 		}
-		links := fillVMNICGuestIPs(parseVMPortList(out), guestNICs[vm.name])
+		links := parseVMPortList(out)
+		if vmInfo, ok := vmByName[vm.name]; ok && vmNICLinksNeedGuestIP(links) {
+			links = fillVMNICGuestIPs(links, collectVMGuestNIC(client, vmInfo))
+		}
 		for _, link := range links {
 			link.VMID = vm.worldID
 			link.VMName = vm.name
@@ -2469,42 +2482,27 @@ type vmGuestNIC struct {
 	IP  string
 }
 
-func collectVMGuestNICs(client *ssh.Client, vms []VM) map[string][]vmGuestNIC {
-	res := map[string][]vmGuestNIC{}
-	var targets []VM
-	for _, v := range vms {
-		if v.State == "powered_on" {
-			targets = append(targets, v)
+func vmNICLinksNeedGuestIP(links []VMNICLink) bool {
+	for _, link := range links {
+		if link.MAC != "" && link.IP == "" {
+			return true
 		}
 	}
-	if len(targets) == 0 {
-		return res
+	return false
+}
+
+func collectVMGuestNIC(client *ssh.Client, vm VM) []vmGuestNIC {
+	if vm.ID <= 0 || vm.State != "powered_on" {
+		return nil
 	}
-	var b strings.Builder
-	for _, v := range targets {
-		b.WriteString("printf '===VM===%d\\n' ")
-		b.WriteString(strconv.Itoa(v.ID))
-		b.WriteString("; vim-cmd vmsvc/get.guest ")
-		b.WriteString(strconv.Itoa(v.ID))
-		b.WriteString("; ")
-	}
-	out, err := runEsxiRetry(client, "vm guest batch", b.String(), 35*time.Second, 2, func(out string) bool {
-		return strings.Contains(out, "===VM===")
+	cmd := "vim-cmd vmsvc/get.guest " + strconv.Itoa(vm.ID)
+	out, err := runEsxiRetry(client, "vm guest "+strconv.Itoa(vm.ID), cmd, 12*time.Second, 2, func(out string) bool {
+		return strings.TrimSpace(out) != ""
 	})
 	if err != nil {
-		logx.Warn("esxi vm guest batch failed", "err", err.Error(), "bytes", len(out))
+		logx.Warn("esxi vm guest fetch failed", "vm_id", vm.ID, "vm", vm.Name, "err", err.Error(), "bytes", len(out))
 	}
-	byID := parseBatchVMGuestNICs(out)
-	nameByID := make(map[int]string, len(targets))
-	for _, v := range targets {
-		nameByID[v.ID] = v.Name
-	}
-	for id, nics := range byID {
-		if name := nameByID[id]; name != "" && len(nics) > 0 {
-			res[name] = nics
-		}
-	}
-	return res
+	return parseVMGuestNICs(out)
 }
 
 func collectVMKPorts(client *ssh.Client) ([]VMKPort, bool) {

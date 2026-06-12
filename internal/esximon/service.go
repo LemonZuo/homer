@@ -556,9 +556,12 @@ func stickyJSON(v any, ok bool, prevJSON string) string {
 
 func stickyTopologyJSON(cur NetTopology, ok bool, prevJSON string) string {
 	if ok {
-		if !cur.VMKCollected && prevJSON != "" {
-			if prev, hasPrev := parsePrevTopology(prevJSON); hasPrev && len(prev.VMKPorts) > 0 {
-				cur.VMKPorts = prev.VMKPorts
+		if prevJSON != "" {
+			if prev, hasPrev := parsePrevTopology(prevJSON); hasPrev {
+				cur = fillVMNICIPsFromPrev(cur, prev)
+				if !cur.VMKCollected && len(prev.VMKPorts) > 0 {
+					cur.VMKPorts = prev.VMKPorts
+				}
 			}
 		}
 		return mustJSON(cur)
@@ -567,6 +570,24 @@ func stickyTopologyJSON(cur NetTopology, ok bool, prevJSON string) string {
 		return prevJSON
 	}
 	return mustJSON(cur)
+}
+
+func fillVMNICIPsFromPrev(cur, prev NetTopology) NetTopology {
+	ipByKey := make(map[string]string, len(prev.VMNICs))
+	for _, link := range prev.VMNICs {
+		if link.IP != "" {
+			ipByKey[vmNICKey(link)] = link.IP
+		}
+	}
+	for i := range cur.VMNICs {
+		if cur.VMNICs[i].IP != "" {
+			continue
+		}
+		if ip := ipByKey[vmNICKey(cur.VMNICs[i])]; ip != "" {
+			cur.VMNICs[i].IP = ip
+		}
+	}
+	return cur
 }
 
 func parsePrevTopology(s string) (NetTopology, bool) {
