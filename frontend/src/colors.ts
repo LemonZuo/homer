@@ -20,6 +20,7 @@ export const colorMap: Record<string, ColorSet> = {
   purple:  { dot: 'bg-purple-500',  border: 'border-purple-500/40 hover:border-purple-500/80', halo: 'hover:shadow-[0_0_24px_0_rgb(168_85_247_/_0.35)]', picker: 'border-purple-500/45 bg-purple-500/10 text-purple-950 dark:text-purple-50' },
   indigo:  { dot: 'bg-indigo-500',  border: 'border-indigo-500/40 hover:border-indigo-500/80', halo: 'hover:shadow-[0_0_24px_0_rgb(99_102_241_/_0.35)]', picker: 'border-indigo-500/45 bg-indigo-500/10 text-indigo-950 dark:text-indigo-50' },
   claude:  { dot: 'bg-[#d97757]',    border: 'border-[#d97757]/45 hover:border-[#d97757]/85', halo: 'hover:shadow-[0_0_24px_0_rgb(217_119_87_/_0.35)]', picker: 'border-[#d97757]/45 bg-[#d97757]/10 text-stone-950 dark:text-stone-50' },
+  esxi:    { dot: 'bg-[#4f89c0]',    border: 'border-[#4f89c0]/45 hover:border-[#4f89c0]/85', halo: 'hover:shadow-[0_0_24px_0_rgb(79_137_192_/_0.35)]', picker: 'border-[#4f89c0]/45 bg-[#4f89c0]/10 text-slate-950 dark:text-slate-50' },
 }
 
 // 头像背景：低饱和深色单色，按字符串哈希挑一个。

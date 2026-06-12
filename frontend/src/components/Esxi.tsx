@@ -1072,7 +1072,7 @@ function HistorySection({
               className={cn(
                 'rounded-md border px-2 py-0.5 text-[11px] transition-colors',
                 metric === o.value
-                  ? 'border-purple-500/60 bg-purple-500/10 text-purple-700 dark:text-purple-300'
+                  ? 'border-[#4f89c0]/60 bg-[#4f89c0]/15 text-[#3d6e9d] dark:text-[#9bc1e0]'
                   : 'border-border bg-background text-muted-foreground hover:border-border/80 hover:text-foreground',
               )}
             >
@@ -1089,7 +1089,7 @@ function HistorySection({
               className={cn(
                 'rounded-md border px-2 py-0.5 text-[11px] transition-colors',
                 range === o.value
-                  ? 'border-purple-500/60 bg-purple-500/10 text-purple-700 dark:text-purple-300'
+                  ? 'border-[#4f89c0]/60 bg-[#4f89c0]/15 text-[#3d6e9d] dark:text-[#9bc1e0]'
                   : 'border-border bg-background text-muted-foreground hover:border-border/80 hover:text-foreground',
               )}
             >
@@ -1680,7 +1680,7 @@ function MiniChart({
 function HostBlock({ host }: { host: Snapshot }) {
   const [expanded, setExpanded] = useState(false)
   const now = useNowTick()
-  const cs = getColorSet('purple')
+  const cs = getColorSet('esxi')
   const sampledAtMs = host.sampled_at ? new Date(host.sampled_at).getTime() : 0
   const isStale = !host.reachable || isStaleSample(host.sampled_at, now)
   const staleAge = sampledAtMs > 0 ? fmtStaleAge(now - sampledAtMs) : ''
@@ -1957,7 +1957,7 @@ export default function Esxi() {
     return () => es.close()
   }, [])
 
-  const cs = getColorSet('purple')
+  const cs = getColorSet('esxi')
   const empty = !loading && snapshots.length === 0
   const now = useNowTick()
 
