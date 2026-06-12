@@ -110,8 +110,9 @@ go build -ldflags="-s -w" -o bin/server .
 - 任务失败计数和告警门槛走 `internal/jobmonitor/`
 - 日志统一使用 `internal/logx` 的 slog 结构化日志封装，级别由 `LOG_LEVEL` 控制
 - schema 变更必须同时补：
-  - `sql/0X_*.sql` 增量迁移脚本，使用存储过程保持幂等
+  - `sql/0X_*.sql` 增量迁移脚本，使用存储过程保持幂等（当前编号已到 18）
   - GORM AutoMigrate 对应模型
+- pre-commit hook 用 `/opt/module/go/go1.25.0` 跑 gofmt + `go vet`；本机若有更高版本 GOROOT 干扰，用 `env -u GOROOT GOTOOLCHAIN=local PATH=/opt/module/go/go1.25.0/bin:/usr/bin:/bin git commit ...` 绕开 toolchain 自动升级
 - Tailwind 使用 v4，通过 `@import "tailwindcss";` 和 CSS 变量配置；不要新增 `tailwind.config.js`，除非确有必要
 - 前端页面登记在 `frontend/src/pages.ts`，业务页面保持自包含，不恢复声明式 CRUD 模式
 - Go 业务 handler 放在 `internal/handler/`，按业务拆分文件；ACME 相关逻辑可放在 `internal/handler/acme/`

@@ -47,14 +47,17 @@ homer/
 │   ├── upsmon/    # UPS：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
 │   ├── esximon/   # ESXi：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler；网络拓扑(vSwitch/uplink/portgroup/VM-NIC) 也在 sampler 合并
 │   └── web/
-├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程）
+├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 18）
 └── frontend/
     ├── dist/        # vite 产物，被 go:embed 引用
     └── src/
         ├── main.tsx / App.tsx   # 入口；路由 + 懒加载页面映射
         ├── api.ts / colors.ts
         ├── pages.ts     # 页面/导航登记表（每页自包含，无声明式 CRUD）
-        ├── components/  # 页面组件 + 子目录 acme/ sms/ esxi/ ups/ ui/ icons/(esxi/NetTopologyFlow 用 @xyflow/react 画拓扑)
+        ├── components/  # 顶层放各页面入口（Esxi.tsx/Ups.tsx 现已瘦身到 ~50 行），按模块拆子目录：
+        │                #   acme/ sms/ ui/ icons/
+        │                #   esxi/{host-cards,history,topology,shared 等}（NetTopologyFlow 用 @xyflow/react）
+        │                #   ups/{history,cards,management 等}
         ├── lib/、assets/
         └── index.css
 ```
