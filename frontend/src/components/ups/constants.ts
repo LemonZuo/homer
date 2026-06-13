@@ -215,9 +215,9 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
   },
 ]
 
-export type MetricKey = 'inputV' | 'load' | 'power'
+export type MetricKey = 'voltage' | 'load' | 'power'
 export const METRIC_OPTIONS: { value: MetricKey; label: string }[] = [
-  { value: 'inputV', label: '输入电压' },
+  { value: 'voltage', label: '电压' },
   { value: 'load', label: '负载' },
   { value: 'power', label: '实时功率' },
 ]

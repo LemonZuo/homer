@@ -26,7 +26,7 @@ export function SeriesChart({
   expanded: boolean
 }) {
   const [range, setRange] = useState('24h')
-  const [metric, setMetric] = useState<MetricKey>('inputV')
+  const [metric, setMetric] = useState<MetricKey>('voltage')
   const [points, setPoints] = useState<SeriesPoint[] | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -104,6 +104,12 @@ export function SeriesChart({
   )
 }
 
+interface MiniSeries {
+  label: string
+  stroke: string
+  data: MiniPoint[]
+}
+
 function SeriesPlot({
   points,
   loading,
@@ -130,62 +136,83 @@ function SeriesPlot({
   }
   const ts = points.map((p) => new Date(p.bucket_start).getTime())
   const psArr = points.map((p) => p.power_source)
-  let data: MiniPoint[]
+  let series: MiniSeries[]
   let unit: string
-  let stroke: string
   let yMin: number | undefined
   let yMax: number | undefined
   let format: (v: number) => string
   switch (metric) {
-    case 'inputV':
-      data = points.map((p, i) => ({
-        t: ts[i],
-        v: p.input_voltage < 0 ? null : p.input_voltage,
-        ps: psArr[i],
-      }))
+    case 'voltage':
+      series = [
+        {
+          label: '输入',
+          stroke: 'rgb(20 184 166)',
+          data: points.map((p, i) => ({
+            t: ts[i],
+            v: p.input_voltage < 0 ? null : p.input_voltage,
+            ps: psArr[i],
+          })),
+        },
+        {
+          label: '输出',
+          stroke: 'rgb(168 85 247)',
+          data: points.map((p, i) => ({
+            t: ts[i],
+            v: p.output_voltage < 0 ? null : p.output_voltage,
+            ps: psArr[i],
+          })),
+        },
+      ]
       unit = 'V'
-      stroke = 'rgb(20 184 166)'
       format = (v) => v.toFixed(1)
       break
     case 'load':
-      data = points.map((p, i) => ({
-        t: ts[i],
-        v: p.load_percent < 0 ? null : p.load_percent,
-        ps: psArr[i],
-      }))
+      series = [
+        {
+          label: '负载',
+          stroke: 'rgb(59 130 246)',
+          data: points.map((p, i) => ({
+            t: ts[i],
+            v: p.load_percent < 0 ? null : p.load_percent,
+            ps: psArr[i],
+          })),
+        },
+      ]
       unit = '%'
-      stroke = 'rgb(59 130 246)'
       yMin = 0
       yMax = 100
       format = (v) => `${Math.round(v)}`
       break
     case 'power':
-      data = points.map((p, i) => ({
-        t: ts[i],
-        v: p.real_power < 0 ? null : p.real_power,
-        ps: psArr[i],
-      }))
+      series = [
+        {
+          label: '功率',
+          stroke: 'rgb(234 88 12)',
+          data: points.map((p, i) => ({
+            t: ts[i],
+            v: p.real_power < 0 ? null : p.real_power,
+            ps: psArr[i],
+          })),
+        },
+      ]
       unit = 'W'
-      stroke = 'rgb(234 88 12)'
       format = (v) => `${Math.round(v)}`
       break
   }
   return (
-    <MiniChart data={data} unit={unit} stroke={stroke} yMin={yMin} yMax={yMax} format={format} />
+    <MiniChart series={series} unit={unit} yMin={yMin} yMax={yMax} format={format} />
   )
 }
 
 function MiniChart({
   unit,
-  data,
-  stroke,
+  series,
   yMin,
   yMax,
   format,
 }: {
   unit: string
-  data: MiniPoint[]
-  stroke: string
+  series: MiniSeries[]
   yMin?: number
   yMax?: number
   format: (v: number) => string
@@ -207,10 +234,12 @@ function MiniChart({
     return () => ro.disconnect()
   }, [])
 
+  // 用第一条 series 的 ps 序列计算电源状态背景色带(所有 series 共享时间轴和 ps)
+  const psSource = useMemo(() => series[0]?.data ?? [], [series])
   const bands = useMemo(() => {
     const out: { start: number; end: number; kind: 'battery' | 'low_battery' }[] = []
     let cur: { start: number; end: number; kind: 'battery' | 'low_battery' } | null = null
-    for (const d of data) {
+    for (const d of psSource) {
       if (d.ps === 'battery' || d.ps === 'low_battery') {
         const k = d.ps === 'low_battery' ? 'low_battery' : 'battery'
         if (!cur || cur.kind !== k) {
@@ -224,10 +253,15 @@ function MiniChart({
     }
     if (cur) out.push(cur)
     return out
-  }, [data])
+  }, [psSource])
 
-  const validVals = data.map((d) => d.v).filter((v): v is number => v != null)
-  const allMissing = validVals.length === 0
+  const allVals: number[] = []
+  for (const s of series) {
+    for (const d of s.data) {
+      if (d.v != null) allVals.push(d.v)
+    }
+  }
+  const allMissing = allVals.length === 0
 
   const H = 180
   const padL = 40
@@ -237,8 +271,8 @@ function MiniChart({
   const innerW = Math.max(20, width - padL - padR)
   const innerH = H - padT - padB
 
-  const tMin = data[0].t
-  const tMax = data[data.length - 1].t
+  const tMin = psSource[0]?.t ?? 0
+  const tMax = psSource[psSource.length - 1]?.t ?? 1
   const tSpan = Math.max(1, tMax - tMin)
   const xOf = (t: number) => padL + ((t - tMin) / tSpan) * innerW
 
@@ -251,8 +285,8 @@ function MiniChart({
     yLo = 0
     yHi = 1
   } else {
-    const mn = Math.min(...validVals)
-    const mx = Math.max(...validVals)
+    const mn = Math.min(...allVals)
+    const mx = Math.max(...allVals)
     if (mn === mx) {
       yLo = mn - 1
       yHi = mx + 1
@@ -270,20 +304,23 @@ function MiniChart({
   // y 轴 3 个刻度
   const yTicks = [yLo, (yLo + yHi) / 2, yHi]
 
-  // 折线路径(null 中断)
-  let path = ''
-  let penUp = true
-  for (const d of data) {
-    if (d.v == null) {
-      penUp = true
-      continue
+  // 每条 series 一条折线(null 中断)
+  const paths = series.map((s) => {
+    let path = ''
+    let penUp = true
+    for (const d of s.data) {
+      if (d.v == null) {
+        penUp = true
+        continue
+      }
+      const cmd = penUp ? 'M' : 'L'
+      path += `${cmd}${xOf(d.t).toFixed(1)},${yOf(d.v).toFixed(1)} `
+      penUp = false
     }
-    const cmd = penUp ? 'M' : 'L'
-    path += `${cmd}${xOf(d.t).toFixed(1)},${yOf(d.v).toFixed(1)} `
-    penUp = false
-  }
+    return path.trim()
+  })
 
-  const xTickCount = Math.min(5, data.length)
+  const xTickCount = Math.min(5, psSource.length)
   const xTicks = Array.from({ length: xTickCount }, (_, i) =>
     Math.round(tMin + ((tMax - tMin) * i) / Math.max(1, xTickCount - 1)),
   )
@@ -306,8 +343,8 @@ function MiniChart({
     const targetT = tMin + ratio * tSpan
     let bestIdx = 0
     let bestDiff = Infinity
-    for (let i = 0; i < data.length; i++) {
-      const diff = Math.abs(data[i].t - targetT)
+    for (let i = 0; i < psSource.length; i++) {
+      const diff = Math.abs(psSource[i].t - targetT)
       if (diff < bestDiff) {
         bestDiff = diff
         bestIdx = i
@@ -316,22 +353,53 @@ function MiniChart({
     setHover({ idx: bestIdx })
   }
 
-  const hoverPoint = hover ? data[hover.idx] : null
+  const hoverT = hover ? psSource[hover.idx]?.t ?? null : null
+  const hoverVals = hover
+    ? series.map((s) => s.data[hover.idx]?.v ?? null)
+    : []
+  const showMultiLegend = series.length > 1
 
   return (
     <div ref={wrapRef} className="relative">
-      <div className="mb-1 flex h-4 items-center justify-end text-[11.5px] text-muted-foreground">
-        {hoverPoint && hoverPoint.v != null ? (
-          <span className="tabular-nums">
-            <span className="text-foreground font-semibold">{format(hoverPoint.v)}</span>
-            <span className="ml-0.5">{unit}</span>
-            <span className="ml-2 text-muted-foreground">
-              {new Date(hoverPoint.t).toLocaleString('zh-CN', { hour12: false })}
-            </span>
-          </span>
-        ) : (
-          <span>{unit}</span>
-        )}
+      <div className="mb-1 flex h-4 flex-wrap items-center justify-between gap-x-3 gap-y-0 text-[11.5px] text-muted-foreground">
+        <div className="flex items-center gap-3">
+          {showMultiLegend &&
+            series.map((s) => (
+              <span key={s.label} className="inline-flex items-center gap-1">
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: s.stroke }}
+                />
+                <span>{s.label}</span>
+              </span>
+            ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0">
+          {hoverT != null && hoverVals.some((v) => v != null) ? (
+            <>
+              {series.map((s, i) => {
+                const v = hoverVals[i]
+                if (v == null) return null
+                return (
+                  <span key={s.label} className="tabular-nums">
+                    {showMultiLegend && (
+                      <span style={{ color: s.stroke }} className="mr-1">
+                        {s.label}
+                      </span>
+                    )}
+                    <span className="text-foreground font-semibold">{format(v)}</span>
+                    <span className="ml-0.5">{unit}</span>
+                  </span>
+                )
+              })}
+              <span className="text-muted-foreground">
+                {new Date(hoverT).toLocaleString('zh-CN', { hour12: false })}
+              </span>
+            </>
+          ) : (
+            <span>{unit}</span>
+          )}
+        </div>
       </div>
       <svg
         width="100%"
@@ -392,27 +460,41 @@ function MiniChart({
             {fmtX(t)}
           </text>
         ))}
-        {!allMissing && (
-          <path
-            d={path.trim()}
-            fill="none"
-            stroke={stroke}
-            strokeWidth={1.75}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        )}
-        {hoverPoint && hoverPoint.v != null && (
+        {!allMissing &&
+          series.map((s, i) => (
+            <path
+              key={s.label}
+              d={paths[i]}
+              fill="none"
+              stroke={s.stroke}
+              strokeWidth={1.75}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+        {hoverT != null && (
           <g>
             <line
-              x1={xOf(hoverPoint.t)}
-              x2={xOf(hoverPoint.t)}
+              x1={xOf(hoverT)}
+              x2={xOf(hoverT)}
               y1={padT}
               y2={padT + innerH}
               className="stroke-border"
               strokeWidth={1}
             />
-            <circle cx={xOf(hoverPoint.t)} cy={yOf(hoverPoint.v)} r={3.5} fill={stroke} />
+            {series.map((s, i) => {
+              const v = hoverVals[i]
+              if (v == null) return null
+              return (
+                <circle
+                  key={s.label}
+                  cx={xOf(hoverT)}
+                  cy={yOf(v)}
+                  r={3.5}
+                  fill={s.stroke}
+                />
+              )
+            })}
           </g>
         )}
         {allMissing && (

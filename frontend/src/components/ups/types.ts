@@ -88,6 +88,7 @@ export interface Snapshot {
 export interface SeriesPoint {
   bucket_start: string
   input_voltage: number
+  output_voltage: number
   load_percent: number
   real_power: number
   power_source: PowerSource
