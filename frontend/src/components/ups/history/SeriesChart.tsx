@@ -171,7 +171,7 @@ function SeriesPlot({
           unit="V"
           format={(v) => v.toFixed(1)}
           title="输入电压"
-          height={120}
+          height={116}
           showXAxis={false}
           hoverIdx={hoverIdx}
           onHover={setHoverIdx}
@@ -181,7 +181,7 @@ function SeriesPlot({
           unit="V"
           format={(v) => v.toFixed(1)}
           title="输出电压"
-          height={120}
+          height={116}
           hoverIdx={hoverIdx}
           onHover={setHoverIdx}
         />
@@ -234,6 +234,7 @@ function SeriesPlot({
       yMin={yMin}
       yMax={yMax}
       format={format}
+      height={260}
       hoverIdx={hoverIdx}
       onHover={setHoverIdx}
     />

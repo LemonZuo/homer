@@ -149,9 +149,9 @@ export function UPSCard({
           </div>
         )}
 
-        {/* 电气指标:输入电压 / 输出电压 / 负载 / 实时功率 */}
-        {(ups.input_voltage >= 0 || ups.output_voltage >= 0 || ups.load_percent >= 0 || ups.real_power >= 0) && (
-          <div className="mt-3 grid grid-cols-4 gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2.5">
+        {/* 电气指标:输入电压 / 输出电压 / 实时功率(负载与功率重复,只留功率) */}
+        {(ups.input_voltage >= 0 || ups.output_voltage >= 0 || ups.real_power >= 0) && (
+          <div className="mt-3 grid grid-cols-3 gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2.5">
             <div className="min-w-0">
               <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">输入电压</div>
               <div className="mt-0.5 flex items-baseline gap-0.5 leading-none">
@@ -168,15 +168,6 @@ export function UPSCard({
                   {fmtNum(ups.output_voltage, 1)}
                 </span>
                 <span className="text-[10.5px] text-muted-foreground">V</span>
-              </div>
-            </div>
-            <div className="min-w-0 border-l border-border/60 pl-3">
-              <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">负载</div>
-              <div className="mt-0.5 flex items-baseline gap-0.5 leading-none">
-                <span className="text-[15px] font-semibold tabular-nums text-foreground">
-                  {fmtNum(ups.load_percent)}
-                </span>
-                <span className="text-[10.5px] text-muted-foreground">%</span>
               </div>
             </div>
             <div className="min-w-0 border-l border-border/60 pl-3">
