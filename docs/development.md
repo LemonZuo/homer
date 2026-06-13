@@ -1,6 +1,6 @@
 # 配置与开发
 
-这里收集本地把 Homer 跑起来需要的东西：环境要求、目录结构、`.env` 配置详表、调度任务、通知通道、SQL 迁移、本地开发命令、常用脚本、健康检查与排错。
+本文涵盖在本地运行 Homer 所需的全部内容：环境要求、目录结构、`.env` 配置详表、调度任务、通知通道、SQL 迁移、本地开发命令、常用脚本、健康检查与排错。
 
 回到[项目首页](../README.md)。
 
@@ -18,7 +18,7 @@
 export PATH=/opt/module/go/go1.25.0/bin:$PATH
 ```
 
-如果用 `goenv` / `gvm` / Homebrew，直接走自己的版本管理。
+若使用 `goenv` / `gvm` / Homebrew，按各自版本管理工具操作即可。
 
 ## 目录结构
 
@@ -59,7 +59,7 @@ homer/
 
 ## 配置（`.env`）
 
-启动入口 `main.go` → `config.Load()` → `godotenv.Load()`（找不到 `.env` 不报错，env 全部缺省继续走）。
+启动入口 `main.go` → `config.Load()` → `godotenv.Load()`（未找到 `.env` 不报错，所有 env 项以默认值继续运行）。
 
 ```sh
 cp .env.example .env
@@ -123,10 +123,10 @@ cp .env.example .env
 | `UPS_CLEANUP_CRON` | `0 0 4 * * *` | 清理过期 `ups_sample` |
 | `UPS_RETENTION_DAYS` | `7` | `ups_sample` 保留天数 |
 | `UPS_SSH_TIMEOUT_SEC` | `5` | 单机一轮采样整体超时 |
-| `UPS_OFFLINE_THRESHOLD` | `3` | 单台 UPS reading 连续失败几轮才告警「设备失联」 |
-| `UPS_NUT_OFFLINE_THRESHOLD` | `5` | 主机 `upsc -l` 连续失败几轮才告警「主机 NUT 不可用」 |
+| `UPS_OFFLINE_THRESHOLD` | `3` | 单台 UPS reading 连续失败该轮数后告警「设备失联」 |
+| `UPS_NUT_OFFLINE_THRESHOLD` | `5` | 主机 `upsc -l` 连续失败该轮数后告警「主机 NUT 不可用」 |
 
-机器与凭证库与 ACME 独立（`ups_host` / `ups_ssh_credential` 两张表），UI 抽屉里 CRUD。
+机器与凭证库与 ACME 独立（`ups_host` / `ups_ssh_credential` 两张表），通过 UI 抽屉进行 CRUD。
 
 ### ESXi 监控
 
@@ -135,17 +135,17 @@ cp .env.example .env
 | `ESXI_SAMPLE_CRON` | `*/30 * * * * *` | 6 段秒级 cron；空字符串改 manual-only |
 | `ESXI_CLEANUP_CRON` | `0 0 4 * * *` | 清理过期 `esxi_sample` |
 | `ESXI_RETENTION_DAYS` | `7` | `esxi_sample` 保留天数 |
-| `ESXI_SSH_TIMEOUT_SEC` | `120` | 单机一轮要跑多次 esxcli/vsish/vim-cmd，给得宽 |
+| `ESXI_SSH_TIMEOUT_SEC` | `120` | 单机一轮需执行多次 esxcli/vsish/vim-cmd，超时设置较宽松 |
 | `ESXI_SLOW_REFRESH_INTERVAL_MIN` | `30` | 慢采集器（拓扑等）独立节流间隔，分钟 |
-| `ESXI_COMMAND_SLOW_LOG_MS` | `1500` | SSH 命令耗时超过该毫秒数即日志告警；`0` 关掉 |
-| `ESXI_ALERT_CONSECUTIVE_SAMPLES` | `5` | 阈值告警去抖：连续 N 轮超阈值才推一次 |
+| `ESXI_COMMAND_SLOW_LOG_MS` | `1500` | SSH 命令耗时超过该毫秒数即记录日志告警；`0` 关闭 |
+| `ESXI_ALERT_CONSECUTIVE_SAMPLES` | `5` | 阈值告警去抖：连续 N 轮超阈值才推送一次 |
 | `ESXI_ALERT_CPU_TEMP_C` | `85` | CPU 温度阈值（°C） |
 | `ESXI_ALERT_CPU_USAGE_PERCENT` | `90` | CPU 使用率阈值（%） |
 | `ESXI_ALERT_MEMORY_USAGE_PERCENT` | `90` | 内存使用率阈值（%） |
 | `ESXI_ALERT_DISK_TEMP_C` | `55` | 磁盘温度阈值（°C） |
 | `ESXI_ALERT_DISK_USAGE_PERCENT` | `90` | 磁盘 datastore 使用率阈值（%） |
 
-机器与凭证库独立（`esxi_host` / `esxi_ssh_credential` 两张表）。告警走「新增超阈值」差集语义：持续异常不刷屏，只在「新加入超阈值集合」时推一次。
+机器与凭证库独立（`esxi_host` / `esxi_ssh_credential` 两张表）。告警采用「新增超阈值」差集语义：持续异常不重复推送，仅当「新加入超阈值集合」时推送一次。
 
 ### 阿里云 AK/SK（留空 → 接口返回 503）
 
@@ -154,7 +154,7 @@ cp .env.example .env
 | `ALIYUN_CDN_ACCESS_KEY_ID` / `ALIYUN_CDN_ACCESS_KEY_SECRET` | CDN 加速域名查询、`/api/certstore/deploy` 把 CAS 证书部署到 CDN |
 | `ALIYUN_CAS_ACCESS_KEY_ID` / `ALIYUN_CAS_ACCESS_KEY_SECRET` | CAS 证书列表/删除（全局凭证） |
 
-> ACME 内部的 `upload_cas` driver 使用 per-target AK/SK（建在 deploy target 上），**与上面这套全局凭证不共用**，可以分配不同子账号、不同权限。
+> ACME 内部的 `upload_cas` driver 使用 per-target AK/SK（绑定在 deploy target 上），**与上述全局凭证不共用**，可分配不同子账号、不同权限。
 
 ### Docker 容器层（仅 docker-compose 用，不进 Config struct）
 
@@ -193,13 +193,13 @@ cp .env.example .env
 
 ## SQL 与 AutoMigrate（双轨）
 
-Schema 变更采取**双轨并行**：GORM `AutoMigrate` + `sql/` 增量脚本，两边都要补，避免老库被 AutoMigrate 默默改坏。
+Schema 变更采取**双轨并行**：GORM `AutoMigrate` + `sql/` 增量脚本，两边均需同步维护，避免历史库被 AutoMigrate 隐式改动导致问题。
 
 `sql/` 目录文件：
 
 | 文件 | 用途 |
 | --- | --- |
-| `00_schema.sql` | 全量建表；`DROP TABLE IF EXISTS` 开头，**只适合全新初始化** |
+| `00_schema.sql` | 全量建表；以 `DROP TABLE IF EXISTS` 开头，**仅适用于全新初始化** |
 | `01_migrate_birthday_rename.sql` | 老 ruoyi 库 `sys_birthday_remind → birthday_reminder` 改名 |
 | `02_acme_san_providers.sql` | `acme_domain.san_providers`：按 SAN 指定 DNS provider 覆盖 |
 | `03_acme_cas_enabled.sql` | `acme_domain.cas_enabled`：是否参与 CAS（默认 `'0'`） |
@@ -219,9 +219,9 @@ Schema 变更采取**双轨并行**：GORM `AutoMigrate` + `sql/` 增量脚本�
 | `17_esxi_alert_state.sql` | ESXi 阈值告警差集状态 |
 | `18_esxi_sample_usage.sql` | `esxi_sample` 历史曲线 3 项指标：`cpu_usage_percent` / `memory_used_bytes` / `disk_usage_json` |
 
-`0X_*.sql` 全部用存储过程做幂等保护，重复执行无副作用。新装库按编号依次跑一遍即可（也可只跑 00，跳过 0X，因为 00 已含最新列）。已有数据的库只跑 0X 增量。
+`0X_*.sql` 全部通过存储过程实现幂等保护，重复执行无副作用。新库按编号依次执行即可（也可仅执行 00，跳过 0X，因 00 已包含最新列）。已有数据的库仅执行 0X 增量脚本。
 
-启动时 AutoMigrate 只会按 GORM tag 做加列/加索引这类**追加式**变更，不会 drop。所以 `sql/00_schema.sql` 不能放进启动流程，要人工执行。
+启动时 AutoMigrate 只会按 GORM tag 进行加列/加索引等**追加式**变更，不会 drop。因此 `sql/00_schema.sql` 不应放入启动流程，需手动执行。
 
 ## 本地开发
 
@@ -242,7 +242,7 @@ npm install
 npm run dev
 ```
 
-Vite 监听 `0.0.0.0:5173`，把 `/api` 反代到 `http://localhost:8081`。开发态调 UI 一律走 `http://localhost:5173`，**不要**用 `:8081`（embed 目录空，只会拿到占位 HTML）。
+Vite 监听 `0.0.0.0:5173`，将 `/api` 反代至 `http://localhost:8081`。开发态调试 UI 一律使用 `http://localhost:5173`，**不要**使用 `:8081`（embed 目录为空，仅会返回占位 HTML）。
 
 ## 常用命令
 
@@ -271,7 +271,7 @@ cd frontend && npm install && npm run build && cd ..
 
 # 2. 后端
 export PATH=/opt/module/go/go1.25.0/bin:$PATH
-go build -ldflags="-s -w" -o bin/server .   # -s -w 砍符号表，体积省 30%+
+go build -ldflags="-s -w" -o bin/server .   # -s -w 去除符号表，体积约减小 30%+
 ./bin/server
 ```
 
@@ -293,13 +293,13 @@ go build \
 - `GET /healthz` → `{"db":"ok|down","scheduler":"ok|down"}`，整体 200/503。
 - `GET /api/version` → 二进制注入的版本/commit/build_id。
 - `GET /api/scheduler/jobs` → 每个 job 的上次执行时间、连续失败次数；调度问题先看这里。
-- SSE 调试：浏览器 DevTools 看 `EventStream` tab 是否能持续收到 `log` 事件；如果只收到第一行就断开，多半是反代缓冲没关。
+- SSE 调试：在浏览器 DevTools 中查看 `EventStream` tab 是否能持续收到 `log` 事件；若仅收到第一行即断开，通常是反代缓冲未关闭。
 
 常见启动失败：
 
 | 现象 | 排查点 |
 | --- | --- |
-| `connect db ...` fatal | `.env` MySQL 五件套、`DB_NAME` 是否填了、防火墙、`utf8mb4` collation |
-| `migrate ...` fatal | 老库字段冲突；先用对应 `sql/0X_*.sql` 把表对齐再启动 |
-| `run server ... bind: address already in use` | `SERVER_PORT` 被占用，`lsof -i :8081` 看下 |
-| `register scheduler job ...` fatal | cron 表达式 5 段而非 6 段（漏了秒） |
+| `connect db ...` fatal | 检查 `.env` MySQL 配置项、`DB_NAME` 是否填写、防火墙、`utf8mb4` collation |
+| `migrate ...` fatal | 历史库字段冲突；先用对应 `sql/0X_*.sql` 对齐表结构再启动 |
+| `run server ... bind: address already in use` | `SERVER_PORT` 被占用，可执行 `lsof -i :8081` 查看 |
+| `register scheduler job ...` fatal | cron 表达式为 5 段而非 6 段（缺少秒位） |

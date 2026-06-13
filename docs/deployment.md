@@ -1,19 +1,19 @@
 # 部署
 
-这里收集 Homer 的部署相关步骤：数据库初始化、Docker compose、Nginx 反向代理（含 tinyauth）、发布流程、升级与备份、故障排查。
+本文涵盖 Homer 的部署步骤：数据库初始化、Docker compose、Nginx 反向代理（含 tinyauth）、发布流程、升级与备份、故障排查。
 
 回到[项目首页](../README.md)。
 
 > Homer 设计为「单进程单二进制」，部署模型有两种主路径：
 >
-> - **Docker compose**（推荐）：拉镜像 + 挂 `.env` + `data/` 卷，配合 tinyauth 做前置登录；适合家用 NAS / 小型 VPS。
-> - **裸机二进制**：`bin/server` 直接跑，用 systemd 托管；适合已有反代体系的环境。
+> - **Docker compose**（推荐）：拉取镜像、挂载 `.env` 与 `data/` 卷，配合 tinyauth 做前置登录；适合家用 NAS 与小型 VPS。
+> - **裸机二进制**：直接运行 `bin/server`，由 systemd 托管；适合已有反代体系的环境。
 >
 > 两种路径下数据库初始化、Nginx 反代、备份注意事项都通用。
 
 ## 数据库初始化
 
-首次部署先把数据库和表准备好，再启动 Homer。
+首次部署需先完成数据库与表的初始化，再启动 Homer。
 
 ### 全新部署
 
@@ -22,11 +22,11 @@ mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS homer DEFAULT CHARACTER SET ut
 mysql -uroot -p homer < sql/00_schema.sql
 ```
 
-`sql/00_schema.sql` 大部分表用 `DROP TABLE IF EXISTS` 开头，**只适合空库**。已有数据的库直接重跑会清表，务必走「增量」路径。
+`sql/00_schema.sql` 大部分建表语句以 `DROP TABLE IF EXISTS` 开头，**仅适用于空库**。已有数据的库重新执行会清空表，须改走「增量」路径。
 
 ### 已有数据的升级
 
-只跑增量脚本，按编号顺序：
+按编号顺序执行增量脚本：
 
 ```sh
 for f in sql/0[1-9]_*.sql; do
@@ -39,14 +39,14 @@ done
 
 ### AutoMigrate
 
-后端启动时会 `AutoMigrate` 22 张业务表（含 ACME / 通知 / 调度 / SMS / UPS / ESXi 全系列），只做**追加式**变更（加列、加索引），不会 drop。这层是兜底，新加字段不至于因为漏跑迁移就启动失败。**真正的 schema 变更仍要写到 `sql/0X_*.sql`**，AutoMigrate 不能依赖。
+后端启动时会对 22 张业务表执行 `AutoMigrate`（含 ACME / 通知 / 调度 / SMS / UPS / ESXi 全系列），仅做**追加式**变更（加列、加索引），不会执行 drop。此层为兜底，避免因漏执行迁移导致启动失败。**真正的 schema 变更仍须落到 `sql/0X_*.sql`**，不可仅依赖 AutoMigrate。
 
 ## Docker Compose
 
 仓库 `docker-compose.yml` 包含两个服务：
 
-- `homer`：业务本体，监听 `8081`。配置来自 `.env`（只读挂载到容器 `/app/.env`），`godotenv.Load()` 自动读。
-- `tinyauth`：前置登录网关，监听 `3000`。Homer 本体不内置鉴权，公网入口建议挂在反代后面、由 tinyauth 拦截登录后回源。tinyauth 配置直接写在 compose 里，不读 `.env`。
+- `homer`：业务本体，监听 `8081`。配置来自 `.env`（以只读方式挂载到容器 `/app/.env`），由 `godotenv.Load()` 自动加载。
+- `tinyauth`：前置登录网关，监听 `3000`。Homer 本体不内置鉴权，公网入口建议置于反代之后，由 tinyauth 拦截鉴权后回源。tinyauth 配置直接写在 compose 文件中，不读取 `.env`。
 
 ### 1. 准备 `.env`
 
@@ -70,7 +70,7 @@ DB_NAME=homer
 DB_CHARSET=utf8mb4
 ```
 
-> 容器里的 `127.0.0.1` 指容器自身，不是宿主机。MySQL 跑在宿主机或别处时 `DB_HOST` 必须填宿主机 IP、局域网 IP、Docker 网络服务名等容器能访问到的地址。
+> 容器内的 `127.0.0.1` 指向容器自身而非宿主机。MySQL 部署于宿主机或其他主机时，`DB_HOST` 必须填写宿主机 IP、局域网 IP 或 Docker 网络服务名等容器可访问的地址。
 
 ### 2. 配置 tinyauth
 
@@ -105,7 +105,7 @@ http://localhost:8081   # homer（直连，绕开鉴权）
 http://localhost:3000   # tinyauth 登录页
 ```
 
-公网部署时 **homer 的 8081 必须收回内网**，由反代单独 `127.0.0.1` 回源（见下方 Nginx 段）。
+公网部署时 **homer 的 8081 端口必须收回内网**，由反代单独从 `127.0.0.1` 回源（见下方 Nginx 段）。
 
 ### 5. 状态与日志
 
@@ -123,7 +123,7 @@ docker compose logs -f tinyauth
 | `./data` | `/app/data` | homer ACME 工作目录、账号私钥、签发产物（**必须持久化**） |
 | `./data/tinyauth` | `/data` | tinyauth 用户会话 |
 
-> 业务数据本身（生日、事项、ACME 元信息等）落在 MySQL，备份策略以 DB 为主；`./data` 主要是 ACME 的 lego 工作目录，丢失会导致下一次签发时重新注册账号（功能上仍可工作，但 CA 侧会产生新的账号记录）。
+> 业务数据本身（生日、事项、ACME 元信息等）存储于 MySQL，备份策略以数据库为主；`./data` 主要是 ACME 的 lego 工作目录，丢失会导致下一次签发时重新注册账号（功能仍可正常工作，但 CA 侧会产生新的账号记录）。
 
 ### 7. 升级镜像
 
@@ -134,9 +134,9 @@ docker compose up -d
 
 `up -d` 检测到镜像变化会重建容器。建议升级前：
 
-1. **备份数据库**（`mysqldump`），跨 minor 版本前更要做。
-2. **看 `sql/` 目录是否多了 0X 增量脚本**：升级到新版本后，对照 `git diff` 看 `sql/` 是否有新增 `0X_*.sql`，有就先在 DB 上跑完再 `up -d`。AutoMigrate 是兜底，但 schema 调整（例如索引去重）只靠它会不一致。
-3. 重启后看 `docker compose logs -f homer | head -50` 确认 `homer starting → connect db → migrate → register scheduler job → http listening` 序列完整。
+1. **备份数据库**（`mysqldump`），跨 minor 版本升级前尤其重要。
+2. **检查 `sql/` 目录是否新增 0X 增量脚本**：升级到新版本后，对照 `git diff` 查看 `sql/` 是否新增 `0X_*.sql`；若有，先在数据库上执行完再 `up -d`。AutoMigrate 仅为兜底，schema 调整（例如索引去重）单靠它会出现不一致。
+3. 重启后通过 `docker compose logs -f homer | head -50` 确认 `homer starting → connect db → migrate → register scheduler job → http listening` 序列完整。
 
 ### 8. 镜像
 
@@ -146,11 +146,11 @@ docker compose up -d
 ghcr.io/lemonzuo/homer:latest
 ```
 
-本地构建（`docker build`）依赖 release 流程已经产出 `dist/server-linux-amd64` 和 `dist/server-linux-arm64`。Dockerfile 没有从源码编译，是基于这两个二进制做的多架构 manifest，平时不需要自己构建。
+本地构建（`docker build`）依赖 release 流程已经产出的 `dist/server-linux-amd64` 与 `dist/server-linux-arm64`。Dockerfile 不从源码编译，而是基于这两个二进制构建多架构 manifest，日常无须自行构建。
 
 ## 裸机二进制部署（可选）
 
-如果不想引入 Docker，直接跑 `bin/server` 也可以：
+若不引入 Docker，亦可直接运行 `bin/server`：
 
 1. 在本地或 CI 构建好二进制（见 [development.md#常用命令](development.md#常用命令)）。
 2. scp 到目标机：
@@ -195,7 +195,7 @@ ghcr.io/lemonzuo/homer:latest
 
 ## Nginx 反向代理
 
-把 homer 和 tinyauth 放在 nginx 后面、用 tinyauth 拦截 homer 入口的最小模板。两个域名各一个 server 块；homer 这块通过 `auth_request` 调 tinyauth 的鉴权接口，401 时重定向到 tinyauth 登录页。SSL 证书路径、上游端口（与 compose 一致：homer `8081` / tinyauth `3000`）按实际改。
+将 homer 与 tinyauth 置于 nginx 之后、由 tinyauth 拦截 homer 入口的最小模板。两个域名各一个 server 块；homer 这一段通过 `auth_request` 调用 tinyauth 的鉴权接口，401 时重定向至 tinyauth 登录页。SSL 证书路径与上游端口（与 compose 保持一致：homer `8081` / tinyauth `3000`）按实际调整。
 
 ```nginx
 # 1. tinyauth 登录页本身
@@ -257,16 +257,16 @@ server {
 }
 ```
 
-> tinyauth 的鉴权 endpoint（示例里写的 `/api/auth/nginx`）和登录回跳参数名以 tinyauth 当前版本文档为准，有差异时按其文档替换即可。
-> 启用反代后，宿主机不应把 homer 的 `8081` 端口对公网开放，由 nginx 走环回（`127.0.0.1`）单独回源；tinyauth 的 `3000` 同理。
+> tinyauth 的鉴权 endpoint（示例中写的 `/api/auth/nginx`）与登录回跳参数名以 tinyauth 当前版本文档为准，存在差异时按其文档替换即可。
+> 启用反代后，宿主机不应将 homer 的 `8081` 端口对公网开放；由 nginx 经环回地址（`127.0.0.1`）单独回源，tinyauth 的 `3000` 同理。
 
 ### SSE 相关的反代细节
 
 `/api/acme/tasks/:id/stream` 是 SSE 长连接，需要：
 
-- `proxy_buffering off`：默认 nginx 会缓存响应直到一定字节再下发，会把实时日志拖成「跑完才一次性出来」。
+- `proxy_buffering off`：nginx 默认会缓存响应至一定字节后再下发，会使实时日志延迟到任务结束后才一次性返回。
 - `proxy_read_timeout 1h`：默认 60s，长签发任务（DNS 传播 + 部署）会被中断。
-- 不要给该路径加 gzip on（默认大多数 nginx 不会对 `text/event-stream` gzip，但若有全局压缩配置需排除）。
+- 该路径不应启用 gzip（多数 nginx 默认不会对 `text/event-stream` 压缩，但若存在全局压缩配置需将其排除）。
 
 ## 健康检查
 
@@ -274,9 +274,9 @@ server {
 | --- | --- |
 | `GET /healthz` | DB ping + scheduler 概览。Body：`{"status":"ok\|degraded","db":"ok\|<err>","scheduler":{"jobs":N,"running":M,"failing":K}}`；DB 不通时 503，**调度器状态仅展示，不影响存活判定**（任一 job 失败不会让 healthz 红） |
 | `GET /api/version` | 当前 `version / commit / build_id`，可用于「滚动升级是否生效」检查 |
-| `GET /api/scheduler/jobs` | 调度任务详情（cron、上次执行时间、连续失败次数）；想监控任务失败请监这里而不是 `/healthz` |
+| `GET /api/scheduler/jobs` | 调度任务详情（cron、上次执行时间、连续失败次数）；监控任务失败应使用此接口而非 `/healthz` |
 
-接入 uptime 监控时建议两条都监：`/healthz` 看进程活着，`/api/version` 看版本回滚是否生效。
+接入 uptime 监控时建议同时监测两条：`/healthz` 用于探活，`/api/version` 用于验证版本回滚是否生效。
 
 ## 发布
 
@@ -303,25 +303,25 @@ patch 号不进位到两位：保持个位（0~9），满 9 后进位到 minor �
 | `./data/tinyauth/` | ★ | 仅会话数据，丢失就强制重登 |
 | `.env` | ★★★ | 含 AK/SK 和 DB 密码，单独存密码管理器，**不入 git** |
 
-升级前的「最小回滚集」：DB dump + `.env` 即可重建一个新实例。
+升级前的「最小回滚集」：DB dump 与 `.env` 即可重建实例。
 
 ## 部署注意事项
 
 - 本项目默认面向可信网络环境，**没有内置登录鉴权**。暴露到公网前必须放在反向代理、VPN、内网网关或 tinyauth/Authelia 等鉴权层之后。
-- `.env`、数据库、`ACME_DATA_DIR` 中含访问密钥、证书私钥、SSH 凭证，不应提交到仓库（已被 `.gitignore` 覆盖，仍要再检查一次 `git status` 再 push）。
-- `frontend/dist` 被 Go embed 引用。fresh clone 时目录需要存在；`npm run build` 会在构建后补回 `dist/.gitkeep`，保证下次 clone embed 不至于失败。
-- SPA 路由由后端 `NoRoute` 兜底处理，非 `/api/*` 请求会回退到前端页面；这意味着 nginx 不需要为前端单独配 `try_files`。
+- `.env`、数据库、`ACME_DATA_DIR` 中包含访问密钥、证书私钥、SSH 凭证，不应提交到仓库（已被 `.gitignore` 覆盖，push 前仍需复核 `git status`）。
+- `frontend/dist` 被 Go embed 引用。新克隆时该目录必须存在；`npm run build` 会在构建后补回 `dist/.gitkeep`，确保下次克隆时 embed 不会因目录为空失败。
+- SPA 路由由后端 `NoRoute` 兜底处理，非 `/api/*` 请求回退至前端页面；nginx 无须为前端单独配置 `try_files`。
 
 ## 故障排查
 
 | 现象 | 检查点 |
 | --- | --- |
-| 启动直接 fatal `connect db` | `.env` 五件套、防火墙、`utf8mb4` collation、`DB_HOST` 在容器里是否可达 |
-| 启动 fatal `migrate` | 老库字段冲突，先跑对应 `sql/0X_*.sql` 把表对齐 |
-| `bind: address already in use` | `SERVER_PORT` / `HOST_PORT` 被占，`lsof -i :8081` 或换端口 |
-| `/api/cdnops/domains` / `/api/certstore/*` 返回 503 | 对应 `ALIYUN_*` AK/SK 没配 |
-| 通知 API 报「企业微信未配置」 | 通道没建或没绑定到对应模块，去 UI 通知页配置 |
-| SSE 日志卡住 / 跑完才一次性出 | nginx `proxy_buffering off` 没加，或前端在 `https://` 但反代回源用了 `http://` 触发 mixed content |
-| 调度任务连续失败但没告警 | `SCHEDULER_ALERT_FAIL_THRESHOLD` 太大；或 `scheduler_alert` 模块没绑通道 |
-| 升级后界面没变 | 浏览器强刷（`Cmd+Shift+R`）；或检查 `/api/version` 的 `build_id` 是否变 |
-| 容器里 `DB_HOST=127.0.0.1` 连不上 | 容器自身不是宿主机，改成宿主机 IP / `host.docker.internal` / Docker 网络服务名 |
+| 启动直接 fatal `connect db` | 检查 `.env` MySQL 连接五项、防火墙、`utf8mb4` collation、`DB_HOST` 在容器内是否可达 |
+| 启动 fatal `migrate` | 老库字段冲突，先执行对应 `sql/0X_*.sql` 将表结构对齐 |
+| `bind: address already in use` | `SERVER_PORT` / `HOST_PORT` 被占用，使用 `lsof -i :8081` 排查或更换端口 |
+| `/api/cdnops/domains` / `/api/certstore/*` 返回 503 | 对应 `ALIYUN_*` AK/SK 未配置 |
+| 通知 API 报「企业微信未配置」 | 通道未创建或未绑定对应模块，至 UI 通知页配置 |
+| SSE 日志停滞 / 任务结束后才一次性返回 | nginx 缺少 `proxy_buffering off`；或前端为 `https://` 但反代回源使用 `http://` 触发 mixed content |
+| 调度任务连续失败但无告警 | `SCHEDULER_ALERT_FAIL_THRESHOLD` 设置过大；或 `scheduler_alert` 模块未绑定通道 |
+| 升级后界面未更新 | 浏览器强制刷新（`Cmd+Shift+R`）；或检查 `/api/version` 的 `build_id` 是否更新 |
+| 容器内 `DB_HOST=127.0.0.1` 连不上 | 容器自身并非宿主机，应改为宿主机 IP / `host.docker.internal` / Docker 网络服务名 |
