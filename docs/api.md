@@ -145,7 +145,7 @@ UPS 采样与 ACME 完全解耦，机器/凭证走独立的 `ups_host` / `ups_ss
 | --- | --- | --- |
 | `GET` | `/api/ups/snapshot` | 当前所有启用 UPS 的最新状态快照 |
 | `GET` | `/api/ups/stream` | **SSE** 实时推送 snapshot 变更（替代轮询） |
-| `GET` | `/api/ups/series` | 历史曲线，query：`host_kind=ups`、`host_id`、`range=1h/6h/24h/3d/7d` |
+| `GET` | `/api/ups/series` | 历史曲线，query：`host_kind=ups`、`host_id`、`ups_name`（NUT 设备名，必填）、`range=24h/7d`（默认 24h）。三个必填项缺一个直接 400 |
 | `POST` | `/api/ups/refresh` | 立即触发一轮采样（同 `POST /api/scheduler/jobs/ups-sample/run` 但走 service 路径） |
 | `GET` | `/api/ups/hosts` | UPS 机器列表（独立于 ACME 部署目标） |
 | `POST` | `/api/ups/hosts` | 新建机器 |

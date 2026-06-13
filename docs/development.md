@@ -207,7 +207,7 @@ Schema 变更采取**双轨并行**：GORM `AutoMigrate` + `sql/` 增量脚本�
 | `05_acme_issue_task_retry.sql` | `acme_issue_task` 增加失败重试列 |
 | `06_acme_cas_decouple.sql` | CAS 改为通用 driver `upload_cas`，老 `cas_enabled` / `cas_cert_id` 不再使用 |
 | `07_ups_monitor.sql` | UPS 监控初版：`ups_sample` + `ups_state` |
-| `08_ups_state_detail.sql` | UPS state 增补字段（电池电压/标称/类型等） |
+| `08_ups_metrics.sql` | UPS sample 补电气指标列：input/output voltage、load、real_power（缺数据落 `-1` 哨兵值） |
 | `09_ups_battery_meta.sql` | UPS 电池元数据补全 |
 | `10_ups_host_decouple.sql` | UPS 与 ACME 解耦：新增 `ups_host` + `ups_ssh_credential`，删 `acme_deploy_target.ups_monitor` |
 | `11_esxi.sql` | ESXi 监控初版建表：`esxi_host` + `esxi_ssh_credential` + `esxi_sample` + `esxi_state` |
