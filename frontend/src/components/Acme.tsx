@@ -6,19 +6,16 @@ import { useAcmeUiState } from './acme/useAcmeUiState'
 import { DomainList } from './acme/sections/DomainList'
 import { TaskHistory } from './acme/sections/TaskHistory'
 import { DomainOverlays } from './acme/overlays/DomainOverlays'
+import { AccountCredentialOverlays } from './acme/overlays/AccountCredentialOverlays'
 import { SSHTargetEditDialog } from './acme/dialogs/SSHTargetEditDialog'
 import { SSHCredentialEditDialog } from './acme/dialogs/SSHCredentialEditDialog'
 import { SafelineTargetEditDialog } from './acme/dialogs/SafelineTargetEditDialog'
-import { AccountEditDialog } from './acme/dialogs/AccountEditDialog'
-import { CredentialEditDialog } from './acme/dialogs/CredentialEditDialog'
 import { SSHDeployConfigEditDialog } from './acme/dialogs/SSHDeployConfigEditDialog'
 import { SafelineDeployConfigEditDialog } from './acme/dialogs/SafelineDeployConfigEditDialog'
 import { CASTargetEditDialog } from './acme/dialogs/CASTargetEditDialog'
 import { CASDeployConfigEditDialog } from './acme/dialogs/CASDeployConfigEditDialog'
 import { FnOSTargetEditDialog } from './acme/dialogs/FnOSTargetEditDialog'
 import { FnOSDeployConfigEditDialog } from './acme/dialogs/FnOSDeployConfigEditDialog'
-import { CredentialsDrawer } from './acme/drawers/CredentialsDrawer'
-import { AccountsDrawer } from './acme/drawers/AccountsDrawer'
 import { DeployTargetsEntryDrawer } from './acme/drawers/DeployTargetsEntryDrawer'
 import { SSHCredentialsDrawer } from './acme/drawers/SSHCredentialsDrawer'
 import { DeployConfigsDrawer } from './acme/drawers/DeployConfigsDrawer'
@@ -120,36 +117,13 @@ export default function Acme() {
         onDeployConfigsReload={reloadDeployConfigs}
       />
 
-      <CredentialsDrawer
-        open={ui.credentials.drawer.open}
-        onOpenChange={ui.credentials.drawer.setOpen}
-        credentials={credentials}
-        onAdd={ui.credentials.edit.add}
-        onEdit={ui.credentials.edit.edit}
-        onDelete={ui.credentials.remove.setPending}
-      />
-
-      <CredentialEditDialog
-        open={ui.credentials.edit.open}
-        onOpenChange={ui.credentials.edit.setOpen}
-        target={ui.credentials.edit.target}
-        onSaved={reloadCredentials}
-      />
-
-      <AccountsDrawer
-        open={ui.accounts.drawer.open}
-        onOpenChange={ui.accounts.drawer.setOpen}
+      <AccountCredentialOverlays
+        ui={ui}
+        actions={actions}
         accounts={accounts}
-        onAdd={ui.accounts.edit.add}
-        onEdit={ui.accounts.edit.edit}
-        onDelete={ui.accounts.remove.setPending}
-      />
-
-      <AccountEditDialog
-        open={ui.accounts.edit.open}
-        onOpenChange={ui.accounts.edit.setOpen}
-        target={ui.accounts.edit.target}
-        onSaved={reloadAccounts}
+        credentials={credentials}
+        onAccountsReload={reloadAccounts}
+        onCredentialsReload={reloadCredentials}
       />
 
       <DeployTargetsEntryDrawer
@@ -436,31 +410,6 @@ export default function Acme() {
         ；引用了该凭证的机器将无法连接，请确认。
       </ConfirmDialog>
 
-      <ConfirmDialog
-        open={!!ui.accounts.remove.pending}
-        onClose={ui.accounts.remove.clear}
-        onConfirm={actions.onDeleteAccount}
-        title="删除 CA 账号"
-      >
-        即将删除{' '}
-        <span className="font-mono font-medium text-foreground">
-          {ui.accounts.remove.pending?.name}
-        </span>{' '}
-        账号；已被域名引用的账号不能删除。
-      </ConfirmDialog>
-
-      <ConfirmDialog
-        open={!!ui.credentials.remove.pending}
-        onClose={ui.credentials.remove.clear}
-        onConfirm={actions.onDeleteCredential}
-        title="删除 DNS 凭证"
-      >
-        即将删除 provider{' '}
-        <span className="font-mono font-medium text-foreground">
-          {ui.credentials.remove.pending?.provider}
-        </span>{' '}
-        的凭证；已关联该 provider 的域名将无法继续签发，请确认。
-      </ConfirmDialog>
     </div>
   )
 }
