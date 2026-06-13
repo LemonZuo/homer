@@ -20,26 +20,26 @@ func TestParseEsxiCommandDiagnostics(t *testing.T) {
 
 func TestParseDeviceInventory(t *testing.T) {
 	out := `
-t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____
-   Display Name: Local ATA Disk (t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____)
+t10.ATA_____Samsung_SSD_870_EVO_1TB_________________XXXXXXXXXXXXXXX_____
+   Display Name: Local ATA Disk (t10.ATA_____Samsung_SSD_870_EVO_1TB_________________XXXXXXXXXXXXXXX_____)
    Size: 953869
    Device Type: Direct-Access
    Model: Samsung SSD 870 EVO 1TB
-eui.002538b831b00000
-   Display Name: Local NVMe Disk (eui.002538b831b00000)
+eui.xxxxxxxxxxxxxxxx
+   Display Name: Local NVMe Disk (eui.xxxxxxxxxxxxxxxx)
    Size: 3815447
    Device Type: Direct-Access
    Model: Samsung SSD 990 PRO 4TB
 `
 	got := parseDeviceInventory(out)
-	sata := got["t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____"]
+	sata := got["t10.ATA_____Samsung_SSD_870_EVO_1TB_________________XXXXXXXXXXXXXXX_____"]
 	if sata.Model != "Samsung SSD 870 EVO 1TB" {
 		t.Fatalf("sata model = %q", sata.Model)
 	}
 	if sata.CapacityBytes != 953869*1024*1024 {
 		t.Fatalf("sata capacity = %d", sata.CapacityBytes)
 	}
-	nvme := got["eui.002538b831b00000"]
+	nvme := got["eui.xxxxxxxxxxxxxxxx"]
 	if nvme.Model != "Samsung SSD 990 PRO 4TB" {
 		t.Fatalf("nvme model = %q", nvme.Model)
 	}
@@ -235,7 +235,7 @@ Powered off
 	}
 }
 
-// fixture 直接复制自 192.168.31.138 上 esxcli storage core device smart get 的真实输出,
+// fixture 复制自真实 ESXi 主机 esxcli storage core device smart get 的输出,
 // 覆盖三种盘:SATA SSD(Samsung 870 EVO) / SATA HDD(WDC) / NVMe(Samsung 990 PRO)。
 func TestParseSMARTAttrs(t *testing.T) {
 	sataSSD := `Parameter                  Value  Threshold  Worst  Raw
@@ -496,8 +496,8 @@ ZDUMP_LATEST=
 func TestParseNICList(t *testing.T) {
 	out := `Name    PCI Device    Driver         Admin Status  Link Status  Speed  Duplex  MAC Address         MTU  Description
 ------  ------------  -------------  ------------  -----------  -----  ------  -----------------  ----  -----------
-vmnic0  0000:00:1f.6  ne1000         Up            Up            1000  Full    d8:bb:c1:c1:b6:49  1500  Intel Corporation Ethernet Connection (7) I219-LM
-vmnic1  0000:01:00.0  igc-community  Up            Up            2500  Full    1c:86:0b:2c:3f:1b  1500  Intel Corporation Ethernet Controller I226-V
+vmnic0  0000:00:1f.6  ne1000         Up            Up            1000  Full    aa:bb:cc:00:00:01  1500  Intel Corporation Ethernet Connection (7) I219-LM
+vmnic1  0000:01:00.0  igc-community  Up            Up            2500  Full    aa:bb:cc:00:00:02  1500  Intel Corporation Ethernet Controller I226-V
 `
 	nics := parseNICList(out)
 	if len(nics) != 2 {
@@ -509,7 +509,7 @@ vmnic1  0000:01:00.0  igc-community  Up            Up            2500  Full    1
 	if nics[0].Description != "Intel Corporation Ethernet Connection (7) I219-LM" {
 		t.Fatalf("nic0 desc = %q", nics[0].Description)
 	}
-	if nics[1].SpeedMbps != 2500 || nics[1].MAC != "1c:86:0b:2c:3f:1b" {
+	if nics[1].SpeedMbps != 2500 || nics[1].MAC != "aa:bb:cc:00:00:02" {
 		t.Fatalf("nic1 = %+v", nics[1])
 	}
 }
@@ -517,7 +517,7 @@ vmnic1  0000:01:00.0  igc-community  Up            Up            2500  Full    1
 func TestParseIPInterfaceList(t *testing.T) {
 	out := `vmk0
    Name: vmk0
-   MAC Address: 00:50:56:6a:11:22
+   MAC Address: 00:50:56:00:00:11
    Enabled: true
    Portset: vSwitch0
    Portgroup: Management Network
@@ -526,7 +526,7 @@ func TestParseIPInterfaceList(t *testing.T) {
 
 vmk1
    Name: vmk1
-   MAC Address: 00:50:56:6a:33:44
+   MAC Address: 00:50:56:00:00:22
    Enabled: true
    Portset: vSwitch0
    Portgroup: vMotion Network
@@ -536,7 +536,7 @@ vmk1
 	if len(got) != 2 {
 		t.Fatalf("want 2 vmkernel ports, got %d: %#v", len(got), got)
 	}
-	if got[0].Name != "vmk0" || got[0].VSwitch != "vSwitch0" || got[0].Portgroup != "Management Network" || got[0].MAC != "00:50:56:6a:11:22" || !got[0].Enabled {
+	if got[0].Name != "vmk0" || got[0].VSwitch != "vSwitch0" || got[0].Portgroup != "Management Network" || got[0].MAC != "00:50:56:00:00:11" || !got[0].Enabled {
 		t.Fatalf("vmk0 = %+v", got[0])
 	}
 	if got[1].Name != "vmk1" || got[1].Portgroup != "vMotion Network" || !got[1].Enabled {
@@ -547,9 +547,9 @@ vmk1
 func TestParseIPv4Get(t *testing.T) {
 	out := `Name  IPv4 Address   IPv4 Netmask   IPv4 Broadcast  Address Type  Gateway      DHCP DNS
 ----  -------------  -------------  --------------  ------------  -----------  --------
-vmk0  192.168.8.138  255.255.255.0  192.168.8.255   STATIC        192.168.8.1  false
+vmk0  192.168.0.10   255.255.255.0  192.168.0.255   STATIC        192.168.0.1  false
 `
-	if got := parseIPv4Get(out, "vmk0"); got != "192.168.8.138" {
+	if got := parseIPv4Get(out, "vmk0"); got != "192.168.0.10" {
 		t.Fatalf("ipv4 = %q", got)
 	}
 }
@@ -558,14 +558,14 @@ func TestParseVMPortListIncludesIP(t *testing.T) {
 	out := `Port ID: 33554442
 vSwitch: vSwitch0
 Portgroup: VM Network
-MAC Address: 00:0c:29:86:f2:a0
-IP Address: 192.168.8.21
+MAC Address: 00:0c:29:00:00:0a
+IP Address: 192.168.0.21
 Team Uplink: vmnic0
 
 Port ID: 33554443
 vSwitch: vSwitch0
 Portgroup: VM Network
-MAC Address: 00:0c:29:72:3f:e3
+MAC Address: 00:0c:29:00:00:0b
 IP Address: 0.0.0.0
 Team Uplink: vmnic0
 `
@@ -573,7 +573,7 @@ Team Uplink: vmnic0
 	if len(got) != 2 {
 		t.Fatalf("links = %#v", got)
 	}
-	if got[0].IP != "192.168.8.21" {
+	if got[0].IP != "192.168.0.21" {
 		t.Fatalf("first ip = %q", got[0].IP)
 	}
 	if got[1].IP != "" {
@@ -589,10 +589,10 @@ func TestParseBatchVMGuestNICs(t *testing.T) {
       (vim.vm.GuestInfo.NicInfo) {
          network = "VM Network",
          ipAddress = (string) [
-            "fe80::250:56ff:fe86:f2a0",
-            "192.168.8.21"
+            "fe80::200:00ff:fe00:000a",
+            "192.168.0.21"
          ],
-         macAddress = "00:0c:29:86:f2:a0",
+         macAddress = "00:0c:29:00:00:0a",
          connected = true
       }
    ],
@@ -604,13 +604,13 @@ func TestParseBatchVMGuestNICs(t *testing.T) {
          ipAddress = (string) [
             "10.0.0.5"
          ],
-         macAddress = "00:0c:29:72:3f:e3",
+         macAddress = "00:0c:29:00:00:0b",
       }
    ],
 }
 `
 	got := parseBatchVMGuestNICs(out)
-	if got[130][0].MAC != "00:0c:29:86:f2:a0" || got[130][0].IP != "192.168.8.21" {
+	if got[130][0].MAC != "00:0c:29:00:00:0a" || got[130][0].IP != "192.168.0.21" {
 		t.Fatalf("vm 130 guest nics = %#v", got[130])
 	}
 	if got[131][0].IP != "10.0.0.5" {
@@ -620,18 +620,18 @@ func TestParseBatchVMGuestNICs(t *testing.T) {
 
 func TestFillVMNICGuestIPs(t *testing.T) {
 	links := []VMNICLink{
-		{MAC: "00:0c:29:86:f2:a0"},
-		{MAC: "00:0c:29:72:3f:e3", IP: "192.168.8.30"},
+		{MAC: "00:0c:29:00:00:0a"},
+		{MAC: "00:0c:29:00:00:0b", IP: "192.168.0.30"},
 	}
 	guest := []vmGuestNIC{
-		{MAC: "00:0c:29:86:f2:a0", IP: "192.168.8.21"},
-		{MAC: "00:0c:29:72:3f:e3", IP: "192.168.8.31"},
+		{MAC: "00:0c:29:00:00:0a", IP: "192.168.0.21"},
+		{MAC: "00:0c:29:00:00:0b", IP: "192.168.0.31"},
 	}
 	got := fillVMNICGuestIPs(links, guest)
-	if got[0].IP != "192.168.8.21" {
+	if got[0].IP != "192.168.0.21" {
 		t.Fatalf("missing ip should be filled, got %#v", got[0])
 	}
-	if got[1].IP != "192.168.8.30" {
+	if got[1].IP != "192.168.0.30" {
 		t.Fatalf("existing ip should win, got %#v", got[1])
 	}
 }
@@ -643,7 +643,7 @@ func TestMergeTopologyFillsVMNICIP(t *testing.T) {
 			VMName:    "fnOS",
 			VSwitch:   "vSwitch0",
 			Portgroup: "VM Network",
-			MAC:       "00:0c:29:86:f2:a0",
+			MAC:       "00:0c:29:00:00:0a",
 		}},
 	}
 	next := NetTopology{
@@ -651,8 +651,8 @@ func TestMergeTopologyFillsVMNICIP(t *testing.T) {
 			VMName:     "fnOS",
 			VSwitch:    "vSwitch0",
 			Portgroup:  "VM Network",
-			MAC:        "00:0C:29:86:F2:A0",
-			IP:         "192.168.8.21",
+			MAC:        "00:0C:29:00:00:0A",
+			IP:         "192.168.0.21",
 			TeamUplink: "vmnic0",
 		}},
 	}
@@ -660,7 +660,7 @@ func TestMergeTopologyFillsVMNICIP(t *testing.T) {
 	if len(got.VMNICs) != 1 {
 		t.Fatalf("vm_nics = %#v", got.VMNICs)
 	}
-	if got.VMNICs[0].IP != "192.168.8.21" || got.VMNICs[0].TeamUplink != "vmnic0" {
+	if got.VMNICs[0].IP != "192.168.0.21" || got.VMNICs[0].TeamUplink != "vmnic0" {
 		t.Fatalf("merged vmnic = %#v", got.VMNICs[0])
 	}
 }
@@ -707,7 +707,7 @@ func TestMergeTopologyMergesVMKPorts(t *testing.T) {
 			Name:      "vmk0",
 			VSwitch:   "vSwitch0",
 			Portgroup: "Management Network",
-			MAC:       "00:50:56:6a:11:22",
+			MAC:       "00:50:56:00:00:11",
 			Enabled:   true,
 		}},
 	}
@@ -717,8 +717,8 @@ func TestMergeTopologyMergesVMKPorts(t *testing.T) {
 			Name:      "vmk0",
 			VSwitch:   "vSwitch0",
 			Portgroup: "Management Network",
-			MAC:       "00:50:56:6a:11:22",
-			IPv4:      "192.168.8.138",
+			MAC:       "00:50:56:00:00:11",
+			IPv4:      "192.168.0.10",
 			Enabled:   true,
 		}},
 	}
@@ -727,7 +727,7 @@ func TestMergeTopologyMergesVMKPorts(t *testing.T) {
 		t.Fatalf("vmk ports = %#v", got.VMKPorts)
 	}
 	vmk := got.VMKPorts[0]
-	if vmk.VSwitch != "vSwitch0" || vmk.Portgroup != "Management Network" || vmk.MAC == "" || vmk.IPv4 != "192.168.8.138" || !vmk.Enabled {
+	if vmk.VSwitch != "vSwitch0" || vmk.Portgroup != "Management Network" || vmk.MAC == "" || vmk.IPv4 != "192.168.0.10" || !vmk.Enabled {
 		t.Fatalf("merged vmk = %+v", vmk)
 	}
 }
@@ -739,16 +739,16 @@ func TestMergeTopologySkipsVMKPortsWhenCollectionFailed(t *testing.T) {
 			Name:      "vmk0",
 			VSwitch:   "vSwitch0",
 			Portgroup: "Management Network",
-			IPv4:      "192.168.8.138",
+			IPv4:      "192.168.0.10",
 			Enabled:   true,
 		}},
 	}
 	next := NetTopology{
 		VSwitches: []VSwitchInfo{{Name: "vSwitch0"}},
-		VMNICs:    []VMNICLink{{VMName: "fnOS", MAC: "00:0c:29:86:f2:a0"}},
+		VMNICs:    []VMNICLink{{VMName: "fnOS", MAC: "00:0c:29:00:00:0a"}},
 	}
 	got := mergeTopology(base, next)
-	if len(got.VMKPorts) != 1 || got.VMKPorts[0].IPv4 != "192.168.8.138" {
+	if len(got.VMKPorts) != 1 || got.VMKPorts[0].IPv4 != "192.168.0.10" {
 		t.Fatalf("vmk ports should remain from previous collected attempt: %#v", got.VMKPorts)
 	}
 	if !got.VMKCollected {
