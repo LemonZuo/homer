@@ -1,6 +1,12 @@
 export type QueryType = 1 | 2
 export type SimSlot = 1 | 2
 
+export interface SmsSendForm {
+  simSlot: SimSlot
+  phones: string
+  content: string
+}
+
 // auth_mode 与 SmsForwarder Android「客户端安全措施」一致
 export type AuthMode = 0 | 1 | 2 | 3
 
