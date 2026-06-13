@@ -282,3 +282,5 @@ export function useAcmeActions({
     onDeleteFnOSDeployConfig,
   }
 }
+
+export type AcmeActions = ReturnType<typeof useAcmeActions>
