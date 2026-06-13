@@ -173,6 +173,7 @@ function SeriesPlot({
           title="输入电压"
           height={116}
           showXAxis={false}
+          clipExtremes
           hoverIdx={hoverIdx}
           onHover={setHoverIdx}
         />
@@ -250,6 +251,7 @@ function MiniChart({
   title,
   height,
   showXAxis = true,
+  clipExtremes = false,
   hoverIdx,
   onHover,
 }: {
@@ -261,6 +263,10 @@ function MiniChart({
   title?: string
   height?: number
   showXAxis?: boolean
+  // 开启后 y 范围按 P1~P99 分位裁剪,极端点(掉电瞬间等)不撑大 y 跨度,
+  // 而是以红色 spike 表示"此处有跌穿但超出 y 范围",
+  // 让正常态的细微波动能在 y 方向上充分展开。
+  clipExtremes?: boolean
   hoverIdx: number | null
   onHover: (idx: number | null) => void
 }) {
@@ -323,6 +329,8 @@ function MiniChart({
   const xOf = (t: number) => padL + ((t - tMin) / tSpan) * innerW
 
   // y 范围:固定范围或自动适配(略带 padding)
+  // clipExtremes=true 时按 P1~P99 分位裁剪极值,正常态波动充分展开;
+  // 跌穿点(v < yLo)交给 spike 单独渲染,不撑大 y 跨度。
   let yLo: number, yHi: number
   if (yMin != null && yMax != null) {
     yLo = yMin
@@ -330,6 +338,24 @@ function MiniChart({
   } else if (allMissing) {
     yLo = 0
     yHi = 1
+  } else if (clipExtremes) {
+    // 用 IQR(四分位距)裁剪:中位数 ±3*IQR,至少留 5V 窗口。
+    // 跌穿持续若干采样点时,分位法(P1/P99)会被跌穿值拉偏;
+    // 用 IQR 对极值鲁棒得多 —— 正常态 IQR 通常 1~2V,
+    // 跌穿值偏离 100+ V,3*IQR 直接排除掉。
+    const sorted = [...allVals].sort((a, b) => a - b)
+    const q = (p: number) => {
+      const idx = Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)))
+      return sorted[idx]
+    }
+    const p25 = q(0.25)
+    const p75 = q(0.75)
+    const iqr = Math.max(p75 - p25, 0.5)
+    const halfRange = Math.max(iqr * 3, 5)
+    yLo = p25 - halfRange
+    yHi = p75 + halfRange
+    if (yMin != null) yLo = yMin
+    if (yMax != null) yHi = yMax
   } else {
     const mn = Math.min(...allVals)
     const mx = Math.max(...allVals)
@@ -350,12 +376,19 @@ function MiniChart({
   // y 轴 3 个刻度
   const yTicks = [yLo, (yLo + yHi) / 2, yHi]
 
-  // 每条 series 一条折线(null 中断)
+  // 每条 series 一条折线;null 中断;clipExtremes 时跌穿点(v<yLo)也中断主曲线,
+  // 改用 spike 单独表示。
+  const spikes: number[] = [] // 跌穿点的 x 坐标
   const paths = series.map((s) => {
     let path = ''
     let penUp = true
     for (const d of s.data) {
       if (d.v == null) {
+        penUp = true
+        continue
+      }
+      if (clipExtremes && d.v < yLo) {
+        spikes.push(xOf(d.t))
         penUp = true
         continue
       }
@@ -530,6 +563,18 @@ function MiniChart({
               {fmtX(t)}
             </text>
           ))}
+        {spikes.map((x, i) => (
+          <line
+            key={`spike-${i}`}
+            x1={x}
+            x2={x}
+            y1={padT}
+            y2={padT + innerH}
+            stroke="rgb(244 63 94)"
+            strokeWidth={1.5}
+            opacity={0.85}
+          />
+        ))}
         {!allMissing &&
           // 倒序绘制:数组靠后的先画(在下),靠前的后画(在上)
           series
@@ -560,6 +605,8 @@ function MiniChart({
             {series.map((s, i) => {
               const v = hoverVals[i]
               if (v == null) return null
+              // 被 clip 的点不画圆点(会落到画布外),但顶部 tooltip 文字仍展示真实值
+              if (clipExtremes && v < yLo) return null
               return (
                 <circle
                   key={s.label}
