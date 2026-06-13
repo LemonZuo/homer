@@ -38,6 +38,8 @@ Homer 是一个自用的小管家工具集，用来跑主动型、轻量级的�
 - [docs/deployment.md](docs/deployment.md) — 部署：数据库初始化、Docker compose、Nginx + tinyauth 反代、发布流程、部署注意事项。
 - [docs/development.md](docs/development.md) — 配置与开发：环境要求、`.env` 配置项详表、目录结构、本地开发、常用命令、单二进制构建。
 - [docs/api.md](docs/api.md) — API 与 ACME：HTTP API 概览、ACME 模块使用流程要点。
+- [docs/ESXI.md](docs/ESXI.md) — ESXi 数据采集详解：`internal/esximon` 通过 SSH 跑的命令、真实输出样例、解析方式、重试与超时策略。
+- [docs/UT1050EGC.md](docs/UT1050EGC.md) — NUT `upsc` 字段含义对照表（以 CyberPower UT1050EGC 为样本），排查 UPS 状态时备查。
 
 ## Quick start
 

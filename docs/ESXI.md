@@ -2,7 +2,7 @@
 
 本文档逐项说明 homer 的 `internal/esximon` 模块如何通过 SSH 远程执行 ESXi 命令采集监控数据,包括命令、真实输出、解析方式、重试 / 超时策略,以及为什么这么设计。
 
-实际机器:`ESXi 7.0.3 build-24784741`(Lenovo,Intel Xeon E-2224G,32 GiB)。文中所有输出都是从 `192.168.31.138`(`esxi_host.id=1`,`DomesticCloud`)抓的真值。
+实际机器:`ESXi 7.0.3 build-24784741`(Lenovo,Intel Xeon E-2224G,32 GiB)。文中所有输出都是从一台 ESXi 主机(`esxi_host.id=1`)抓的真值。
 
 所有命令的远端入口是 `internal/esximon/client.go` 的 `CollectAll(client *ssh.Client) HostMetrics`;外层 `internal/esximon/sampler.go` 在关键指标缺失时复跑一次并合并。
 
@@ -29,11 +29,11 @@ esxcli hardware platform get
 
 ```
 Platform Information
-   UUID: 0xd2 0x57 0x12 0x71 0x8f 0xb6 0xec 0x11 0x89 0xac 0xd8 0xbb 0xc1 0xc1 0xb6 0x49
-   Product Name: 7D4ZCTO1WW
+   UUID: 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX 0xXX
+   Product Name: XXXXXXXXXX
    Vendor Name: LENOVO
-   Serial Number: J30A139R
-   Enclosure Serial Number: J30A139R
+   Serial Number: J30A****
+   Enclosure Serial Number: J30A****
    BIOS Asset Tag:
    IPMI Supported: false
 ```
@@ -338,8 +338,8 @@ esxcli storage core device list
 实测输出(取首块):
 
 ```
-t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____
-   Display Name: Local ATA Disk (t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____)
+t10.ATA_____Samsung_SSD_870_EVO_1TB_________________XXXXXXXXXXXXXXX_____
+   Display Name: Local ATA Disk (t10.ATA_____Samsung_SSD_870_EVO_1TB_________________XXXXXXXXXXXXXXX_____)
    Has Settable Display Name: true
    Size: 953869
    Device Type: Direct-Access
@@ -365,8 +365,8 @@ t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____
 ```bash
 printf '===DEV===%s\n' 't10.ATA_____Samsung_SSD_870_EVO_1TB_____...'
 esxcli storage core device smart get -d 't10.ATA_____Samsung_SSD_870_EVO_1TB_____...'
-printf '===DEV===%s\n' 't10.NVMe____Samsung_SSD_990_PRO_with_Heatsink_4TB___2E39404142382500'
-esxcli storage core device smart get -d 't10.NVMe____Samsung_SSD_990_PRO_with_Heatsink_4TB___2E39404142382500'
+printf '===DEV===%s\n' 't10.NVMe____Samsung_SSD_990_PRO_with_Heatsink_4TB___XXXXXXXXXXXXXXXX'
+esxcli storage core device smart get -d 't10.NVMe____Samsung_SSD_990_PRO_with_Heatsink_4TB___XXXXXXXXXXXXXXXX'
 # ... 每块盘一段
 ```
 
@@ -543,13 +543,13 @@ esxcli storage filesystem list
 ```
 Mount Point                                        Volume Name                                 UUID                                 Mounted  Type              Size            Free
 -------------------------------------------------  ------------------------------------------  -----------------------------------  -------  ------  --------------  --------------
-/vmfs/volumes/6314fb31-cbf77190-ea99-d8bbc1c1b649  wdc_6t                                      6314fb31-cbf77190-ea99-d8bbc1c1b649     true  VMFS-6   6001143054336   3758807318528
-/vmfs/volumes/63972d60-cbc9a7ec-9a08-d8bbc1c1b649  samsung_1t                                  63972d60-cbc9a7ec-9a08-d8bbc1c1b649     true  VMFS-6    980594720768    979069042688
-/vmfs/volumes/66d056dc-fbc56f2e-6914-d8bbc1c1b649  samsung_4t                                  66d056dc-fbc56f2e-6914-d8bbc1c1b649     true  VMFS-6   4000762036224   1541203296256
-/vmfs/volumes/686e51e3-dabd1d5e-a799-1c860b2c3f1b  hc550                                       686e51e3-dabd1d5e-a799-1c860b2c3f1b     true  VMFS-6  16000632225792  11600314499072
-/vmfs/volumes/63972d60-b15becb2-68fc-d8bbc1c1b649  OSDATA-63972d60-b15becb2-68fc-d8bbc1c1b649  63972d60-b15becb2-68fc-d8bbc1c1b649     true  VFFS       10468982784      5367660544
-/vmfs/volumes/582ca1fa-f4400e5a-dba6-b65df57e7453  BOOTBANK1                                   582ca1fa-f4400e5a-dba6-b65df57e7453     true  vfat        4293591040      4073783296
-/vmfs/volumes/b5736b60-d6415986-8198-3025178e6d6e  BOOTBANK2                                   b5736b60-d6415986-8198-3025178e6d6e     true  vfat        4293591040      4073848832
+/vmfs/volumes/6314fb31-cbf77190-ea99-XXXXXXXXXXXX  wdc_6t                                      6314fb31-cbf77190-ea99-XXXXXXXXXXXX     true  VMFS-6   6001143054336   3758807318528
+/vmfs/volumes/63972d60-cbc9a7ec-9a08-XXXXXXXXXXXX  samsung_1t                                  63972d60-cbc9a7ec-9a08-XXXXXXXXXXXX     true  VMFS-6    980594720768    979069042688
+/vmfs/volumes/66d056dc-fbc56f2e-6914-XXXXXXXXXXXX  samsung_4t                                  66d056dc-fbc56f2e-6914-XXXXXXXXXXXX     true  VMFS-6   4000762036224   1541203296256
+/vmfs/volumes/686e51e3-dabd1d5e-a799-XXXXXXXXXXXX  hc550                                       686e51e3-dabd1d5e-a799-XXXXXXXXXXXX     true  VMFS-6  16000632225792  11600314499072
+/vmfs/volumes/63972d60-b15becb2-68fc-XXXXXXXXXXXX  OSDATA-63972d60-b15becb2-68fc-XXXXXXXXXXXX  63972d60-b15becb2-68fc-XXXXXXXXXXXX     true  VFFS       10468982784      5367660544
+/vmfs/volumes/582ca1fa-f4400e5a-dba6-XXXXXXXXXXXX  BOOTBANK1                                   582ca1fa-f4400e5a-dba6-XXXXXXXXXXXX     true  vfat        4293591040      4073783296
+/vmfs/volumes/b5736b60-d6415986-8198-XXXXXXXXXXXX  BOOTBANK2                                   b5736b60-d6415986-8198-XXXXXXXXXXXX     true  vfat        4293591040      4073848832
 ```
 
 - `parseStorageFilesystems`:只保留 `Mounted=true` 且 `Type` 前缀 `vmfs` 的 datastore。`VFFS / vfat` 直接过滤。
@@ -567,11 +567,11 @@ esxcli storage vmfs extent list
 ```
 Volume Name                                 VMFS UUID                            Extent Number  Device Name                                                                Partition
 ------------------------------------------  -----------------------------------  -------------  -------------------------------------------------------------------------  ---------
-wdc_6t                                      6314fb31-cbf77190-ea99-d8bbc1c1b649              0  t10.ATA_____WDC_WD6003FFBX2D68MU3N0__________________V7GDGGMH____________          1
-samsung_1t                                  63972d60-cbc9a7ec-9a08-d8bbc1c1b649              0  t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____           8
-samsung_4t                                  66d056dc-fbc56f2e-6914-d8bbc1c1b649              0  t10.NVMe____Samsung_SSD_990_PRO_with_Heatsink_4TB___2E39404142382500               1
-hc550                                       686e51e3-dabd1d5e-a799-1c860b2c3f1b              0  t10.ATA_____WDC__WUH721816ALE6L4____________________2CK3RBPN____________           3
-OSDATA-63972d60-b15becb2-68fc-d8bbc1c1b649  63972d60-b15becb2-68fc-d8bbc1c1b649              0  t10.ATA_____Samsung_SSD_870_EVO_1TB_________________S6PVNX0T805261Z_____           7
+wdc_6t                                      6314fb31-cbf77190-ea99-XXXXXXXXXXXX              0  t10.ATA_____WDC_WD6003FFBX2D68MU3N0__________________XXXXXXXX____________          1
+samsung_1t                                  63972d60-cbc9a7ec-9a08-XXXXXXXXXXXX              0  t10.ATA_____Samsung_SSD_870_EVO_1TB_________________XXXXXXXXXXXXXXX_____           8
+samsung_4t                                  66d056dc-fbc56f2e-6914-XXXXXXXXXXXX              0  t10.NVMe____Samsung_SSD_990_PRO_with_Heatsink_4TB___XXXXXXXXXXXXXXXX               1
+hc550                                       686e51e3-dabd1d5e-a799-XXXXXXXXXXXX              0  t10.ATA_____WDC__WUH721816ALE6L4____________________XXXXXXXX____________           3
+OSDATA-63972d60-b15becb2-68fc-XXXXXXXXXXXX  63972d60-b15becb2-68fc-XXXXXXXXXXXX              0  t10.ATA_____Samsung_SSD_870_EVO_1TB_________________XXXXXXXXXXXXXXX_____           7
 ```
 
 #### 7.5.3 关联逻辑(`mapDiskUsage`)
@@ -823,12 +823,12 @@ esxcli network nic list
 ```
 Name    PCI Device    Driver         Admin Status  Link Status  Speed  Duplex  MAC Address         MTU  Description
 ------  ------------  -------------  ------------  -----------  -----  ------  -----------------  ----  -----------
-vmnic0  0000:00:1f.6  ne1000         Up            Up            1000  Full    d8:bb:c1:c1:b6:49  1500  Intel Corporation Ethernet Connection (7) I219-LM
-vmnic1  0000:01:00.0  igc-community  Up            Up            2500  Full    1c:86:0b:2c:3f:1b  1500  Intel Corporation Ethernet Controller I226-V
+vmnic0  0000:00:1f.6  ne1000         Up            Up            1000  Full    XX:XX:XX:XX:XX:XX  1500  Intel Corporation Ethernet Connection (7) I219-LM
+vmnic1  0000:01:00.0  igc-community  Up            Up            2500  Full    XX:XX:XX:XX:XX:XX  1500  Intel Corporation Ethernet Controller I226-V
 ```
 
 - `parseNICList`:`vmnic0/vmnic1` 起首,按空白切;`Description` 列可能含空格(`Intel Corporation Ethernet ...`),取 `fields[9:]` join。
-- 例(vmnic0):`Driver=ne1000, AdminStatus=Up, LinkStatus=Up, SpeedMbps=1000, Duplex=Full, MAC=d8:bb:c1:c1:b6:49, MTU=1500`。
+- 例(vmnic0):`Driver=ne1000, AdminStatus=Up, LinkStatus=Up, SpeedMbps=1000, Duplex=Full, MAC=XX:XX:XX:XX:XX:XX, MTU=1500`。
 - Validator:输出含 `vmnic`。
 - 缺数据兜底:`SpeedMbps=-1`/`Duplex=""`(链路 Down 或缺字段)。
 
