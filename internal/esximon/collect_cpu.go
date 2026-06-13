@@ -143,5 +143,3 @@ func parseTrailingInt64(line string) int64 {
 	n, _ := strconv.ParseInt(tail, 10, 64)
 	return n
 }
-
-// --- 采集 + 解析:磁盘 ---

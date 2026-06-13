@@ -244,5 +244,3 @@ func compactLogSample(s string, limit int) string {
 	}
 	return s[:limit-3] + "..."
 }
-
-// --- 解析:平台 / 版本 ---

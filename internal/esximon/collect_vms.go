@@ -211,5 +211,3 @@ func mapVMPowerState(out string) string {
 		return "unknown"
 	}
 }
-
-// --- 小工具 ---

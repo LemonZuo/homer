@@ -29,5 +29,3 @@ func pickBucket(window time.Duration) int {
 		return 30 * 60 // 30min
 	}
 }
-
-// --- 工具:把 sampler 结果转 sample / state ---

@@ -563,5 +563,3 @@ func classifyDisk(devType string, temp int) string {
 	}
 	return "ok"
 }
-
-// --- 采集 + 解析:USB ---

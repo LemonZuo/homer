@@ -343,5 +343,3 @@ func filterVMOwnedUSB(avail []USBPassthroughDevice, owned []USBVMOwned) []USBPas
 	}
 	return out
 }
-
-// --- 采集 + 解析:VM ---
