@@ -108,6 +108,8 @@ interface MiniSeries {
   label: string
   stroke: string
   data: MiniPoint[]
+  dash?: string
+  width?: number
 }
 
 function SeriesPlot({
@@ -119,6 +121,8 @@ function SeriesPlot({
   loading: boolean
   metric: MetricKey
 }) {
+  // 多张子图共享 hover idx,实现联动游标
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
   if (loading) {
     return (
       <div className="flex h-32 items-center justify-center text-[12px] text-muted-foreground">
@@ -136,36 +140,60 @@ function SeriesPlot({
   }
   const ts = points.map((p) => new Date(p.bucket_start).getTime())
   const psArr = points.map((p) => p.power_source)
+  if (metric === 'voltage') {
+    // 拆成上下两张子图,各自 y 轴自适应。两条线值常常贴近,挤在同一坐标系里看不清差异。
+    const inputSeries: MiniSeries[] = [
+      {
+        label: '输入',
+        stroke: 'rgb(20 184 166)',
+        data: points.map((p, i) => ({
+          t: ts[i],
+          v: p.input_voltage < 0 ? null : p.input_voltage,
+          ps: psArr[i],
+        })),
+      },
+    ]
+    const outputSeries: MiniSeries[] = [
+      {
+        label: '输出',
+        stroke: 'rgb(168 85 247)',
+        data: points.map((p, i) => ({
+          t: ts[i],
+          v: p.output_voltage < 0 ? null : p.output_voltage,
+          ps: psArr[i],
+        })),
+      },
+    ]
+    return (
+      <div className="space-y-2">
+        <MiniChart
+          series={inputSeries}
+          unit="V"
+          format={(v) => v.toFixed(1)}
+          title="输入电压"
+          height={120}
+          showXAxis={false}
+          hoverIdx={hoverIdx}
+          onHover={setHoverIdx}
+        />
+        <MiniChart
+          series={outputSeries}
+          unit="V"
+          format={(v) => v.toFixed(1)}
+          title="输出电压"
+          height={120}
+          hoverIdx={hoverIdx}
+          onHover={setHoverIdx}
+        />
+      </div>
+    )
+  }
   let series: MiniSeries[]
   let unit: string
   let yMin: number | undefined
   let yMax: number | undefined
   let format: (v: number) => string
   switch (metric) {
-    case 'voltage':
-      series = [
-        {
-          label: '输入',
-          stroke: 'rgb(20 184 166)',
-          data: points.map((p, i) => ({
-            t: ts[i],
-            v: p.input_voltage < 0 ? null : p.input_voltage,
-            ps: psArr[i],
-          })),
-        },
-        {
-          label: '输出',
-          stroke: 'rgb(168 85 247)',
-          data: points.map((p, i) => ({
-            t: ts[i],
-            v: p.output_voltage < 0 ? null : p.output_voltage,
-            ps: psArr[i],
-          })),
-        },
-      ]
-      unit = 'V'
-      format = (v) => v.toFixed(1)
-      break
     case 'load':
       series = [
         {
@@ -200,7 +228,15 @@ function SeriesPlot({
       break
   }
   return (
-    <MiniChart series={series} unit={unit} yMin={yMin} yMax={yMax} format={format} />
+    <MiniChart
+      series={series}
+      unit={unit}
+      yMin={yMin}
+      yMax={yMax}
+      format={format}
+      hoverIdx={hoverIdx}
+      onHover={setHoverIdx}
+    />
   )
 }
 
@@ -210,16 +246,25 @@ function MiniChart({
   yMin,
   yMax,
   format,
+  title,
+  height,
+  showXAxis = true,
+  hoverIdx,
+  onHover,
 }: {
   unit: string
   series: MiniSeries[]
   yMin?: number
   yMax?: number
   format: (v: number) => string
+  title?: string
+  height?: number
+  showXAxis?: boolean
+  hoverIdx: number | null
+  onHover: (idx: number | null) => void
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(640)
-  const [hover, setHover] = useState<{ idx: number } | null>(null)
 
   useEffect(() => {
     const el = wrapRef.current
@@ -263,11 +308,11 @@ function MiniChart({
   }
   const allMissing = allVals.length === 0
 
-  const H = 180
+  const H = height ?? 180
   const padL = 40
   const padR = 8
   const padT = 8
-  const padB = 18
+  const padB = showXAxis ? 18 : 6
   const innerW = Math.max(20, width - padL - padR)
   const innerH = H - padT - padB
 
@@ -336,7 +381,7 @@ function MiniChart({
     const r = svg.getBoundingClientRect()
     const x = ev.clientX - r.left
     if (x < padL || x > padL + innerW) {
-      setHover(null)
+      onHover(null)
       return
     }
     const ratio = (x - padL) / innerW
@@ -350,12 +395,12 @@ function MiniChart({
         bestIdx = i
       }
     }
-    setHover({ idx: bestIdx })
+    onHover(bestIdx)
   }
 
-  const hoverT = hover ? psSource[hover.idx]?.t ?? null : null
-  const hoverVals = hover
-    ? series.map((s) => s.data[hover.idx]?.v ?? null)
+  const hoverT = hoverIdx != null ? psSource[hoverIdx]?.t ?? null : null
+  const hoverVals = hoverIdx != null
+    ? series.map((s) => s.data[hoverIdx]?.v ?? null)
     : []
   const showMultiLegend = series.length > 1
 
@@ -363,13 +408,36 @@ function MiniChart({
     <div ref={wrapRef} className="relative">
       <div className="mb-1 flex h-4 flex-wrap items-center justify-between gap-x-3 gap-y-0 text-[11.5px] text-muted-foreground">
         <div className="flex items-center gap-3">
+          {title && (
+            <span className="inline-flex items-center gap-1">
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ backgroundColor: series[0]?.stroke }}
+              />
+              <span>{title}</span>
+            </span>
+          )}
           {showMultiLegend &&
             series.map((s) => (
               <span key={s.label} className="inline-flex items-center gap-1">
-                <span
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{ backgroundColor: s.stroke }}
-                />
+                {s.dash ? (
+                  <svg width="14" height="6" className="inline-block">
+                    <line
+                      x1="0"
+                      y1="3"
+                      x2="14"
+                      y2="3"
+                      stroke={s.stroke}
+                      strokeWidth={2}
+                      strokeDasharray="3 2"
+                    />
+                  </svg>
+                ) : (
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ backgroundColor: s.stroke }}
+                  />
+                )}
                 <span>{s.label}</span>
               </span>
             ))}
@@ -407,7 +475,7 @@ function MiniChart({
         viewBox={`0 0 ${width} ${H}`}
         preserveAspectRatio="none"
         onMouseMove={onMove}
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={() => onHover(null)}
       >
         {yTicks.map((v, i) => (
           <g key={i}>
@@ -448,30 +516,36 @@ function MiniChart({
             />
           )
         })}
-        {xTicks.map((t, i) => (
-          <text
-            key={i}
-            x={xOf(t)}
-            y={H - 4}
-            textAnchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
-            fontSize="10"
-            className="fill-muted-foreground"
-          >
-            {fmtX(t)}
-          </text>
-        ))}
-        {!allMissing &&
-          series.map((s, i) => (
-            <path
-              key={s.label}
-              d={paths[i]}
-              fill="none"
-              stroke={s.stroke}
-              strokeWidth={1.75}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+        {showXAxis &&
+          xTicks.map((t, i) => (
+            <text
+              key={i}
+              x={xOf(t)}
+              y={H - 4}
+              textAnchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
+              fontSize="10"
+              className="fill-muted-foreground"
+            >
+              {fmtX(t)}
+            </text>
           ))}
+        {!allMissing &&
+          // 倒序绘制:数组靠后的先画(在下),靠前的后画(在上)
+          series
+            .map((s, i) => ({ s, i }))
+            .reverse()
+            .map(({ s, i }) => (
+              <path
+                key={s.label}
+                d={paths[i]}
+                fill="none"
+                stroke={s.stroke}
+                strokeWidth={s.width ?? 1.75}
+                strokeDasharray={s.dash}
+                strokeLinecap={s.dash ? 'butt' : 'round'}
+                strokeLinejoin="round"
+              />
+            ))}
         {hoverT != null && (
           <g>
             <line
