@@ -1,21 +1,10 @@
-import {
-  KeyRound,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Server,
-  ShieldCheck,
-} from 'lucide-react'
-import { getColorSet } from '../colors'
-import { Card } from './ui/card'
-import { Button } from './ui/button'
 import { ConfirmDialog } from './acme/ConfirmDialog'
-import { cn } from '../lib/utils'
+import { AcmePageHeader } from './acme/AcmePageHeader'
 import { useAcmeData } from './acme/useAcmeData'
 import { useAcmeActions } from './acme/useAcmeActions'
 import { useAcmeUiState } from './acme/useAcmeUiState'
 import { LogDrawer } from './acme/LogDrawer'
-import { DomainCard } from './acme/sections/DomainCard'
+import { DomainList } from './acme/sections/DomainList'
 import { TaskHistory } from './acme/sections/TaskHistory'
 import { DomainEditDialog } from './acme/dialogs/DomainEditDialog'
 import { SSHTargetEditDialog } from './acme/dialogs/SSHTargetEditDialog'
@@ -82,103 +71,30 @@ export default function Acme() {
     reloadSSHCredentials,
     reloadDeployConfigs,
   })
-  const cs = getColorSet('emerald')
 
   return (
     <div className="mx-auto max-w-5xl px-4 pb-12 pt-4 sm:px-8 sm:pb-32 sm:pt-10">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="hidden sm:block">
-          <div className="flex items-center gap-3">
-            <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
-            <h1 className="text-[28px] font-bold leading-none tracking-tight">ACME 签发</h1>
-          </div>
-          <p className="mt-2 text-[12.5px] text-muted-foreground">
-            自动签发与续期，配置部署目标后一键分发
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-10 w-full sm:h-8 sm:w-auto"
-            onClick={reloadAll}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            刷新
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-10 w-full sm:h-8 sm:w-auto"
-            onClick={ui.credentials.drawer.show}
-          >
-            <KeyRound className="mr-1.5 h-3.5 w-3.5" />
-            DNS 凭证
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-10 w-full sm:h-8 sm:w-auto"
-            onClick={ui.accounts.drawer.show}
-          >
-            <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
-            CA 账号
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-10 w-full sm:h-8 sm:w-auto"
-            onClick={ui.targets.entry.show}
-          >
-            <Server className="mr-1.5 h-3.5 w-3.5" />
-            部署目标
-          </Button>
-          <Button
-            size="sm"
-            className="hidden h-10 w-full sm:inline-flex sm:h-8 sm:w-auto"
-            onClick={ui.domain.edit.add}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            新增域名
-          </Button>
-        </div>
-      </div>
+      <AcmePageHeader
+        loading={loading}
+        onRefresh={reloadAll}
+        onOpenCredentials={ui.credentials.drawer.show}
+        onOpenAccounts={ui.accounts.drawer.show}
+        onOpenDeployTargets={ui.targets.entry.show}
+        onAddDomain={ui.domain.edit.add}
+      />
 
-      <Button
-        size="icon"
-        onClick={ui.domain.edit.add}
-        className="fixed bottom-[calc(env(safe-area-inset-bottom)+6rem)] right-5 z-30 h-12 w-12 rounded-full shadow-lg active:scale-95 sm:hidden"
-        aria-label="新增域名"
-      >
-        <Plus className="h-5 w-5" />
-      </Button>
-
-      <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {domains.map((d) => (
-          <DomainCard
-            key={d.id}
-            d={d}
-            busy={ui.busy}
-            accountSummary={accountSummary}
-            onIssue={actions.requestIssue}
-            onDeploy={actions.openDeployConfigs}
-            onEdit={ui.domain.edit.edit}
-            onRevoke={ui.domain.revoke.setPending}
-            onDelete={ui.domain.remove.setPending}
-            onDownload={actions.downloadCert}
-          />
-        ))}
-        {!loading && domains.length === 0 && (
-          <Card className="col-span-full px-4 py-12 text-center text-[12.5px] text-muted-foreground">
-            还没有域名，点击右上「新增域名」开始
-          </Card>
-        )}
-      </div>
+      <DomainList
+        domains={domains}
+        loading={loading}
+        busy={ui.busy}
+        accountSummary={accountSummary}
+        onIssue={actions.requestIssue}
+        onDeploy={actions.openDeployConfigs}
+        onEdit={ui.domain.edit.edit}
+        onRevoke={ui.domain.revoke.setPending}
+        onDelete={ui.domain.remove.setPending}
+        onDownload={actions.downloadCert}
+      />
 
       <TaskHistory
         tasks={tasks}
