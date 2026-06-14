@@ -45,6 +45,7 @@ var ChannelTypes = []struct {
 	{"email", "Resend 邮件", []string{"api_key", "from", "to"}},
 	{"webhook", "Webhook", []string{"url"}},
 	{"bark", "Bark", []string{"server", "device_key"}},
+	{"ntfy", "ntfy", []string{"server", "topic", "token"}},
 }
 
 // Hub 按 DB 里的「通道 + 模块映射」在发送时解析通知，配置改动即时生效（无缓存）。
@@ -111,6 +112,8 @@ func buildChannel(ch model.NotifyChannel) Notifier {
 		return Retry(3, 2*time.Second, Webhook(cfg["url"]))
 	case "bark":
 		return Retry(3, 2*time.Second, Bark(cfg["server"], cfg["device_key"]))
+	case "ntfy":
+		return Retry(3, 2*time.Second, Ntfy(cfg["server"], cfg["topic"], cfg["token"]))
 	default:
 		return nil
 	}
