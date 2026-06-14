@@ -6,14 +6,14 @@ export interface PageDef {
 }
 
 export const pages: PageDef[] = [
-  { key: 'acme', label: 'ACME 签发', color: 'emerald' },
-  { key: 'certstore', label: '证书管理', color: 'violet' },
   { key: 'ups', label: 'UPS 状态', color: 'teal' },
   { key: 'esxi', label: 'ESXi 状态', color: 'esxi' },
+  { key: 'acme', label: '证书签发', color: 'emerald' },
+  { key: 'certstore', label: 'CAS证书', color: 'violet' },
+  { key: 'cdnops', label: 'CDN域名', color: 'sky' },
   { key: 'birthday', label: '生日提醒', color: 'orange' },
   { key: 'event', label: '事项提醒', color: 'blue' },
-  { key: 'cdnops', label: '加速域名', color: 'sky' },
-  { key: 'sms', label: '短信转发器', color: 'teal' },
+  { key: 'sms', label: '短信转发', color: 'teal' },
   { key: 'scheduler', label: '任务调度', color: 'blue' },
   { key: 'notify', label: '通知渠道', color: 'indigo' },
 ]

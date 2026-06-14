@@ -29,7 +29,7 @@ export function AcmePageHeader({
         <div className="hidden sm:block">
           <div className="flex items-center gap-3">
             <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
-            <h1 className="text-[28px] font-bold leading-none tracking-tight">ACME 签发</h1>
+            <h1 className="text-[28px] font-bold leading-none tracking-tight">证书签发</h1>
           </div>
           <p className="mt-2 text-[12.5px] text-muted-foreground">
             自动签发与续期，配置部署目标后一键分发

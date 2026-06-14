@@ -120,7 +120,7 @@ export default function CertStore() {
         <div className="hidden sm:block">
           <div className="flex items-center gap-3">
             <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
-            <h1 className="text-[28px] font-bold leading-none tracking-tight">证书管理</h1>
+            <h1 className="text-[28px] font-bold leading-none tracking-tight">CAS证书</h1>
           </div>
           <p className="mt-2 text-[12.5px] text-muted-foreground">
             阿里云数字证书（CAS）列表、部署到 CDN 与删除

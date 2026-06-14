@@ -25,7 +25,7 @@ export function SmsPageHeader({
       <div className="hidden sm:block">
         <div className="flex items-center gap-3">
           <span className={cn('h-2 w-2 rounded-full', accent.dot)} />
-          <h1 className="text-[28px] font-bold leading-none tracking-tight">短信转发器</h1>
+          <h1 className="text-[28px] font-bold leading-none tracking-tight">短信转发</h1>
         </div>
         <p className="mt-2 text-[12.5px] text-muted-foreground">
           通过 SmsForwarder Android 服务收发短信；签名鉴权模式

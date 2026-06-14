@@ -81,7 +81,7 @@ export default function CdnOps() {
         <div className="hidden sm:block">
           <div className="flex items-center gap-3">
             <span className={cn('h-2 w-2 rounded-full', cs.dot)} />
-            <h1 className="text-[28px] font-bold leading-none tracking-tight">加速域名</h1>
+            <h1 className="text-[28px] font-bold leading-none tracking-tight">CDN域名</h1>
           </div>
           <p className="mt-2 text-[12.5px] text-muted-foreground">
             阿里云 CDN 域名只读视图
