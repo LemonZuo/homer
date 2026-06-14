@@ -9,6 +9,8 @@ export const FIELD_LABELS: Record<string, string> = {
   from: '发件地址 (from)',
   to: '收件地址 (to)',
   url: 'Webhook URL',
+  server: 'Bark Server 地址',
+  device_key: '设备 Key (device_key)',
 }
 
 export function parseConfig(s: string): Record<string, string> {

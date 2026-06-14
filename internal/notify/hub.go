@@ -44,6 +44,7 @@ var ChannelTypes = []struct {
 	{"wework", "企业微信", []string{"corp_id", "agent_id", "secret", "tag_id"}},
 	{"email", "Resend 邮件", []string{"api_key", "from", "to"}},
 	{"webhook", "Webhook", []string{"url"}},
+	{"bark", "Bark", []string{"server", "device_key"}},
 }
 
 // Hub 按 DB 里的「通道 + 模块映射」在发送时解析通知，配置改动即时生效（无缓存）。
@@ -108,6 +109,8 @@ func buildChannel(ch model.NotifyChannel) Notifier {
 		return Retry(3, 2*time.Second, Email(email.NewResend(cfg["api_key"], cfg["from"]), cfg["to"]))
 	case "webhook":
 		return Retry(3, 2*time.Second, Webhook(cfg["url"]))
+	case "bark":
+		return Retry(3, 2*time.Second, Bark(cfg["server"], cfg["device_key"]))
 	default:
 		return nil
 	}
