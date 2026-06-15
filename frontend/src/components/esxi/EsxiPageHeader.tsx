@@ -17,6 +17,7 @@ interface EsxiPageHeaderProps {
   refreshing: boolean
   onRefresh: () => void
   onOpenHosts: () => void
+  onDemoTap: () => void
 }
 
 export function EsxiPageHeader({
@@ -25,6 +26,7 @@ export function EsxiPageHeader({
   refreshing,
   onRefresh,
   onOpenHosts,
+  onDemoTap,
 }: EsxiPageHeaderProps) {
   const cs = getColorSet('esxi')
 
@@ -32,7 +34,11 @@ export function EsxiPageHeader({
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="hidden sm:block">
         <div className="flex items-center gap-3">
-          <span className={cn('h-2 w-2 rounded-full', cs.dot)} aria-hidden />
+          <span
+            className={cn('h-2 w-2 cursor-pointer rounded-full', cs.dot)}
+            onClick={onDemoTap}
+            aria-hidden
+          />
           <h1 className="text-[28px] font-bold leading-none tracking-tight">ESXi 状态</h1>
         </div>
         {stats.hostCnt > 1 && (

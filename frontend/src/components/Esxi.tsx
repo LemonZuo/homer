@@ -1,5 +1,7 @@
+import { useCallback, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Card } from './ui/card'
+import { EsxiDemoSection } from './esxi/EsxiDemoSection'
 import { EsxiEmptyState } from './esxi/EsxiEmptyState'
 import { EsxiManagementDialogs } from './esxi/EsxiManagementDialogs'
 import { EsxiPageHeader } from './esxi/EsxiPageHeader'
@@ -21,6 +23,28 @@ export default function Esxi() {
     triggerSample,
   } = useEsxiSnapshots()
   const management = useEsxiManagement({ reloadSnapshots })
+  const [demoMode, setDemoMode] = useState(false)
+  const demoTapRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({
+    count: 0,
+    timer: null,
+  })
+  // 标题左侧状态点 5 秒内连点 5 次进入演示模式;再次进入只需关闭按钮退出。
+  const bumpDemoTap = useCallback(() => {
+    if (demoMode) return
+    const s = demoTapRef.current
+    s.count += 1
+    if (s.timer) clearTimeout(s.timer)
+    s.timer = setTimeout(() => {
+      s.count = 0
+      s.timer = null
+    }, 5000)
+    if (s.count >= 5) {
+      s.count = 0
+      if (s.timer) clearTimeout(s.timer)
+      s.timer = null
+      setDemoMode(true)
+    }
+  }, [demoMode])
 
   return (
     <div className="mx-auto max-w-5xl px-4 pb-32 pt-4 sm:px-8 sm:pt-10">
@@ -30,6 +54,7 @@ export default function Esxi() {
         refreshing={refreshing}
         onRefresh={triggerSample}
         onOpenHosts={management.openHostsDrawer}
+        onDemoTap={bumpDemoTap}
       />
 
       {loading ? (
@@ -46,6 +71,8 @@ export default function Esxi() {
           ))}
         </div>
       )}
+
+      {demoMode && <EsxiDemoSection onClose={() => setDemoMode(false)} />}
 
       <EsxiManagementDialogs management={management} onHostSaved={reloadSnapshots} />
     </div>

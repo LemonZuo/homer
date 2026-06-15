@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils'
 import { Card } from '../ui/card'
 import { fmtDateTime, fmtStaleAge, isStaleSample, useNowTick } from './format'
 import { NetTopologyFlow } from './NetTopologyFlow'
+import { DemoHistorySection } from './history/DemoHistorySection'
 import { HistorySection } from './history/HistorySection'
 import type { Snapshot } from './types'
 import { EmptyCard } from './ui'
@@ -13,7 +14,7 @@ import { CPUStaticCard, CPUTempCard, DisksCard, MCECard, NICsCard, PlatformCard,
 
 // --- 一台主机的整张卡 ---
 
-export function HostBlock({ host }: { host: Snapshot }) {
+export function HostBlock({ host, demo = false }: { host: Snapshot; demo?: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const now = useNowTick()
   const cs = getColorSet('esxi')
@@ -139,7 +140,11 @@ export function HostBlock({ host }: { host: Snapshot }) {
         </button>
         {expanded && (
           <div className="mt-3">
-            <HistorySection hostKind={host.host_kind} hostID={host.host_id} disks={host.disk_health} />
+            {demo ? (
+              <DemoHistorySection host={host} />
+            ) : (
+              <HistorySection hostKind={host.host_kind} hostID={host.host_id} disks={host.disk_health} />
+            )}
           </div>
         )}
       </div>
