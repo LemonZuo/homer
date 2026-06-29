@@ -27,6 +27,7 @@ export const METRIC_OPTIONS: { value: MetricKey; label: string }[] = [
 export const RANGE_OPTIONS = [
   { value: '1h', label: '1 小时' },
   { value: '6h', label: '6 小时' },
+  { value: '12h', label: '12 小时' },
   { value: '24h', label: '24 小时' },
   { value: '3d', label: '3 天' },
   { value: '7d', label: '7 天' },

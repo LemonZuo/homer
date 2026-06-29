@@ -383,6 +383,8 @@ func parseRange(s string) time.Duration {
 		return 1 * time.Hour
 	case "6h":
 		return 6 * time.Hour
+	case "12h":
+		return 12 * time.Hour
 	case "24h", "":
 		return 24 * time.Hour
 	case "3d":

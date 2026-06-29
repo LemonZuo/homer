@@ -59,6 +59,7 @@ export function DemoHistorySection({ host }: { host: Snapshot }) {
 const RANGE_BUCKETS: Record<string, { points: number; stepMs: number }> = {
   '1h': { points: 60, stepMs: 60_000 },
   '6h': { points: 72, stepMs: 5 * 60_000 },
+  '12h': { points: 72, stepMs: 10 * 60_000 },
   '24h': { points: 96, stepMs: 15 * 60_000 },
   '3d': { points: 72, stepMs: 60 * 60_000 },
   '7d': { points: 84, stepMs: 2 * 60 * 60_000 },
