@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 
+import { cn } from '../../../lib/utils'
 import type { MiniPoint } from './types'
 
 export function MiniChart({
@@ -118,20 +119,43 @@ export function MiniChart({
   }
 
   const hoverPoint = hover ? data[hover.idx] : null
+  // 默认显示最近一个非空 bucket,作为基线读数;悬浮时切换为悬浮点。
+  let defaultPoint: MiniPoint | null = null
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (data[i].v != null) {
+      defaultPoint = data[i]
+      break
+    }
+  }
+  const displayPoint = hoverPoint ?? defaultPoint
+  const showing = displayPoint && displayPoint.v != null
 
   return (
     <div ref={wrapRef} className="relative">
-      <div className="mb-1 flex h-4 items-center justify-end text-[11.5px] text-muted-foreground">
-        {hoverPoint && hoverPoint.v != null ? (
+      {/* 值槽始终占位,只切换内容与强弱,避免悬浮时整行尺寸跳动。 */}
+      <div className="mb-1 flex h-4 items-center justify-end text-[11.5px]">
+        {showing ? (
           <span className="tabular-nums">
-            <span className="text-foreground font-semibold">{format(hoverPoint.v)}</span>
-            {unit && <span className="ml-0.5">{unit}</span>}
-            <span className="ml-2 text-muted-foreground">
-              {new Date(hoverPoint.t).toLocaleString('zh-CN', { hour12: false })}
+            <span
+              className={cn(
+                'font-semibold',
+                hoverPoint ? 'text-foreground' : 'text-foreground/70',
+              )}
+            >
+              {format(displayPoint!.v as number)}
+            </span>
+            {unit && <span className="ml-0.5 text-muted-foreground">{unit}</span>}
+            <span
+              className={cn(
+                'ml-2 tabular-nums',
+                hoverPoint ? 'text-foreground' : 'text-muted-foreground/70',
+              )}
+            >
+              {new Date(displayPoint!.t).toLocaleString('zh-CN', { hour12: false })}
             </span>
           </span>
         ) : (
-          <span>{unit}</span>
+          <span className="text-muted-foreground">{unit}</span>
         )}
       </div>
       <svg

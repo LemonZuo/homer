@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 
+import { cn } from '../../../lib/utils'
 import type { LineSeries } from './types'
 
 // MultiLineChart 多线版本的 mini chart。顶部 legend 横排,hover 时在 legend 上挂值;
@@ -105,14 +106,18 @@ export function MultiLineChart({
     setHoverIdx(bestIdx)
   }
 
+  // 默认显示最近一个 bucket 的值,悬浮时切换为对应索引,布局始终稳定不抖动。
+  const defaultIdx = ts.length > 0 ? ts.length - 1 : null
+  const displayIdx = hoverIdx ?? defaultIdx
+  const displayT = displayIdx != null ? ts[displayIdx] : null
   const hoverT = hoverIdx != null ? ts[hoverIdx] : null
 
   return (
     <div ref={wrapRef} className="relative">
-      {/* legend + hover 时间戳 */}
+      {/* legend + 当前/悬浮值。值槽始终渲染,只切换数字与强弱,避免悬浮时整行尺寸跳动。 */}
       <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
         {lines.map((ln) => {
-          const v = hoverIdx != null ? ln.points[hoverIdx]?.v : null
+          const v = displayIdx != null ? ln.points[displayIdx]?.v : null
           return (
             <span key={ln.id} className="inline-flex max-w-[210px] items-center gap-1 tabular-nums sm:max-w-[260px]">
               <span
@@ -120,18 +125,26 @@ export function MultiLineChart({
                 style={{ background: ln.color }}
               />
               <span className="min-w-0 truncate text-muted-foreground" title={ln.label}>{ln.label}</span>
-              {v != null && (
-                <span className="font-semibold text-foreground">
-                  {format(v)}
-                  {unit && <span className="ml-0.5 text-muted-foreground">{unit}</span>}
-                </span>
-              )}
+              <span
+                className={cn(
+                  'font-semibold tabular-nums',
+                  hoverIdx != null ? 'text-foreground' : 'text-foreground/70',
+                )}
+              >
+                {v != null ? format(v) : '—'}
+                {v != null && unit && <span className="ml-0.5 text-muted-foreground">{unit}</span>}
+              </span>
             </span>
           )
         })}
-        {hoverT != null && (
-          <span className="ml-auto text-muted-foreground tabular-nums">
-            {new Date(hoverT).toLocaleString('zh-CN', { hour12: false })}
+        {displayT != null && (
+          <span
+            className={cn(
+              'ml-auto tabular-nums',
+              hoverIdx != null ? 'text-foreground' : 'text-muted-foreground/70',
+            )}
+          >
+            {new Date(displayT).toLocaleString('zh-CN', { hour12: false })}
           </span>
         )}
       </div>

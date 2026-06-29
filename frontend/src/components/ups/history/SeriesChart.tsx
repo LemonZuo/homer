@@ -432,11 +432,26 @@ function MiniChart({
     onHover(bestIdx)
   }
 
+  // 默认显示最近一个 "至少一条线有值" 的 bucket,作为基线读数;
+  // 悬浮时切换到悬浮索引。值槽始终渲染,只切换数字与强弱,避免悬浮时整行尺寸跳动。
+  let defaultIdx: number | null = null
+  for (let i = psSource.length - 1; i >= 0; i--) {
+    if (series.some((s) => s.data[i]?.v != null)) {
+      defaultIdx = i
+      break
+    }
+  }
+  const displayIdx = hoverIdx ?? defaultIdx
+  const displayT = displayIdx != null ? psSource[displayIdx]?.t ?? null : null
   const hoverT = hoverIdx != null ? psSource[hoverIdx]?.t ?? null : null
+  const displayVals = displayIdx != null
+    ? series.map((s) => s.data[displayIdx]?.v ?? null)
+    : []
   const hoverVals = hoverIdx != null
     ? series.map((s) => s.data[hoverIdx]?.v ?? null)
     : []
   const showMultiLegend = series.length > 1
+  const isHover = hoverIdx != null
 
   return (
     <div ref={wrapRef} className="relative">
@@ -477,10 +492,10 @@ function MiniChart({
             ))}
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0">
-          {hoverT != null && hoverVals.some((v) => v != null) ? (
+          {displayT != null && displayVals.some((v) => v != null) ? (
             <>
               {series.map((s, i) => {
-                const v = hoverVals[i]
+                const v = displayVals[i]
                 if (v == null) return null
                 return (
                   <span key={s.label} className="tabular-nums">
@@ -489,13 +504,20 @@ function MiniChart({
                         {s.label}
                       </span>
                     )}
-                    <span className="text-foreground font-semibold">{format(v)}</span>
+                    <span
+                      className={cn(
+                        'font-semibold',
+                        isHover ? 'text-foreground' : 'text-foreground/70',
+                      )}
+                    >
+                      {format(v)}
+                    </span>
                     <span className="ml-0.5">{unit}</span>
                   </span>
                 )
               })}
-              <span className="text-muted-foreground">
-                {new Date(hoverT).toLocaleString('zh-CN', { hour12: false })}
+              <span className={cn(isHover ? 'text-foreground' : 'text-muted-foreground/70')}>
+                {new Date(displayT).toLocaleString('zh-CN', { hour12: false })}
               </span>
             </>
           ) : (
