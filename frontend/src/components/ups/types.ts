@@ -73,6 +73,7 @@ export interface SnapshotUPS {
   real_power: number
   raw_status: string
   sampled_at: string
+  energy_today_wh: number
 }
 
 export interface Snapshot {

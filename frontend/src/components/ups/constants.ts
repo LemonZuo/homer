@@ -59,6 +59,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OL',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     name: 'demo-35',
@@ -76,6 +77,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OL',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     name: 'demo-12',
@@ -93,6 +95,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OL',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     name: 'demo-chrg-60',
@@ -110,6 +113,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OL CHRG',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     name: 'demo-chrg-35',
@@ -127,6 +131,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OL CHRG',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     name: 'demo-chrg-12',
@@ -144,6 +149,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OL CHRG',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     name: 'demo-bat-75',
@@ -161,6 +167,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OB DISCHRG',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     name: 'demo-bat-35',
@@ -178,6 +185,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OB DISCHRG',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     name: 'demo-bat-12',
@@ -195,6 +203,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OB LB DISCHRG',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
   {
     // demo-offline:DemoSection 里会把 sampled_at 改写为 now - 15min,触发离线样式
@@ -213,6 +222,7 @@ export const DEMO_BATTERY_VARIANTS: SnapshotUPS[] = [
     real_power: 100,
     raw_status: 'OL',
     sampled_at: new Date().toISOString(),
+    energy_today_wh: 1200,
   },
 ]
 

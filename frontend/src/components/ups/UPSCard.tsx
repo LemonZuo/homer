@@ -5,7 +5,7 @@ import { getColorSet } from '../../colors'
 import { cn } from '../../lib/utils'
 import { Card } from '../ui/card'
 import { POWER_META } from './constants'
-import { fmtBatteryType, fmtNum, fmtRuntime, fmtStaleAge, fmtTime, isStaleSample, useNowTick } from './format'
+import { fmtBatteryType, fmtKwh, fmtNum, fmtRuntime, fmtStaleAge, fmtTime, isStaleSample, useNowTick } from './format'
 import { SeriesChart } from './history/SeriesChart'
 import type { SnapshotUPS } from './types'
 import { BatteryCell } from './BatteryCell'
@@ -193,8 +193,17 @@ export function UPSCard({
               <span className="text-muted-foreground/70">尚未收到状态码</span>
             )}
           </div>
-          <div className="shrink-0 tabular-nums text-muted-foreground">
-            {fmtTime(ups.sampled_at)}
+          <div className="flex shrink-0 items-center gap-2 tabular-nums text-muted-foreground">
+            {ups.energy_today_wh > 0 && (
+              <span
+                className="rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px]"
+                title={`今日 0 点起按实时功率矩形积分。采样断档 > 5 分钟的时段不计入。`}
+              >
+                今日 <span className="font-semibold text-foreground">{fmtKwh(ups.energy_today_wh)}</span>
+                <span className="ml-0.5 text-muted-foreground">kWh</span>
+              </span>
+            )}
+            <span>{fmtTime(ups.sampled_at)}</span>
           </div>
         </div>
 

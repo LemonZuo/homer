@@ -22,6 +22,15 @@ export function fmtNum(v: number, fractionDigits = 0): string {
   return v.toFixed(fractionDigits)
 }
 
+// fmtKwh 把 Wh 整数渲染成 kWh:< 1 kWh 保留 3 位小数,< 10 保留 2 位,否则 1 位。
+export function fmtKwh(wh: number): string {
+  if (wh == null || wh < 0 || !isFinite(wh)) return '—'
+  const kwh = wh / 1000
+  if (kwh < 1) return kwh.toFixed(3)
+  if (kwh < 10) return kwh.toFixed(2)
+  return kwh.toFixed(1)
+}
+
 // 超过 10 分钟没拿到新一帧采样即视为离线(SSE 推送 + 后端调度通常每轮 < 30s)
 const STALE_THRESHOLD_MS = 10 * 60_000
 

@@ -107,11 +107,17 @@ func (h *Handler) series(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	// 能耗汇总走同一个窗口,失败不阻断曲线,前端按字段缺失隐藏。
+	summary, sumErr := h.svc.EnergyWindow(hostKind, hostID, upsName, window)
+	resp := gin.H{
 		"data":   pts,
 		"range":  window.String(),
 		"bucket": pickBucket(window),
-	})
+	}
+	if sumErr == nil {
+		resp["energy"] = summary
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // refresh 手动触发一次采样(同步等待),供前端"立即刷新"按钮用。

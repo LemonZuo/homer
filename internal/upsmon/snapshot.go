@@ -36,6 +36,8 @@ type SnapshotUPS struct {
 	RealPower             int       `json:"real_power"`
 	RawStatus             string    `json:"raw_status"`
 	SampledAt             time.Time `json:"sampled_at"`
+	// EnergyTodayWh 当日累计耗电(0 点至今,Wh,矩形积分)。-1 表示无法估算。
+	EnergyTodayWh int `json:"energy_today_wh"`
 }
 
 // BuildSnapshot 不重新采样,基于 ups_state(最新)+ ups_host 表组装快照。
@@ -67,7 +69,16 @@ func (s *Service) BuildSnapshot() ([]Snapshot, error) {
 			Endpoint: t.Endpoint,
 			UPSes:    []SnapshotUPS{},
 		}
+		// 今日累计 kWh:从本地当日 0 点起的矩形积分。失败回退 -1,前端隐藏该字段。
+		// 注意:time.Truncate(24h) 在 UTC 维度截断,在东八区会落到当日 8 点;
+		// 必须按 Local 的 Year/Month/Day 显式构造,才是"本地今日 0 点"。
+		nowLocal := time.Now().Local()
+		startOfDay := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, nowLocal.Location())
 		for _, st := range stateByHost[k] {
+			energyWh := -1
+			if kwh, samples, _, err := s.store.EnergyAccumulated(st.HostKind, st.HostID, st.UPSName, startOfDay, 300); err == nil && samples > 0 {
+				energyWh = int(kwh*1000 + 0.5)
+			}
 			sn.UPSes = append(sn.UPSes, SnapshotUPS{
 				Name:                  st.UPSName,
 				Mfr:                   st.Mfr,
@@ -84,6 +95,7 @@ func (s *Service) BuildSnapshot() ([]Snapshot, error) {
 				RealPower:             st.LastRealPower,
 				RawStatus:             st.LastRawStatus,
 				SampledAt:             st.UpdatedAt,
+				EnergyTodayWh:         energyWh,
 			})
 			sn.Reachable = true
 		}

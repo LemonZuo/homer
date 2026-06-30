@@ -5,8 +5,16 @@ import { toast } from 'sonner'
 import { api } from '../../../api'
 import { cn } from '../../../lib/utils'
 import { METRIC_OPTIONS, RANGE_OPTIONS, type MetricKey } from '../constants'
-import { extractErr } from '../format'
+import { extractErr, fmtKwh } from '../format'
 import type { PowerSource, SeriesPoint } from '../types'
+
+interface EnergySummary {
+  energy_wh: number
+  avg_power_w: number
+  covered_sec: number
+  window_sec: number
+  sample_count: number
+}
 
 interface MiniPoint {
   t: number
@@ -28,6 +36,7 @@ export function SeriesChart({
   const [range, setRange] = useState('24h')
   const [metric, setMetric] = useState<MetricKey>('voltage')
   const [points, setPoints] = useState<SeriesPoint[] | null>(null)
+  const [energy, setEnergy] = useState<EnergySummary | null>(null)
   const [loading, setLoading] = useState(false)
 
   const load = useCallback(
@@ -43,6 +52,7 @@ export function SeriesChart({
           },
         })
         setPoints(data?.data ?? [])
+        setEnergy(data?.energy ?? null)
       } catch (e) {
         toast.error(extractErr(e, '加载历史失败'))
       } finally {
@@ -100,6 +110,30 @@ export function SeriesChart({
         </div>
       </div>
       <SeriesPlot points={points} loading={loading} metric={metric} />
+      {/* power 档显示窗口能耗汇总;其他档隐藏避免视觉噪音(电压/负载本身没有累计语义)。
+          用 justify-between 让两/三项沿汇总行铺开,不留右侧空白。 */}
+      {metric === 'power' && energy && energy.sample_count > 0 && (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+          <span>
+            窗口累计{' '}
+            <span className="font-semibold text-foreground tabular-nums">{fmtKwh(energy.energy_wh)}</span>
+            <span className="ml-0.5">kWh</span>
+          </span>
+          <span>
+            平均功率{' '}
+            <span className="font-semibold text-foreground tabular-nums">{energy.avg_power_w}</span>
+            <span className="ml-0.5">W</span>
+          </span>
+          {energy.covered_sec < energy.window_sec * 0.9 && (
+            <span
+              className="text-amber-600 dark:text-amber-400"
+              title={`实际覆盖 ${Math.round(energy.covered_sec / 60)} 分钟 / 窗口 ${Math.round(energy.window_sec / 60)} 分钟`}
+            >
+              采样有断档
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

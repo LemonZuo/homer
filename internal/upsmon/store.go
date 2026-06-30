@@ -163,6 +163,54 @@ func (s *Store) Series(hostKind string, hostID int64, upsName string, since time
 	return points, nil
 }
 
+// EnergyAccumulated 按矩形积分把 real_power × Δt 累加成 kWh。
+// since 包含下界;maxGapSec 用于截断采样断档(掉机/重启),
+// 避免空白时段被按上一次功率"补"成一大笔虚假能耗。
+//
+// Δt 取相邻两条采样的间隔,首条样本的 Δt 取 sampled_at - since。
+// 任何 Δt 超过 maxGapSec 会被截断为 maxGapSec(默认 300s ≈ 10 个采样周期)。
+// 负值(实测缺数据)在子查询里已过滤。
+func (s *Store) EnergyAccumulated(hostKind string, hostID int64, upsName string, since time.Time, maxGapSec int) (kwh float64, samples int, coveredSec int, err error) {
+	if maxGapSec <= 0 {
+		maxGapSec = 300
+	}
+	// MySQL 5.7 没有窗口函数,在 Go 端做矩形积分。
+	// 单台 UPS 一天采样量 ~2880 条(30s 周期),拉一次很轻。
+	type row struct {
+		SampledAt time.Time
+		RealPower int
+	}
+	var rows []row
+	if err = s.db.Model(&model.UPSSample{}).
+		Select("sampled_at, real_power").
+		Where("host_kind=? AND host_id=? AND ups_name=? AND sampled_at >= ? AND real_power >= 0",
+			hostKind, hostID, upsName, since).
+		Order("sampled_at ASC").
+		Scan(&rows).Error; err != nil {
+		return 0, 0, 0, err
+	}
+	if len(rows) == 0 {
+		return 0, 0, 0, nil
+	}
+	maxGap := float64(maxGapSec)
+	prev := since
+	var energyWs float64 // 焦耳累计(W·s)
+	var coveredF float64
+	for _, r := range rows {
+		dt := r.SampledAt.Sub(prev).Seconds()
+		prev = r.SampledAt
+		if dt <= 0 {
+			continue
+		}
+		if dt > maxGap {
+			dt = maxGap
+		}
+		energyWs += float64(r.RealPower) * dt
+		coveredF += dt
+	}
+	return energyWs / 3600.0 / 1000.0, len(rows), int(coveredF + 0.5), nil
+}
+
 // PurgeOlderThan 清理 cutoff 之前的 sample,返回删除行数。
 func (s *Store) PurgeOlderThan(cutoff time.Time) (int64, error) {
 	res := s.db.Where("sampled_at < ?", cutoff).Delete(&model.UPSSample{})
