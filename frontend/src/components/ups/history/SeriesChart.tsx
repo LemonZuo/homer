@@ -109,7 +109,12 @@ export function SeriesChart({
           ))}
         </div>
       </div>
-      <SeriesPlot points={points} loading={loading} metric={metric} />
+      <SeriesPlot
+        points={points}
+        loading={loading}
+        metric={metric}
+        avgPowerW={energy && energy.sample_count > 0 ? energy.avg_power_w : null}
+      />
       {/* power 档显示窗口能耗汇总;其他档隐藏避免视觉噪音(电压/负载本身没有累计语义)。
           用 justify-between 让两/三项沿汇总行铺开,不留右侧空白。 */}
       {metric === 'power' && energy && energy.sample_count > 0 && (
@@ -150,10 +155,12 @@ function SeriesPlot({
   points,
   loading,
   metric,
+  avgPowerW,
 }: {
   points: SeriesPoint[] | null
   loading: boolean
   metric: MetricKey
+  avgPowerW: number | null
 }) {
   // 多张子图共享 hover idx,实现联动游标
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
@@ -272,6 +279,11 @@ function SeriesPlot({
       height={260}
       hoverIdx={hoverIdx}
       onHover={setHoverIdx}
+      refLine={
+        metric === 'power' && avgPowerW != null
+          ? { value: avgPowerW, label: `均 ${Math.round(avgPowerW)}W` }
+          : undefined
+      }
     />
   )
 }
@@ -288,6 +300,7 @@ function MiniChart({
   clipExtremes = false,
   hoverIdx,
   onHover,
+  refLine,
 }: {
   unit: string
   series: MiniSeries[]
@@ -303,6 +316,8 @@ function MiniChart({
   clipExtremes?: boolean
   hoverIdx: number | null
   onHover: (idx: number | null) => void
+  // 水平参考线(如窗口平均功率),与主线同色系但用虚线区分
+  refLine?: { value: number; label: string }
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(640)
@@ -403,6 +418,13 @@ function MiniChart({
     }
     if (yMin != null) yLo = yMin
     if (yMax != null) yHi = yMax
+  }
+  // 参考线也参与 y 自适应:大时间窗下曲线取桶内峰值、整体偏高,
+  // 真实平均值可能低于曲线下缘,不扩展会被挤出可视范围。
+  if (refLine && yMin == null && yMax == null) {
+    const pad = Math.max((yHi - yLo) * 0.08, 1)
+    if (refLine.value < yLo) yLo = refLine.value - pad
+    if (refLine.value > yHi) yHi = refLine.value + pad
   }
   const ySpan = Math.max(0.001, yHi - yLo)
   const yOf = (v: number) => padT + (1 - (v - yLo) / ySpan) * innerH
@@ -619,6 +641,31 @@ function MiniChart({
               {fmtX(t)}
             </text>
           ))}
+        {refLine && refLine.value >= yLo && refLine.value <= yHi && (
+          <g>
+            <line
+              x1={padL}
+              x2={width - padR}
+              y1={yOf(refLine.value)}
+              y2={yOf(refLine.value)}
+              stroke="rgb(99 102 241)"
+              strokeWidth={1}
+              strokeDasharray="5 4"
+              opacity={0.7}
+            />
+            <text
+              x={width - padR - 2}
+              // 标签放线下方;太靠底时翻到线上方,避免溢出绘图区
+              y={yOf(refLine.value) > padT + innerH - 14 ? yOf(refLine.value) - 3 : yOf(refLine.value) + 11}
+              textAnchor="end"
+              fontSize="10"
+              fill="rgb(99 102 241)"
+              opacity={0.9}
+            >
+              {refLine.label}
+            </text>
+          </g>
+        )}
         {spikes.map((x, i) => (
           <line
             key={`spike-${i}`}
