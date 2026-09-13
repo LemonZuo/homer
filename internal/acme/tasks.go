@@ -2,7 +2,9 @@ package acme
 
 import (
 	"errors"
+	"time"
 
+	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
 	"gorm.io/gorm"
 )
@@ -32,6 +34,59 @@ func (s *Service) ListTasks(page, pageSize int, status string) ([]model.ACMEIssu
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+func (s *Service) pauseTask(id int64, reason string) {
+	res := s.db.Model(&model.ACMEIssueTask{}).Where("id = ? AND status IN ?", id, []string{"pending", "retrying"}).
+		Updates(map[string]any{"status": "paused", "error_msg": reason, "log_text": gorm.Expr("CONCAT(COALESCE(log_text, ''), ?)", "\n"+reason+"\n"), "finished_at": time.Now(), "next_retry_at": nil})
+	if res.Error != nil {
+		logx.Error("pause acme task failed", "task", id, "err", res.Error)
+	}
+	s.hub.Close(id)
+}
+
+// 进程重启后原 goroutine 不存在，保留任务供手动重试，不把中断任务显示成永久运行中。
+func (s *Service) PauseInterruptedTasks() error {
+	reason := "进程已重启，任务已暂停；请核对实际结果后重新发起操作"
+	return s.db.Model(&model.ACMEIssueTask{}).Where("status IN ?", []string{"pending", "running"}).
+		Updates(map[string]any{"status": "paused", "error_msg": reason, "log_text": gorm.Expr("CONCAT(COALESCE(log_text, ''), ?)", "\n"+reason+"\n"), "finished_at": time.Now(), "next_retry_at": nil}).Error
+}
+
+func (s *Service) RetryTaskNow(id int64) error {
+	ticket, err := s.modules.Ticket("acme")
+	if err != nil {
+		return err
+	}
+	t, err := s.GetTask(id)
+	if err != nil {
+		return err
+	}
+	if t == nil {
+		return errors.New("任务不存在")
+	}
+	if t.ConfigID > 0 {
+		return s.RetryDeployTaskNow(id)
+	}
+	if t.Status != "paused" || (t.Kind != "issue" && t.Kind != "renew") {
+		return errors.New("该任务不支持重试")
+	}
+	var domain model.ACMEDomain
+	if err := s.db.First(&domain, t.DomainID).Error; err != nil {
+		return err
+	}
+	if !bool(domain.Enabled) {
+		return errors.New("域名已停用，请先启用域名")
+	}
+	res := s.db.Model(&model.ACMEIssueTask{}).Where("id = ? AND status = ?", id, "paused").
+		Updates(map[string]any{"status": "pending", "error_msg": "", "finished_at": nil})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return errors.New("任务状态已变化，请刷新")
+	}
+	go s.runIssue(id, domain, ticket)
+	return nil
 }
 
 // GetTask 单条任务详情（用于前端在 SSE 关闭后拉全量日志）。

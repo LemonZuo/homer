@@ -29,6 +29,19 @@ func NewNotifier(out notify.Notifier, store *Store) *Notifier {
 	return &Notifier{out: out, store: store}
 }
 
+// 恢复监控后只报告当前的异常供电，不把停用期间的变化误报为恢复市电。
+func (n *Notifier) ProcessBaseline(curr model.UPSState) {
+	if n == nil || n.out == nil {
+		return
+	}
+	switch curr.LastPowerSource {
+	case model.UPSPowerBattery:
+		n.send("current_battery", curr)
+	case model.UPSPowerLowBattery:
+		n.send("low_battery", curr)
+	}
+}
+
 // Process 处理一个 UPS 的状态变化。prev=nil 表示这是首次看到该 UPS。
 func (n *Notifier) Process(prev *model.UPSState, curr model.UPSState) {
 	if n == nil || n.out == nil {
@@ -101,6 +114,8 @@ func composeMessage(kind string, st model.UPSState) (string, string) {
 		header += ":(" + device + ")"
 	}
 	switch kind {
+	case "current_battery":
+		return "UPS 当前使用电池供电", fmt.Sprintf("%s\n恢复监控时处于电池供电\n剩余电量:%d%%\n预估续航:%s", header, st.LastBatteryPercent, fmtRuntime(st.LastRuntimeMinutes))
 	case "switched_to_battery":
 		return "UPS 切到电池供电",
 			fmt.Sprintf("%s\n剩余电量:%d%%\n预估续航:%s\n原始状态:%s",

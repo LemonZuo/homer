@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LemonZuo/homer/internal/logx"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"github.com/robfig/cron/v3"
 )
 
@@ -62,7 +63,11 @@ type Scheduler struct {
 
 	obs           Observer
 	failThreshold int
+	modules       *modulecontrol.Manager
 }
+
+// SetModules 在 Start 前注入；业务任务的定时与手动触发共用同一个开关。
+func (s *Scheduler) SetModules(m *modulecontrol.Manager) { s.modules = m }
 
 // New 创建调度器；启用秒级精度（cron 表达式 6 段：秒 分 时 日 月 周）。
 func New() *Scheduler {
@@ -131,6 +136,25 @@ func (s *Scheduler) RegisterWithTrigger(name, spec string, fn func(trigger strin
 }
 
 func (s *Scheduler) run(j *job, trigger string) {
+	module := modulecontrol.JobModule(j.name)
+	var ticket modulecontrol.Ticket
+	if module != "" {
+		var err error
+		ticket, err = s.modules.Ticket(module)
+		if err != nil {
+			return
+		}
+	}
+	s.runWithTicket(j, trigger, ticket)
+}
+
+func (s *Scheduler) runWithTicket(j *job, trigger string, ticket modulecontrol.Ticket) {
+	module := modulecontrol.JobModule(j.name)
+	finish, err := ticket.Begin()
+	if err != nil {
+		return
+	} // 暂停不覆盖上次执行结果或失败计数。
+	defer finish()
 	j.mu.Lock()
 	if j.running {
 		j.mu.Unlock()
@@ -153,7 +177,7 @@ func (s *Scheduler) run(j *job, trigger string) {
 		runErr = j.fn(trigger)
 	}()
 
-	skipped := errors.Is(runErr, ErrSkipped)
+	skipped := errors.Is(runErr, ErrSkipped) || errors.Is(runErr, modulecontrol.ErrDisabled)
 	rec := Run{Start: start, End: time.Now(), Trigger: trigger}
 	switch {
 	case skipped:
@@ -199,7 +223,7 @@ func (s *Scheduler) run(j *job, trigger string) {
 	s.mu.RUnlock()
 	if obs != nil {
 		obs.Record(j.name, rec, consec)
-		if !rec.OK && consec >= threshold {
+		if !rec.OK && consec >= threshold && ticket.Valid() && (module == "" || s.modules.Enabled(module)) {
 			obs.Alert(j.name, rec, consec)
 		}
 	}
@@ -207,6 +231,14 @@ func (s *Scheduler) run(j *job, trigger string) {
 
 // Trigger 立即手动执行一次（异步）；任务不存在或正在执行时返回错误。
 func (s *Scheduler) Trigger(name string) error {
+	var ticket modulecontrol.Ticket
+	if module := modulecontrol.JobModule(name); module != "" {
+		var err error
+		ticket, err = s.modules.Ticket(module)
+		if err != nil {
+			return err
+		}
+	}
 	s.mu.RLock()
 	j, ok := s.jobs[name]
 	s.mu.RUnlock()
@@ -219,12 +251,14 @@ func (s *Scheduler) Trigger(name string) error {
 		return errors.New("任务正在执行中")
 	}
 	j.mu.Unlock()
-	go s.run(j, "manual")
+	go s.runWithTicket(j, "manual", ticket)
 	return nil
 }
 
 // JobView 面板用的任务视图，历史按时间倒序（最近在前）。
 type JobView struct {
+	Module      string     `json:"module,omitempty"`
+	Paused      bool       `json:"paused"`
 	Name        string     `json:"name"`
 	Spec        string     `json:"spec"`
 	ManualOnly  bool       `json:"manual_only"`
@@ -250,12 +284,14 @@ func (s *Scheduler) Jobs() []JobView {
 			Last:        j.last,
 			ConsecFails: j.consec,
 		}
+		v.Module = modulecontrol.JobModule(j.name)
+		v.Paused = v.Module != "" && !s.modules.Enabled(v.Module)
 		// 倒序拷贝，避免把内部 slice 暴露出去
 		v.History = make([]Run, 0, len(j.history))
 		for i := len(j.history) - 1; i >= 0; i-- {
 			v.History = append(v.History, j.history[i])
 		}
-		if j.entryID != 0 {
+		if j.entryID != 0 && !v.Paused {
 			if e := s.c.Entry(j.entryID); !e.Next.IsZero() {
 				n := e.Next
 				v.Next = &n

@@ -1,6 +1,7 @@
 import { cn } from '../../lib/utils'
 
 interface Props {
+  ariaLabel?: string
   id?: string
   checked: boolean
   onChange: (v: boolean) => void
@@ -8,7 +9,7 @@ interface Props {
   size?: 'sm' | 'md'
 }
 
-export function Switch({ id, checked, onChange, disabled, size = 'md' }: Props) {
+export function Switch({ id, ariaLabel, checked, onChange, disabled, size = 'md' }: Props) {
   const trackCls =
     size === 'sm' ? 'h-4 w-7' : 'h-5 w-9'
   const thumbCls =
@@ -22,6 +23,7 @@ export function Switch({ id, checked, onChange, disabled, size = 'md' }: Props) 
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={(e) => {
         e.stopPropagation()

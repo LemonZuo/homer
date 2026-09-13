@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"github.com/LemonZuo/homer/internal/notify/email"
 	"github.com/LemonZuo/homer/internal/notify/wework"
 	"gorm.io/gorm"
@@ -49,16 +50,28 @@ var ChannelTypes = []struct {
 }
 
 // Hub 按 DB 里的「通道 + 模块映射」在发送时解析通知，配置改动即时生效（无缓存）。
-type Hub struct{ db *gorm.DB }
+type Hub struct {
+	db      *gorm.DB
+	modules *modulecontrol.Manager
+}
 
-func NewHub(db *gorm.DB) *Hub { return &Hub{db: db} }
+func NewHub(db *gorm.DB, modules ...*modulecontrol.Manager) *Hub {
+	h := &Hub{db: db}
+	if len(modules) > 0 {
+		h.modules = modules[0]
+	}
+	return h
+}
 
 // For 返回某模块的扇出 Notifier；Send 时实时查 DB，运行时改配置立即生效。
-func (h *Hub) For(module string) Notifier { return &hubNotifier{db: h.db, module: module} }
+func (h *Hub) For(module string) Notifier {
+	return &hubNotifier{db: h.db, module: module, modules: h.modules}
+}
 
 type hubNotifier struct {
-	db     *gorm.DB
-	module string
+	db      *gorm.DB
+	module  string
+	modules *modulecontrol.Manager
 }
 
 func (n *hubNotifier) Name() string { return "hub:" + n.module }
@@ -82,6 +95,9 @@ func (n *hubNotifier) resolve() []Notifier {
 }
 
 func (n *hubNotifier) Enabled() bool {
+	if modulecontrol.Known(n.module) && !n.modules.Enabled(n.module) {
+		return false
+	}
 	for _, nf := range n.resolve() {
 		if nf.Enabled() {
 			return true
@@ -91,6 +107,13 @@ func (n *hubNotifier) Enabled() bool {
 }
 
 func (n *hubNotifier) Send(ctx context.Context, m Message) error {
+	if modulecontrol.Known(n.module) {
+		finish, err := n.modules.Begin(n.module)
+		if err != nil {
+			return err
+		}
+		defer finish()
+	}
 	return Multi(n.resolve()...).Send(ctx, m)
 }
 

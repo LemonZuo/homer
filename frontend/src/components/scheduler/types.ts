@@ -8,6 +8,8 @@ export interface Run {
 }
 
 export interface Job {
+  module?: string
+  paused: boolean
   name: string
   spec: string
   manual_only: boolean

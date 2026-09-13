@@ -35,7 +35,7 @@ func Health(db *gorm.DB, sched *scheduler.Scheduler) gin.HandlerFunc {
 			if j.Running {
 				running++
 			}
-			if j.Last != nil && !j.Last.OK {
+			if !j.Paused && j.Last != nil && !j.Last.OK {
 				failing++
 			}
 		}

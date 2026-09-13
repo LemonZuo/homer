@@ -14,7 +14,7 @@ func (h *Handler) listTasks(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 	status := c.Query("status")
 	switch status {
-	case "", "pending", "running", "success", "failed", "retrying":
+	case "", "pending", "running", "success", "failed", "retrying", "paused":
 	default:
 		status = ""
 	}
@@ -52,7 +52,7 @@ func (h *Handler) retryTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.svc.RetryDeployTaskNow(id); err != nil {
+	if err := h.svc.RetryTaskNow(id); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

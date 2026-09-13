@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { navItems, findNavByPath } from '../pages'
+import { navItems as allNavItems, findNavByPath } from '../pages'
+import { useModules } from '../lib/modules'
 import { getColorSet } from '../colors'
 import { Check, Command as CmdIcon, LayoutGrid } from 'lucide-react'
 import { cn } from '../lib/utils'
@@ -36,7 +37,7 @@ function useAppVersion() {
 
 function useCurrentNav() {
   const loc = useLocation()
-  return findNavByPath(loc.pathname) ?? navItems[0]
+  return findNavByPath(loc.pathname) ?? allNavItems.find((item) => item.key === 'modules')!
 }
 
 function useMediaQuery(query: string) {
@@ -56,6 +57,8 @@ function useMediaQuery(query: string) {
 }
 
 export default function Layout() {
+  const { isEnabled } = useModules()
+  const navItems = allNavItems.filter((item) => isEnabled(item.key))
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const widePicker = useMediaQuery('(min-width: 430px)')

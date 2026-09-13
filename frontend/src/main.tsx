@@ -6,13 +6,14 @@ import '@fontsource-variable/geist'
 import '@fontsource-variable/geist-mono'
 import './index.css'
 import App from './App.tsx'
+import { ModulesProvider } from './components/modules/ModulesProvider'
 import { TooltipProvider } from './components/ui/tooltip'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <TooltipProvider delayDuration={200}>
-        <App />
+        <ModulesProvider><App /></ModulesProvider>
       </TooltipProvider>
       <Toaster
         position="top-center"

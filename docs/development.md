@@ -49,7 +49,7 @@ homer/
 │   ├── upsmon/             # UPS 监控：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
 │   ├── esximon/            # ESXi 监控：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler
 │   └── web/                # embedded SPA handler
-├── sql/                    # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 18）
+├── sql/                    # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 19）
 ├── frontend/               # React 19 + Vite + TS + Tailwind v4
 │   ├── dist/               # vite 产物，被 //go:embed all:frontend/dist 引用
 │   └── src/
@@ -218,6 +218,7 @@ Schema 变更采取**双轨并行**：GORM `AutoMigrate` + `sql/` 增量脚本�
 | `16_esxi_state_topology.sql` | `esxi_state.topology_json` 网络拓扑快照 |
 | `17_esxi_alert_state.sql` | ESXi 阈值告警差集状态 |
 | `18_esxi_sample_usage.sql` | `esxi_sample` 历史曲线 3 项指标：`cpu_usage_percent` / `memory_used_bytes` / `disk_usage_json` |
+| `19_module_settings.sql` | `module_setting` 业务模块开关、版本号与更新时间；重复执行保留原开关 |
 
 `0X_*.sql` 全部通过存储过程实现幂等保护，重复执行无副作用。新库按编号依次执行即可（也可仅执行 00，跳过 0X，因 00 已包含最新列）。已有数据的库仅执行 0X 增量脚本。
 

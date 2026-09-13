@@ -6,6 +6,7 @@ Homer 是一个自用的小管家工具集，承担主动型、轻量级的后�
 
 ## 功能列表
 
+- 模块管理：Web 动态启用/禁用 9 个业务模块，菜单和页面入口同步隐藏，接口与后台任务受同一开关控制，数据保留、无需重启。
 - 生日提醒：维护生日名单，自动计算农历生日与生肖，到期通过企业微信推送提醒。
 - 事项提醒：体检、续费、办事截止等一次性日期，提前若干天开始推送，同一天去重。
 - 调度面板：查看各调度任务的执行时间、最近一次执行结果，支持手动触发。
@@ -36,6 +37,7 @@ Homer 是一个自用的小管家工具集，承担主动型、轻量级的后�
 - [docs/deployment.md](docs/deployment.md) — 部署：数据库初始化、Docker compose、Nginx + tinyauth 反代、发布流程、部署注意事项。
 - [docs/development.md](docs/development.md) — 配置与开发：环境要求、`.env` 配置项详表、目录结构、本地开发、常用命令、单二进制构建。
 - [docs/api.md](docs/api.md) — API 与 ACME：HTTP API 概览、ACME 模块使用流程要点。
+- [docs/modules.md](docs/modules.md) — 模块管理：禁用范围、任务收尾、动态生效、配置接口与迁移。
 - [docs/ESXI.md](docs/ESXI.md) — ESXi 数据采集详解：`internal/esximon` 通过 SSH 执行的命令、真实输出样例、解析方式、重试与超时策略。
 - [docs/UT1050EGC.md](docs/UT1050EGC.md) — NUT `upsc` 字段含义对照表（以 CyberPower UT1050EGC 为样本），排查 UPS 状态时备查。
 

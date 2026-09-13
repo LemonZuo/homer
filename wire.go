@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"github.com/LemonZuo/homer/internal/jobmonitor"
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"github.com/LemonZuo/homer/internal/notify"
 	"github.com/LemonZuo/homer/internal/router"
 	"github.com/LemonZuo/homer/internal/scheduler"
@@ -41,6 +43,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 		return nil, nil, fmt.Errorf("connect db: %w", err)
 	}
 	if err := gormDB.AutoMigrate(
+		&model.ModuleSetting{},
 		&model.BirthdayRemind{},
 		&model.EventReminder{},
 		&model.SmsForwarder{},
@@ -67,8 +70,12 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 		return nil, nil, fmt.Errorf("migrate: %w", err)
 	}
 	logx.Info("db automigrate done")
+	modules, err := modulecontrol.New(context.Background(), modulecontrol.NewDBStore(gormDB))
+	if err != nil {
+		return nil, nil, err
+	}
 
-	hub := notify.NewHub(gormDB)
+	hub := notify.NewHub(gormDB, modules)
 	notifyStore := notify.NewStore(gormDB)
 
 	birthdayNotifier := hub.For(notify.ModuleBirthday)
@@ -78,13 +85,19 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	cdnopsSvc := cdnops.NewService(cfg.AliyunCDNAccessKeyID, cfg.AliyunCDNAccessKeySecret)
 	certstoreSvc := certstore.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
 	acmeSvc := buildACMEService(gormDB, cfg)
+	acmeSvc.SetModules(modules)
+	if err := acmeSvc.PauseInterruptedTasks(); err != nil {
+		return nil, nil, err
+	}
 	upsSvc, upsSampler, upsHosts, upsCreds := buildUPSService(gormDB, cfg, hub)
 	esxiSvc, esxiSampler, esxiHosts, esxiCreds := buildEsxiService(gormDB, cfg, hub)
+	upsSvc.SetModules(modules)
+	esxiSvc.SetModules(modules)
 
-	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, upsSvc, esxiSvc, hub)
+	sched := startScheduler(gormDB, cfg, birthdayNotifier, eventNotifier, acmeSvc, upsSvc, esxiSvc, hub, modules)
 
 	cdnopsHandler := handler.NewCDNOpsHandler(cdnopsSvc)
-	certstoreHandler := handler.NewCertStoreHandler(certstoreSvc, cdnopsSvc)
+	certstoreHandler := handler.NewCertStoreHandler(certstoreSvc, cdnopsSvc, modules)
 	acmeHandler := acmehandler.New(acmeSvc)
 	bypassHandler := handler.NewBypassHandler(bypassNotifier)
 	smsHandler := handler.NewSMSHandler(gormDB)
@@ -93,7 +106,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	upsHandler := upsmon.NewHandler(upsSvc, upsSampler, upsHosts, upsCreds)
 	esxiHandler := esximon.NewHandler(esxiSvc, esxiSampler, esxiHosts, esxiCreds)
 
-	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnopsHandler, certstoreHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, upsHandler, esxiHandler, frontend)
+	r := router.Setup(gormDB, birthdayNotifier, eventNotifier, cdnopsHandler, certstoreHandler, acmeHandler, bypassHandler, smsHandler, schedulerHandler, notifyHandler, upsHandler, esxiHandler, frontend, modules)
 	r.GET("/healthz", handler.Health(gormDB, sched))
 
 	return r, sched.Stop, nil
@@ -166,8 +179,9 @@ func buildEsxiService(gormDB *gorm.DB, cfg *config.Config, hub *notify.Hub) (*es
 
 // startScheduler 注册后台任务、挂上 jobmonitor（持久化 + 失败告警）并启动，
 // 返回 Scheduler 供调用方 defer Stop。
-func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, upsSvc *upsmon.Service, esxiSvc *esximon.Service, hub *notify.Hub) *scheduler.Scheduler {
+func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifier, eventNotifier notify.Notifier, acmeSvc *acme.Service, upsSvc *upsmon.Service, esxiSvc *esximon.Service, hub *notify.Hub, modules *modulecontrol.Manager) *scheduler.Scheduler {
 	sched := scheduler.New()
+	sched.SetModules(modules)
 	routerMaintenanceWindow, err := parseDailyMaintenanceWindow(cfg.RouterMaintenanceWindow)
 	if err != nil {
 		logx.Warn("router maintenance window disabled", "value", cfg.RouterMaintenanceWindow, "err", err.Error())

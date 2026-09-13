@@ -1,8 +1,9 @@
 import type { Job } from './types'
 
-export type JobStatus = 'running' | 'ok' | 'fail' | 'skipped' | 'idle'
+export type JobStatus = 'running' | 'ok' | 'fail' | 'skipped' | 'idle' | 'paused'
 
 export function statusOf(job: Job): JobStatus {
+  if (job.paused) return 'paused'
   if (job.running) return 'running'
   if (!job.last) return 'idle'
   if (job.last.skipped) return 'skipped'
@@ -10,6 +11,7 @@ export function statusOf(job: Job): JobStatus {
 }
 
 export const STATUS_STYLE: Record<JobStatus, { dot: string; text: string; label: string; chip: string }> = {
+  paused: { dot: 'bg-muted-foreground/50', text: 'text-muted-foreground', label: '模块已禁用', chip: 'bg-muted text-muted-foreground' },
   running: {
     dot: 'bg-sky-500 animate-pulse',
     text: 'text-sky-600 dark:text-sky-400',

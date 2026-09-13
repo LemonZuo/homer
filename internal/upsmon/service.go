@@ -8,19 +8,23 @@ import (
 
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"github.com/LemonZuo/homer/internal/notify"
 	"gorm.io/gorm"
 )
 
 // Service 串起一轮"扫描 → 采样 → 持久化 → 告警 → SSE 广播"。
 type Service struct {
-	db        *gorm.DB
-	sampler   *Sampler
-	store     *Store
-	notifier  *Notifier
-	sampleOut notify.Notifier // 走 ModuleUPS 通道发"采样整体可达性"状态转换告警
-	sse       *sseHub
-	retention time.Duration
+	modules       *modulecontrol.Manager
+	sampleMu      sync.Mutex
+	sampleVersion uint64
+	db            *gorm.DB
+	sampler       *Sampler
+	store         *Store
+	notifier      *Notifier
+	sampleOut     notify.Notifier // 走 ModuleUPS 通道发"采样整体可达性"状态转换告警
+	sse           *sseHub
+	retention     time.Duration
 
 	// 采样整体可达性状态机:OK ↔ 全部不可达。只在转换的那一轮发一条告警,
 	// 持续不可达不重复打扰(jobmonitor 那条路径已经不走了,不会重复)。
@@ -58,6 +62,8 @@ type Service struct {
 	// GC 卡顿之类的"两台机器同时哑一会"共因,这些通常 90s 内自愈,不该报警。
 	nutOfflineThreshold int
 }
+
+func (s *Service) SetModules(m *modulecontrol.Manager) { s.modules = m }
 
 // upsTrack 通用"计数 + 已告警"状态:用作单个 UPS 的失联去抖,也用作主机级 NUT 不可用去抖。
 // missCount 是连续触发次数,alertedDown 防止跨阈值后每轮都重复发同一条告警。
@@ -101,6 +107,26 @@ func (s *Service) Subscribe() (<-chan []Snapshot, func()) { return s.sse.Subscri
 // (见 handleReachAlert),不再让 jobmonitor 每轮都重复打扰。单机不可达由 notifier
 // 走 UPS 通道发"单机不可达"的状态转换告警。
 func (s *Service) RunSample() error {
+	ticket, err := s.modules.Ticket("ups")
+	if err != nil {
+		return err
+	}
+	s.sampleMu.Lock()
+	defer s.sampleMu.Unlock()
+	finish, err := ticket.Begin()
+	if err != nil {
+		return err
+	}
+	defer finish()
+	rebase := ticket.Version() > 1 && s.sampleVersion != ticket.Version()
+	if rebase {
+		s.reachMu.Lock()
+		s.lastOK = true
+		s.hostReach = map[int64]bool{}
+		s.hostUPSNames = map[int64]map[string]upsTrack{}
+		s.hostNUTState = map[int64]upsTrack{}
+		s.reachMu.Unlock()
+	}
 	hosts, err := s.sampler.Run()
 	if err != nil {
 		return err
@@ -116,6 +142,9 @@ func (s *Service) RunSample() error {
 		return fmt.Errorf("加载 ups_state 失败:%w", err)
 	}
 	prev := indexStates(prevStates)
+	if rebase {
+		prev = map[string]model.UPSState{}
+	}
 
 	now := time.Now()
 	var samples []model.UPSSample
@@ -204,7 +233,14 @@ func (s *Service) RunSample() error {
 	}
 
 	for _, a := range alerts {
-		s.notifier.Process(a.prev, a.curr)
+		if !ticket.Valid() {
+			return nil
+		}
+		if rebase {
+			s.notifier.ProcessBaseline(a.curr)
+		} else {
+			s.notifier.Process(a.prev, a.curr)
+		}
 	}
 
 	// 整体可达性状态机:只在 OK ↔ 全不可达 的转换瞬间各发一条,避免持续打扰。
@@ -221,10 +257,14 @@ func (s *Service) RunSample() error {
 	} else {
 		logx.Info("ups sample done", "hosts", len(hosts), "reachable", reachableHosts, "samples", len(samples))
 	}
+	if !ticket.Valid() {
+		return nil
+	}
 	s.handleHostReachAlerts(hosts)
 	s.handleNUTAlerts(hosts)
 	s.handleUPSAvailabilityAlerts(hosts)
 	s.handleReachAlert(sampleOK, len(hosts), firstErr)
+	s.sampleVersion = ticket.Version()
 
 	// 广播最新快照给所有 SSE 订阅者。BuildSnapshot 失败只记日志,不阻断采样链路。
 	if snap, err := s.BuildSnapshot(); err == nil {

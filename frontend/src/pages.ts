@@ -16,6 +16,7 @@ export const pages: PageDef[] = [
   { key: 'sms', label: '短信转发', color: 'teal' },
   { key: 'scheduler', label: '任务调度', color: 'blue' },
   { key: 'notify', label: '通知渠道', color: 'indigo' },
+  { key: 'modules', label: '模块管理', color: 'blue' },
 ]
 
 export function getPage(key: string | undefined): PageDef | undefined {

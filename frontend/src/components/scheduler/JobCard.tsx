@@ -85,7 +85,7 @@ export function JobCard({ job, accent, onRun }: JobCardProps) {
             size="sm"
             variant="outline"
             onClick={trigger}
-            disabled={running || job.running}
+            disabled={running || job.running || job.paused}
             className="h-8 shrink-0 px-3"
           >
             {running || job.running ? (
@@ -126,7 +126,7 @@ export function JobCard({ job, accent, onRun }: JobCardProps) {
               下次执行
             </span>
             <span className="font-mono text-[12px] text-foreground/85">
-              {job.manual_only ? '—' : fmtTime(job.next)}
+              {job.paused ? '已暂停' : job.manual_only ? '—' : fmtTime(job.next)}
             </span>
           </div>
 
@@ -152,6 +152,7 @@ export function JobCard({ job, accent, onRun }: JobCardProps) {
           </div>
         </div>
 
+        {job.paused && <div className="mt-2.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-[11.5px] text-muted-foreground">所属模块已禁用，自动和手动执行均已暂停。{job.running && '已开始的任务正在收尾。'}</div>}
         {job.last && job.last.skipped && job.last.err && (
           <div className="mt-2.5 break-words rounded-md bg-amber-500/5 px-2.5 py-1.5 font-mono text-[11.5px] text-amber-600 dark:text-amber-400">
             {job.last.err}

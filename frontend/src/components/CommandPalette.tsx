@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 import { Command } from 'cmdk'
 import { Search } from 'lucide-react'
-import { navItems } from '../pages'
+import { navItems as allNavItems } from '../pages'
+import { useModules } from '../lib/modules'
 import { getColorSet } from '../colors'
 import { cn } from '../lib/utils'
 import { Kbd } from './ui/kbd'
@@ -17,6 +18,8 @@ interface Props {
  * Cmd/Ctrl+K 触发的命令面板：cmdk 实现 fuzzy 搜索 + 键盘导航。
  */
 export default function CommandPalette({ open, onClose, onPick, currentTo }: Props) {
+  const { isEnabled } = useModules()
+  const navItems = allNavItems.filter((item) => isEnabled(item.key))
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -43,7 +46,7 @@ export default function CommandPalette({ open, onClose, onPick, currentTo }: Pro
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <Command.Input
               autoFocus
-              placeholder="搜索表名…"
+              placeholder="搜索模块…"
               className="flex-1 bg-transparent py-3 text-[13.5px] outline-none placeholder:text-muted-foreground"
             />
             <Kbd>esc</Kbd>
@@ -53,7 +56,7 @@ export default function CommandPalette({ open, onClose, onPick, currentTo }: Pro
               没有匹配
             </Command.Empty>
             <Command.Group
-              heading="表"
+              heading="模块"
               className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
             >
               {navItems.map((t) => {

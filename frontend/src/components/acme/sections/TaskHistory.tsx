@@ -45,7 +45,7 @@ export function TaskHistory({
             onChange={onStatusChange}
             options={[
               { value: '', label: '全部状态' },
-              ...(['pending', 'running', 'success', 'failed', 'retrying'] as const).map(
+              ...(['pending', 'running', 'success', 'failed', 'retrying', 'paused'] as const).map(
                 (s) => ({ value: s, label: STATUS_LABEL[s] || s }),
               ),
             ]}
@@ -68,6 +68,7 @@ export function TaskHistory({
             className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-[12.5px]"
           >
             <span
+              title={t.error_msg || undefined}
               className={cn(
                 'rounded-md px-1.5 py-0.5 text-[11px] font-medium',
                 STATUS_STYLE[t.status] || 'bg-muted text-muted-foreground',
@@ -95,8 +96,8 @@ export function TaskHistory({
               <ScrollText className="mr-1.5 h-3.5 w-3.5" />
               日志
             </Button>
-            {(t.config_id ?? 0) > 0 &&
-              (t.status === 'failed' || t.status === 'retrying') && (
+            {(((t.config_id ?? 0) > 0 && ['failed', 'retrying', 'paused'].includes(t.status)) ||
+              (t.status === 'paused' && ['issue', 'renew'].includes(t.kind))) && (
                 <Button
                   size="sm"
                   variant="outline"

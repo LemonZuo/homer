@@ -8,18 +8,24 @@ import (
 	"github.com/LemonZuo/homer/internal/cdnops"
 	"github.com/LemonZuo/homer/internal/certstore"
 	"github.com/LemonZuo/homer/internal/logx"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 
 	"github.com/gin-gonic/gin"
 )
 
 // CertStoreHandler 数字证书库存接口；「部署到 CDN」复用 cdnops.Service。
 type CertStoreHandler struct {
-	svc    *certstore.Service
-	cdnops *cdnops.Service
+	svc     *certstore.Service
+	cdnops  *cdnops.Service
+	modules *modulecontrol.Manager
 }
 
-func NewCertStoreHandler(svc *certstore.Service, cdnopsSvc *cdnops.Service) *CertStoreHandler {
-	return &CertStoreHandler{svc: svc, cdnops: cdnopsSvc}
+func NewCertStoreHandler(svc *certstore.Service, cdnopsSvc *cdnops.Service, modules ...*modulecontrol.Manager) *CertStoreHandler {
+	h := &CertStoreHandler{svc: svc, cdnops: cdnopsSvc}
+	if len(modules) > 0 {
+		h.modules = modules[0]
+	}
+	return h
 }
 
 func (h *CertStoreHandler) Register(rg *gin.RouterGroup) {
@@ -69,7 +75,18 @@ func (h *CertStoreHandler) deploy(c *gin.Context) {
 		return
 	}
 	certName := body.CertName
+	ticket, err := h.modules.Ticket("certstore")
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"code": "MODULE_DISABLED", "error": err.Error()})
+		return
+	}
 	go func() {
+		finish, err := ticket.Begin()
+		if err != nil {
+			logx.Info("certstore deploy skipped: module disabled", "cert_name", certName)
+			return
+		}
+		defer finish()
 		logx.Info("certstore deploy to cdn start", "cert_name", certName)
 		msg, err := h.cdnops.DeployCertificate(certName)
 		if err != nil {

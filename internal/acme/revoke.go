@@ -9,10 +9,15 @@ import (
 
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 )
 
 // RevokeAsync 异步吊销当前域名最近一次证书。
 func (s *Service) RevokeAsync(domainID int64) (int64, error) {
+	ticket, err := s.modules.Ticket("acme")
+	if err != nil {
+		return 0, err
+	}
 	var d model.ACMEDomain
 	if err := s.db.First(&d, domainID).Error; err != nil {
 		return 0, err
@@ -39,14 +44,20 @@ func (s *Service) RevokeAsync(domainID int64) (int64, error) {
 	if err := s.db.Create(task).Error; err != nil {
 		return 0, err
 	}
-	go s.runRevoke(task.ID, d, *cert)
+	go s.runRevoke(task.ID, d, *cert, ticket)
 	return task.ID, nil
 }
 
 // runRevoke 在 goroutine 里向 CA 吊销当前证书。
-func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECert) {
+func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECert, ticket modulecontrol.Ticket) {
 	s.issueMu.Lock()
 	defer s.issueMu.Unlock()
+	finishOperation, err := ticket.Begin()
+	if err != nil {
+		s.pauseTask(taskID, "模块已停用，启用后请在域名页面核对证书并重新发起吊销")
+		return
+	}
+	defer finishOperation()
 
 	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).
 		Updates(map[string]any{"status": "running"}).Error
@@ -60,7 +71,7 @@ func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECer
 		logf(logw, "证书序列号：%s", cert.Serial)
 	}
 
-	err := func() error {
+	err = func() error {
 		account, err := s.accountStore.Get(d.AccountID)
 		if err != nil {
 			return err

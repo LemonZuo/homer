@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"github.com/LemonZuo/homer/internal/scheduler"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +30,10 @@ func (h *SchedulerHandler) list(c *gin.Context) {
 
 func (h *SchedulerHandler) run(c *gin.Context) {
 	if err := h.sched.Trigger(c.Param("name")); err != nil {
+		if errors.Is(err, modulecontrol.ErrDisabled) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "MODULE_DISABLED", "error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

@@ -10,10 +10,15 @@ import (
 
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 )
 
 // DeployConfigTaskAsync 异步按保存的部署配置发布当前域名最近一次证书。
 func (s *Service) DeployConfigTaskAsync(configID int64) (int64, error) {
+	ticket, err := s.modules.Ticket("acme")
+	if err != nil {
+		return 0, err
+	}
 	cfg, err := s.deployConfigs.Get(configID)
 	if err != nil {
 		return 0, err
@@ -33,12 +38,16 @@ func (s *Service) DeployConfigTaskAsync(configID int64) (int64, error) {
 	if err := s.db.Create(task).Error; err != nil {
 		return 0, err
 	}
-	go s.runDeploy(task.ID, d, *cert, *target, *cfg)
+	go s.runDeploy(task.ID, d, *cert, *target, *cfg, ticket)
 	return task.ID, nil
 }
 
 // DeployConfigsByDomainAsync 异步按当前域名所有启用的部署配置发布最近一次证书。
 func (s *Service) DeployConfigsByDomainAsync(domainID int64, kind string) ([]int64, error) {
+	ticket, err := s.modules.Ticket("acme")
+	if err != nil {
+		return nil, err
+	}
 	var d model.ACMEDomain
 	if err := s.db.First(&d, domainID).Error; err != nil {
 		return nil, err
@@ -53,6 +62,9 @@ func (s *Service) DeployConfigsByDomainAsync(domainID int64, kind string) ([]int
 	}
 	taskIDs := make([]int64, 0, len(cfgs))
 	for _, cfg := range cfgs {
+		if !ticket.Valid() {
+			break
+		}
 		if !bool(cfg.Enabled) {
 			continue
 		}
@@ -72,7 +84,7 @@ func (s *Service) DeployConfigsByDomainAsync(domainID int64, kind string) ([]int
 			return nil, err
 		}
 		taskIDs = append(taskIDs, task.ID)
-		go s.runDeploy(task.ID, d, *cert, *target, cfg)
+		go s.runDeploy(task.ID, d, *cert, *target, cfg, ticket)
 	}
 	if len(taskIDs) == 0 {
 		return nil, errors.New("没有可部署的启用配置")
@@ -80,7 +92,11 @@ func (s *Service) DeployConfigsByDomainAsync(domainID int64, kind string) ([]int
 	return taskIDs, nil
 }
 
-func (s *Service) submitAutoDeploy(logw *teeWriter, d model.ACMEDomain, cert model.ACMECert) {
+func (s *Service) submitAutoDeploy(logw *teeWriter, d model.ACMEDomain, cert model.ACMECert, ticket modulecontrol.Ticket) {
+	if !ticket.Valid() {
+		logf(logw, "证书已保存；模块已停用，未启动自动部署，请在启用后手动部署")
+		return
+	}
 	cfgs, err := s.deployConfigs.ListAutoByDomain(d.ID, "")
 	if err != nil {
 		logf(logw, "查询自动部署配置失败：%v", err)
@@ -91,6 +107,10 @@ func (s *Service) submitAutoDeploy(logw *teeWriter, d model.ACMEDomain, cert mod
 	}
 	logf(logw, "发现 %d 个自动部署配置", len(cfgs))
 	for _, cfg := range cfgs {
+		if !ticket.Valid() {
+			logf(logw, "模块已停用，剩余自动部署未提交")
+			break
+		}
 		target, err := s.deployTargets.Get(cfg.TargetID)
 		if err != nil {
 			logf(logw, "跳过自动部署配置 %s：%v", deployConfigName(cfg), err)
@@ -113,7 +133,7 @@ func (s *Service) submitAutoDeploy(logw *teeWriter, d model.ACMEDomain, cert mod
 			continue
 		}
 		logf(logw, "已提交自动部署任务：%s -> %s，任务 #%d", deployConfigName(cfg), target.Name, task.ID)
-		go s.runDeploy(task.ID, d, cert, *target, cfg)
+		go s.runDeploy(task.ID, d, cert, *target, cfg, ticket)
 	}
 }
 
@@ -165,12 +185,21 @@ func deployTaskKind(kind string) string {
 	}
 }
 
-func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECert, target model.ACMEDeployTarget, cfg model.ACMEDeployConfig) {
+func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECert, target model.ACMEDeployTarget, cfg model.ACMEDeployConfig, ticket modulecontrol.Ticket) {
 	s.issueMu.Lock()
 	defer s.issueMu.Unlock()
+	finishOperation, err := ticket.Begin()
+	if err != nil {
+		s.pauseTask(taskID, "模块已停用，重新启用后可手动重试")
+		return
+	}
+	defer finishOperation()
 
 	var task model.ACMEIssueTask
 	if err := s.db.First(&task, taskID).Error; err != nil {
+		return
+	}
+	if task.Status != "pending" && task.Status != "retrying" {
 		return
 	}
 	attempt := task.Attempt + 1
@@ -195,7 +224,7 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 	logx.Info("acme deploy start", "task", taskID, "domain", d.MainDomain,
 		"kind", cfg.Kind, "target", target.Name, "attempt", attempt, "max_attempt", maxAttempt)
 
-	err := s.executeDeploy(logw, d, cert, target, cfg)
+	err = s.executeDeploy(logw, d, cert, target, cfg)
 
 	if err == nil {
 		logf(logw, "部署完成")
@@ -209,6 +238,11 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 		return
 	}
 
+	if !ticket.Valid() {
+		logf(logw, "部署失败：%v；模块已停用，暂停后续重试", err)
+		s.finalizeDeployTask(taskID, logBuf, map[string]any{"status": "paused", "error_msg": truncate(err.Error(), 1000), "finished_at": time.Now(), "next_retry_at": nil})
+		return
+	}
 	// 仅持久化配置触发的任务（config_id>0）且仍有剩余次数才安排重试。
 	if task.ConfigID > 0 && attempt < maxAttempt {
 		next := time.Now().Add(s.deployRetryBackoff * time.Duration(attempt))
@@ -275,6 +309,10 @@ func (s *Service) finalizeDeployTask(taskID int64, logBuf *bytes.Buffer, fields 
 // 仅持久化配置触发的任务可重试；耗尽次数的 failed 任务抬高一次上限，
 // 失败后回到 failed，不会无限重试。立即异步执行，不等 cron。
 func (s *Service) RetryDeployTaskNow(taskID int64) error {
+	ticket, err := s.modules.Ticket("acme")
+	if err != nil {
+		return err
+	}
 	var t model.ACMEIssueTask
 	if err := s.db.First(&t, taskID).Error; err != nil {
 		return err
@@ -282,8 +320,8 @@ func (s *Service) RetryDeployTaskNow(taskID int64) error {
 	if t.ConfigID <= 0 {
 		return errors.New("该任务无持久化部署配置，无法重试")
 	}
-	if t.Status != "failed" && t.Status != "retrying" {
-		return errors.New("仅失败或待重试的任务可手动重试")
+	if t.Status != "failed" && t.Status != "retrying" && t.Status != "paused" {
+		return errors.New("仅失败、待重试或暂停的任务可手动重试")
 	}
 	cfg, err := s.deployConfigs.Get(t.ConfigID)
 	if err != nil {
@@ -293,20 +331,27 @@ func (s *Service) RetryDeployTaskNow(taskID int64) error {
 	if err != nil {
 		return err
 	}
+	if !bool(d.Enabled) || !bool(cfg.Enabled) || !bool(target.Enabled) {
+		return errors.New("域名、部署配置或目标已停用")
+	}
 	maxAttempt := t.MaxAttempt
 	if t.Attempt >= maxAttempt {
 		maxAttempt = t.Attempt + 1
 	}
-	if err := s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(map[string]any{
-		"status":        "retrying",
+	res := s.db.Model(&model.ACMEIssueTask{}).Where("id = ? AND status = ?", taskID, t.Status).Updates(map[string]any{
+		"status":        "pending",
 		"max_attempt":   maxAttempt,
 		"next_retry_at": nil,
 		"finished_at":   nil,
-	}).Error; err != nil {
-		return err
+	})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return errors.New("任务状态已变化，请刷新")
 	}
 	logx.Info("acme deploy manual retry", "task", taskID, "config_id", t.ConfigID, "domain", d.MainDomain)
-	go s.runDeploy(taskID, d, *cert, *target, *cfg)
+	go s.runDeploy(taskID, d, *cert, *target, *cfg, ticket)
 	return nil
 }
 
@@ -314,6 +359,10 @@ func (s *Service) RetryDeployTaskNow(taskID int64) error {
 // 只扫 status='retrying' 且 next_retry_at<=now 的行（历史数据无此状态，零影响），
 // 双保险再校验 attempt<max_attempt 且 config_id>0。返回本轮拉起的任务数。
 func (s *Service) RetryDeployTasks() (int, error) {
+	ticket, err := s.modules.Ticket("acme")
+	if err != nil {
+		return 0, err
+	}
 	now := time.Now()
 	var tasks []model.ACMEIssueTask
 	if err := s.db.
@@ -323,6 +372,9 @@ func (s *Service) RetryDeployTasks() (int, error) {
 	}
 	n := 0
 	for _, t := range tasks {
+		if !ticket.Valid() {
+			break
+		}
 		cfg, err := s.deployConfigs.Get(t.ConfigID)
 		if err != nil {
 			finish := time.Now()
@@ -345,7 +397,7 @@ func (s *Service) RetryDeployTasks() (int, error) {
 			}).Error
 			continue
 		}
-		s.runDeploy(t.ID, d, *cert, *target, *cfg)
+		s.runDeploy(t.ID, d, *cert, *target, *cfg, ticket)
 		n++
 	}
 	return n, nil

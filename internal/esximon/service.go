@@ -9,26 +9,32 @@ import (
 
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"github.com/LemonZuo/homer/internal/notify"
 	"gorm.io/gorm"
 )
 
 // Service 串起一轮"扫描 → 采集 → 持久化 → SSE 广播"。
 type Service struct {
-	db        *gorm.DB
-	sampler   *Sampler
-	store     *Store
-	hosts     *HostStore
-	alertOut  notify.Notifier
-	alertCfg  AlertConfig
-	sse       *sseHub
-	retention time.Duration
+	modules       *modulecontrol.Manager
+	sampleMu      sync.Mutex
+	sampleVersion uint64
+	db            *gorm.DB
+	sampler       *Sampler
+	store         *Store
+	hosts         *HostStore
+	alertOut      notify.Notifier
+	alertCfg      AlertConfig
+	sse           *sseHub
+	retention     time.Duration
 
 	// 单机可达性状态机:host_id -> 上次是否可达。首次见到的 host 仅记录,不告警,
 	// 防止刚启动 / 刚加机器时刷一片"已离线/已恢复"。
 	reachMu   sync.Mutex
 	hostReach map[int64]bool
 }
+
+func (s *Service) SetModules(m *modulecontrol.Manager) { s.modules = m }
 
 func NewService(db *gorm.DB, sampler *Sampler, store *Store, hosts *HostStore, alertOut notify.Notifier, alertCfg AlertConfig, retention time.Duration) *Service {
 	if retention <= 0 {
@@ -52,6 +58,23 @@ func (s *Service) Subscribe() (<-chan []Snapshot, func()) { return s.sse.Subscri
 
 // RunSample cron 调用入口。整轮失败返回 error,单机失败封进 esxi_state.LastError。
 func (s *Service) RunSample() error {
+	ticket, err := s.modules.Ticket("esxi")
+	if err != nil {
+		return err
+	}
+	s.sampleMu.Lock()
+	defer s.sampleMu.Unlock()
+	finish, err := ticket.Begin()
+	if err != nil {
+		return err
+	}
+	defer finish()
+	rebase := ticket.Version() > 1 && s.sampleVersion != ticket.Version()
+	if rebase {
+		s.reachMu.Lock()
+		s.hostReach = map[int64]bool{}
+		s.reachMu.Unlock()
+	}
 	results, err := s.sampler.Run()
 	if err != nil {
 		return err
@@ -65,6 +88,9 @@ func (s *Service) RunSample() error {
 	prevStates, _ := s.store.LoadStates()
 	prevByHost := map[string]model.EsxiState{}
 	for _, st := range prevStates {
+		if rebase {
+			st.AlertStateJSON = ""
+		}
 		prevByHost[fmt.Sprintf("%s/%d", st.HostKind, st.HostID)] = st
 	}
 
@@ -107,10 +133,17 @@ func (s *Service) RunSample() error {
 		return fmt.Errorf("更新 esxi_state 失败:%w", err)
 	}
 
+	if !ticket.Valid() {
+		return nil
+	}
 	s.handleHostReachAlerts(results)
 	for _, a := range alerts {
+		if !ticket.Valid() {
+			return nil
+		}
 		s.processThresholdAlerts(a.prev, a.cur)
 	}
+	s.sampleVersion = ticket.Version()
 
 	logx.Info("esxi sample done",
 		"hosts", len(results), "reachable", reachableHosts, "samples", len(samples))

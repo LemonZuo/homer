@@ -1,6 +1,7 @@
 package acme
 
 import (
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"sync"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 // Service ACME 业务编排：域名 CRUD、签发、续期、落盘、部署、SSE 日志。
 type Service struct {
+	modules        *modulecontrol.Manager
 	db             *gorm.DB
 	manager        *Manager
 	credstore      *CredentialStore
@@ -26,6 +28,8 @@ type Service struct {
 
 	issueMu sync.Mutex // 串行化签发（lego logger / env 是全局状态）
 }
+
+func (s *Service) SetModules(m *modulecontrol.Manager) { s.modules = m }
 
 func NewService(db *gorm.DB, mgr *Manager, store *CredentialStore, sshCreds *SSHCredentialStore, accounts *AccountStore, deployTargets *DeployTargetStore, deployConfigs *DeployConfigStore, deployRegistry *DeployRegistry, hub *SSEHub, dataDir string, renewDays int, deployRetry int, deployRetryBackoff time.Duration) *Service {
 	if deployRetry < 1 {

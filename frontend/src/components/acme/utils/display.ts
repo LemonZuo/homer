@@ -10,6 +10,7 @@ import type {
 } from '../types'
 
 export const STATUS_STYLE: Record<string, string> = {
+	paused: 'bg-slate-500/10 text-slate-600 dark:text-slate-400',
   pending: 'bg-muted text-muted-foreground',
   running: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
   success: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
@@ -18,6 +19,7 @@ export const STATUS_STYLE: Record<string, string> = {
 }
 
 export const STATUS_LABEL: Record<string, string> = {
+	paused: '已暂停',
   pending: '待运行',
   running: '运行中',
   success: '成功',

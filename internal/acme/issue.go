@@ -11,6 +11,7 @@ import (
 
 	"github.com/LemonZuo/homer/internal/logx"
 	"github.com/LemonZuo/homer/internal/model"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"gorm.io/gorm"
 )
 
@@ -18,6 +19,17 @@ import (
 // 调用方（HTTP handler）应订阅 hub.Subscribe(taskID) 拿实时日志，
 // 任务结束时 hub 关闭对应 channel，前端再拉 GET /tasks/:id 取全文。
 func (s *Service) IssueAsync(domainID int64, kind string) (int64, error) {
+	ticket, err := s.modules.Ticket("acme")
+	if err != nil {
+		return 0, err
+	}
+	return s.issueAsyncWithTicket(domainID, kind, ticket)
+}
+
+func (s *Service) issueAsyncWithTicket(domainID int64, kind string, ticket modulecontrol.Ticket) (int64, error) {
+	if !ticket.Valid() {
+		return 0, modulecontrol.ErrDisabled
+	}
 	var d model.ACMEDomain
 	if err := s.db.First(&d, domainID).Error; err != nil {
 		return 0, err
@@ -34,14 +46,20 @@ func (s *Service) IssueAsync(domainID int64, kind string) (int64, error) {
 	if err := s.db.Create(task).Error; err != nil {
 		return 0, err
 	}
-	go s.runIssue(task.ID, d)
+	go s.runIssue(task.ID, d, ticket)
 	return task.ID, nil
 }
 
 // runIssue 在 goroutine 里跑实际签发流程。
-func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
+func (s *Service) runIssue(taskID int64, d model.ACMEDomain, ticket modulecontrol.Ticket) {
 	s.issueMu.Lock()
 	defer s.issueMu.Unlock()
+	finishOperation, err := ticket.Begin()
+	if err != nil {
+		s.pauseTask(taskID, "模块已停用，重新启用后可手动重试")
+		return
+	}
+	defer finishOperation()
 
 	// 标记 running
 	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).
@@ -63,7 +81,7 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 		logf(logw, "按域名指定 provider：%s", strings.Join(parts, ", "))
 	}
 
-	err := func() error {
+	err = func() error {
 		account, err := s.accountStore.Get(d.AccountID)
 		if err != nil {
 			return err
@@ -81,7 +99,7 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain) {
 		if err != nil {
 			return err
 		}
-		s.submitAutoDeploy(logw, d, *rec)
+		s.submitAutoDeploy(logw, d, *rec, ticket)
 		return nil
 	}()
 

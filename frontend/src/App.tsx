@@ -2,6 +2,7 @@ import { Suspense, lazy, type ReactElement } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
 import { pages, getPage } from './pages'
+import { CORE_PAGES, useModules } from './lib/modules'
 
 const Birthday = lazy(() => import('./components/Birthday'))
 const Event = lazy(() => import('./components/Event'))
@@ -13,6 +14,7 @@ const Scheduler = lazy(() => import('./components/Scheduler'))
 const Notify = lazy(() => import('./components/Notify'))
 const Ups = lazy(() => import('./components/Ups'))
 const Esxi = lazy(() => import('./components/Esxi'))
+const Modules = lazy(() => import('./components/Modules'))
 
 function Empty() {
   return (
@@ -42,24 +44,31 @@ const PAGE_COMPONENTS: Record<string, () => ReactElement> = {
   notify: () => <Notify />,
   ups: () => <Ups />,
   esxi: () => <Esxi />,
+  modules: () => <Modules />,
 }
 
 function CustomPage() {
   const { pageKey } = useParams()
+  const { snapshot, loading, isEnabled } = useModules()
   const def = getPage(pageKey)
   const render = def ? PAGE_COMPONENTS[def.key] : undefined
   if (!def || !render) return <Empty />
+  if (!CORE_PAGES.includes(def.key)) {
+    if (!snapshot && loading) return <PageFallback />
+    if (!isEnabled(def.key)) return <Navigate to="/p/modules" replace />
+  }
   return <Suspense fallback={<PageFallback />}>{render()}</Suspense>
 }
 
 export default function App() {
-  const first = pages[0]?.key
+  const { snapshot, loading, isEnabled } = useModules()
+  const first = pages.find((page) => !CORE_PAGES.includes(page.key) && isEnabled(page.key))?.key ?? 'modules'
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route
           index
-          element={first ? <Navigate to={`/p/${first}`} replace /> : <Empty />}
+          element={!snapshot && loading ? <PageFallback /> : <Navigate to={`/p/${first}`} replace />}
         />
         <Route path="p/:pageKey" element={<CustomPage />} />
       </Route>

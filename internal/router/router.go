@@ -8,6 +8,7 @@ import (
 	"github.com/LemonZuo/homer/internal/esximon"
 	"github.com/LemonZuo/homer/internal/handler"
 	acmehandler "github.com/LemonZuo/homer/internal/handler/acme"
+	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"github.com/LemonZuo/homer/internal/notify"
 	"github.com/LemonZuo/homer/internal/upsmon"
 
@@ -16,7 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnopsHandler *handler.CDNOpsHandler, certstoreHandler *handler.CertStoreHandler, acmeHandler *acmehandler.Handler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, notifyHandler *handler.NotifyHandler, upsHandler *upsmon.Handler, esxiHandler *esximon.Handler, frontend fs.FS) *gin.Engine {
+func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier, cdnopsHandler *handler.CDNOpsHandler, certstoreHandler *handler.CertStoreHandler, acmeHandler *acmehandler.Handler, bypassHandler *handler.BypassHandler, smsHandler *handler.SMSHandler, schedulerHandler *handler.SchedulerHandler, notifyHandler *handler.NotifyHandler, upsHandler *upsmon.Handler, esxiHandler *esximon.Handler, frontend fs.FS, modules *modulecontrol.Manager) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{"/healthz"}}))
 	r.Use(gin.Recovery())
@@ -27,6 +28,8 @@ func Setup(db *gorm.DB, notifier notify.Notifier, eventNotifier notify.Notifier,
 	}))
 
 	api := r.Group("/api")
+	api.Use(modules.Guard())
+	handler.NewModulesHandler(modules).Register(api)
 
 	api.GET("/version", func(c *gin.Context) {
 		c.JSON(200, gin.H{

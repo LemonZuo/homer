@@ -4,6 +4,8 @@
 
 回到[项目首页](../README.md)。
 
+模块开关与全局配置 SSE 见[模块管理](modules.md)。业务模块禁用时，其接口返回 HTTP 403 和 `code: MODULE_DISABLED`；任务调度和通知管理继续可用。
+
 ## 通用约定
 
 - **前缀**：所有业务接口均挂载于 `/api` 之下。健康检查使用 `/healthz`，不计入 Gin access log。

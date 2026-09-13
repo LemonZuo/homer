@@ -471,3 +471,17 @@ CREATE TABLE `esxi_state` (
   `updated_at`       DATETIME(3)  NOT NULL                COMMENT '更新时刻',
   PRIMARY KEY (`host_kind`, `host_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='ESXi 最新状态';
+
+-- 模块开关；现有业务默认启用，后续由模块管理页面持久化配置。
+DROP TABLE IF EXISTS `module_setting`;
+CREATE TABLE `module_setting` (
+  `module_key` VARCHAR(32) NOT NULL,
+  `enabled` TINYINT(1) NOT NULL DEFAULT 0,
+  `version` BIGINT UNSIGNED NOT NULL DEFAULT 1,
+  `updated_at` DATETIME(3) NULL,
+  PRIMARY KEY (`module_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+INSERT INTO `module_setting` (`module_key`, `enabled`, `version`, `updated_at`) VALUES
+  ('ups', 1, 1, NOW(3)), ('esxi', 1, 1, NOW(3)), ('acme', 1, 1, NOW(3)),
+  ('certstore', 1, 1, NOW(3)), ('cdnops', 1, 1, NOW(3)), ('birthday', 1, 1, NOW(3)),
+  ('event', 1, 1, NOW(3)), ('sms', 1, 1, NOW(3)), ('bypass', 1, 1, NOW(3));
