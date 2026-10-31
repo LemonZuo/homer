@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 // 复制 .env.example 为 .env.local 后改成自己后端地址。
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const apiTarget = env.API_PROXY_TARGET || 'http://localhost:8080'
+  const apiTarget = env.API_PROXY_TARGET || 'http://localhost:8081'
 
   return {
     plugins: [react(), tailwindcss()],

@@ -28,27 +28,26 @@ homer/
 ├── wire.go                 # 依赖组装：DB / notify hub / ACME service / scheduler / handlers
 ├── go.mod / go.sum
 ├── .env / .env.example
-├── docs/                   # 本目录：deployment / development / api 三件套
+├── docs/                   # 本目录：deployment / development / api / modules / ESXI / UT1050EGC
 ├── internal/
 │   ├── acme/               # ACME 签发、续期、SSE；子包 deployer/{ssh,safeline,alicas,fnos}、providers/
 │   ├── aliyun/             # 阿里云 SDK 客户端封装
 │   ├── birthday/、event/    # 生日 / 事项提醒 RunOnce
 │   ├── buildinfo/          # 版本/commit/build_id（ldflags 注入）
 │   ├── certstore/、cdnops/  # 阿里云 CAS 库存查询 / CDN 加速域名查询与 CAS→CDN 部署
-│   ├── chinesedate/        # 农历/生肖
 │   ├── config/、db/         # .env 加载、GORM MySQL 初始化
 │   ├── handler/            # HTTP handler（含 acme/ 子包）
 │   ├── jobmonitor/         # 任务失败计数 + 告警门槛
 │   ├── logx/               # slog 结构化日志
 │   ├── model/              # GORM 模型（按模块拆分文件）
+│   ├── modulecontrol/      # 业务模块开关：持久化 + 执行准入 Ticket + 状态 SSE
 │   ├── notify/             # 通道适配 + Hub + 模块绑定
 │   ├── router/             # API + SPA fallback
 │   ├── scheduler/          # 进程内 cron (robfig/cron v3，6 段秒级)
 │   ├── sms/                # SmsForwarder 适配
 │   ├── sshlike/、sshx/      # 公共 SSH 拨号 / 跳板工具（acme/upsmon/esximon 三方共享）
 │   ├── upsmon/             # UPS 监控：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
-│   ├── esximon/            # ESXi 监控：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler
-│   └── web/                # embedded SPA handler
+│   └── esximon/            # ESXi 监控：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler
 ├── sql/                    # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 19）
 ├── frontend/               # React 19 + Vite + TS + Tailwind v4
 │   ├── dist/               # vite 产物，被 //go:embed all:frontend/dist 引用

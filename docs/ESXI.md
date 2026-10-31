@@ -977,7 +977,7 @@ esxcli network vm port list -w 2270220
 - `IP Address: 0.0.0.0` 视为无 IP,留空(VMware Tools 没汇报 IP)。
 - `TeamUplink` 是当前 active 的 pNIC(标准 vSwitch + 默认 team 策略下稳定)。
 - 结果(fnOS_2):两条 edge → `(VSwitch0, VM Network, vmnic0)` + `(VSwitch1, VM Network1, vmnic1)`。
-- 前端按 `pNIC → vSwitch → Portgroup → VMs` 四列渲染(`@xyflow/react`)。
+- 前端按 `pNIC → vSwitch → Portgroup → VMs` 四列渲染（`components/esxi/topology/` 下的 CSS 布局自绘，未引入图形库）。
 
 ---
 

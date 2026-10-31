@@ -16,7 +16,7 @@
 ## 技术栈
 
 - **后端**: Go 1.25+，Gin + GORM + MySQL 驱动；通过 `.env`（godotenv）加载配置
-- **前端**: React 19 + Vite + TypeScript + Tailwind CSS v4 + react-router-dom + axios + lucide-react + @xyflow/react(ESXi 网络拓扑)
+- **前端**: React 19 + Vite + TypeScript + Tailwind CSS v4 + react-router-dom + axios + lucide-react
 - **风格**: 卡片式现代极简（浅色为主，深色模式自动跟随系统），桌面 + 移动响应式
 - **部署**: 单二进制 —— `//go:embed all:frontend/dist` 把前端产物打入 Go binary
 
@@ -29,35 +29,34 @@ homer/
 ├── go.mod / go.sum
 ├── .env / .env.example
 ├── internal/
-│   ├── acme/        # 签发、续期、SSE；子包 deployer/{ssh,safeline}、providers/
+│   ├── acme/        # 签发、续期、SSE；子包 deployer/{ssh,safeline,alicas,fnos}、providers/
 │   ├── aliyun/      # 阿里云 SDK 客户端封装
 │   ├── birthday/、event/   # 生日 / 事项提醒任务
 │   ├── buildinfo/   # 版本/commit 注入
 │   ├── certstore/、cdnops/  # 阿里云 CAS 证书库存、CDN 加速域名查询与 CAS→CDN 部署
-│   ├── chinesedate/ # 农历/生肖
 │   ├── config/、db/
 │   ├── handler/     # 业务专用 handler 单独文件（含 acme/ 子包；通用 CRUD 已删除）
 │   ├── jobmonitor/  # 任务失败计数 + 告警门槛
 │   ├── logx/        # slog 结构化日志封装
 │   ├── model/       # 业务模型（按模块拆分文件即可）
+│   ├── modulecontrol/  # 业务模块开关：持久化配置 + 执行准入 Ticket + 状态 SSE
 │   ├── notify/、sms/
 │   ├── router/、scheduler/
 │   ├── sshlike/   # 公共 SSH 拨号(acme/upsmon/esximon 共用，原 acme/deployer/sshlike）
 │   ├── sshx/      # SSH 跳板/中转工具（原 acme/deployer/sshx，提升到顶层）
 │   ├── upsmon/    # UPS：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
-│   ├── esximon/   # ESXi：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler；网络拓扑(vSwitch/uplink/portgroup/VM-NIC) 也在 sampler 合并
-│   └── web/
-├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 18）
+│   └── esximon/   # ESXi：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler；网络拓扑(vSwitch/uplink/portgroup/VM-NIC) 也在 sampler 合并
+├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 19）
 └── frontend/
     ├── dist/        # vite 产物，被 go:embed 引用
     └── src/
         ├── main.tsx / App.tsx   # 入口；路由 + 懒加载页面映射
         ├── api.ts / colors.ts
         ├── pages.ts     # 页面/导航登记表（每页自包含，无声明式 CRUD）
-        ├── components/  # 顶层放各页面入口（Esxi.tsx/Ups.tsx 现已瘦身到 ~50 行），按模块拆子目录：
-        │                #   acme/ sms/ ui/ icons/
-        │                #   esxi/{host-cards,history,topology,shared 等}（NetTopologyFlow 用 @xyflow/react）
-        │                #   ups/{history,cards,management 等}
+        ├── components/  # 顶层放各页面入口（Esxi.tsx/Ups.tsx 已瘦身到 ~80 行），按模块拆子目录：
+        │                #   acme/ sms/ ui/ icons/ birthday/ event/ notify/ reminders/ scheduler/
+        │                #   esxi/{host-cards,history,topology}（NetTopologyFlow 用 CSS 自绘机箱式四列布局）
+        │                #   ups/{history}（卡片/管理抽屉等平铺在 ups/ 下）
         ├── lib/、assets/
         └── index.css
 ```
@@ -65,12 +64,12 @@ homer/
 ## 开发
 
 ```sh
-# 后端（端口默认 8080，可在 .env 的 SERVER_PORT 改）
+# 后端（端口默认 8081，可在 .env 的 SERVER_PORT 改）
 export PATH=/opt/module/go/go1.25.0/bin:$PATH
 cp .env.example .env   # 填好 MySQL 连接
 go run .
 
-# 前端（端口默认 :5173；Vite 已把 /api 代理到 :8080）
+# 前端（端口默认 :5173；Vite 已把 /api 代理到 :8081，可在 frontend/.env.local 的 API_PROXY_TARGET 改）
 cd frontend && npm install && npm run dev
 ```
 

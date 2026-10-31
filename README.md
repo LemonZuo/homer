@@ -16,7 +16,7 @@ Homer 是一个自用的小管家工具集，承担主动型、轻量级的后�
 - 短信转发：对接 SmsForwarder Android 端，统一管理配置、发送短信、查阅短信记录。
 - 12306Bypass webhook 中转：接收分流抢票助手 webhook，转发至企业微信与 Resend 邮件。
 - UPS 监控：通过 SSH 拉取 NUT `upsc`，按市电 / 电池 / 低电状态机产生告警，SSE 实时推送，提供历史曲线。
-- ESXi 监控：通过 SSH 执行 esxcli / vsish / vim-cmd，采集平台信息、CPU / 内存使用率、CPU 温度、磁盘 SMART、容量用量、MCE、USB 直通、虚拟机及网络拓扑（vSwitch / uplink / portgroup / VM-NIC，前端使用 React Flow 渲染机箱式拓扑图）；历史曲线覆盖 CPU 各核温度、各盘温度、CPU 使用率、内存已用 GiB、各盘已用 GiB、运行 VM 数、MCE 累计；阈值告警在连续 N 次超阈值后触发，仅对新增超阈项推送，已通知项不重复。
+- ESXi 监控：通过 SSH 执行 esxcli / vsish / vim-cmd，采集平台信息、CPU / 内存使用率、CPU 温度、磁盘 SMART、容量用量、MCE、USB 直通、虚拟机及网络拓扑（vSwitch / uplink / portgroup / VM-NIC，前端用 CSS 自绘机箱式四列拓扑图）；历史曲线覆盖 CPU 各核温度、各盘温度、CPU 使用率、内存已用 GiB、各盘已用 GiB、运行 VM 数、MCE 累计；阈值告警在连续 N 次超阈值后触发，仅对新增超阈项推送，已通知项不重复。
 
 ## 不在范围
 

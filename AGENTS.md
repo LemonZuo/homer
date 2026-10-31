@@ -18,7 +18,7 @@
 ## Tech Stack
 
 - 后端：Go 1.25+，Gin，GORM，MySQL driver，`.env` 通过 godotenv 加载
-- 前端：React 19，Vite，TypeScript，Tailwind CSS v4，react-router-dom，axios，lucide-react，@xyflow/react（ESXi 网络拓扑可视化）
+- 前端：React 19，Vite，TypeScript，Tailwind CSS v4，react-router-dom，axios，lucide-react（ESXi 网络拓扑用 CSS 自绘）
 - UI 风格：卡片式现代极简，浅色为主，深色模式自动跟随系统，桌面和移动端响应式
 - 部署：单二进制，通过 `//go:embed all:frontend/dist` 将前端产物嵌入 Go binary
 
@@ -36,18 +36,17 @@ homer/
 │   ├── birthday/、event/
 │   ├── buildinfo/
 │   ├── certstore/、cdnops/
-│   ├── chinesedate/
 │   ├── config/、db/
 │   ├── handler/
 │   ├── jobmonitor/
 │   ├── logx/
 │   ├── model/
+│   ├── modulecontrol/
 │   ├── notify/、sms/
 │   ├── router/、scheduler/
 │   ├── sshlike/、sshx/
 │   ├── upsmon/
-│   ├── esximon/
-│   └── web/
+│   └── esximon/
 ├── sql/
 └── frontend/
     ├── dist/
@@ -78,7 +77,7 @@ npm install
 npm run dev
 ```
 
-开发态前端使用 Vite dev server，默认端口 `:5173`，并代理 `/api` 到后端 `:8080`。后端 SPA handler 在 `frontend/dist` 为空时只返回占位页，因此调试 UI 时优先使用 Vite dev server。
+开发态前端使用 Vite dev server，默认端口 `:5173`，并代理 `/api` 到后端 `:8081`（默认值在 `frontend/vite.config.ts`，可用 `frontend/.env.local` 的 `API_PROXY_TARGET` 覆盖）。后端 SPA handler 在 `frontend/dist` 为空时只返回占位页，因此调试 UI 时优先使用 Vite dev server。
 
 ## Build
 
@@ -110,7 +109,7 @@ go build -ldflags="-s -w" -o bin/server .
 - 任务失败计数和告警门槛走 `internal/jobmonitor/`
 - 日志统一使用 `internal/logx` 的 slog 结构化日志封装，级别由 `LOG_LEVEL` 控制
 - schema 变更必须同时补：
-  - `sql/0X_*.sql` 增量迁移脚本，使用存储过程保持幂等（当前编号已到 18）
+  - `sql/0X_*.sql` 增量迁移脚本，使用存储过程保持幂等（当前编号已到 19）
   - GORM AutoMigrate 对应模型
 - pre-commit hook 用 `/opt/module/go/go1.25.0` 跑 gofmt + `go vet`；本机若有更高版本 GOROOT 干扰，用 `env -u GOROOT GOTOOLCHAIN=local PATH=/opt/module/go/go1.25.0/bin:/usr/bin:/bin git commit ...` 绕开 toolchain 自动升级
 - Tailwind 使用 v4，通过 `@import "tailwindcss";` 和 CSS 变量配置；不要新增 `tailwind.config.js`，除非确有必要
