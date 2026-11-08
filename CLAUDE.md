@@ -46,7 +46,7 @@ homer/
 │   ├── sshx/      # SSH 跳板/中转工具（原 acme/deployer/sshx，提升到顶层）
 │   ├── upsmon/    # UPS：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
 │   └── esximon/   # ESXi：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler；网络拓扑(vSwitch/uplink/portgroup/VM-NIC) 也在 sampler 合并
-├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 19）
+├── sql/             # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 21）
 └── frontend/
     ├── dist/        # vite 产物，被 go:embed 引用
     └── src/

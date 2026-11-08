@@ -111,7 +111,7 @@ func (s *Service) RetryTaskNow(id int64) error {
 	if res.RowsAffected != 1 {
 		return errors.New("任务状态已变化，请刷新")
 	}
-	go s.runIssue(id, domain, ticket)
+	go s.runIssue(id, t.Kind, domain, ticket)
 	return nil
 }
 

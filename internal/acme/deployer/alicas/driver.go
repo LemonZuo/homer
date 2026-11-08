@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sdk "github.com/alibabacloud-go/cas-20200407/v4/client"
+	"github.com/alibabacloud-go/tea/dara"
 	"github.com/alibabacloud-go/tea/tea"
 
 	"github.com/LemonZuo/homer/internal/acme"
@@ -60,7 +61,7 @@ func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, cfg model.ACMEDeployCo
 	return err
 }
 
-func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) error {
+func (d *Driver) TestTarget(ctx context.Context, target model.ACMEDeployTarget) error {
 	t, err := targetFromDeployTarget(target)
 	if err != nil {
 		return err
@@ -72,15 +73,15 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	if client == nil {
 		return errors.New("AK/SK 不完整")
 	}
-	_, err = client.ListUserCertificateOrder(&sdk.ListUserCertificateOrderRequest{
+	_, err = client.ListUserCertificateOrderWithContext(ctx, &sdk.ListUserCertificateOrderRequest{
 		OrderType:   tea.String("CERT"),
 		CurrentPage: tea.Int64(1),
 		ShowSize:    tea.Int64(1),
-	})
+	}, &dara.RuntimeOptions{})
 	return err
 }
 
-func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
+func (d *Driver) Deploy(ctx context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
 	target, err := targetFromDeployTarget(req.Target)
 	if err != nil {
 		return nil, err
@@ -103,11 +104,12 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 	if req.Logf != nil {
 		req.Logf("准备上传 CAS：name=%s", name)
 	}
-	resp, err := client.UploadUserCertificate(&sdk.UploadUserCertificateRequest{
+	// 透传 ctx：runDeploy 的总时限到了要能真正打断请求（runtime 不能传 nil，SDK 会解引用）。
+	resp, err := client.UploadUserCertificateWithContext(ctx, &sdk.UploadUserCertificateRequest{
 		Name: tea.String(name),
 		Cert: tea.String(req.Cert.FullchainPEM),
 		Key:  tea.String(req.Cert.KeyPEM),
-	})
+	}, &dara.RuntimeOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("上传 CAS 失败：%w", err)
 	}

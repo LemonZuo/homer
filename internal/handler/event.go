@@ -29,6 +29,7 @@ func (h *EventHandler) Register(api *gin.RouterGroup) {
 	g.GET("", h.list)
 	g.POST("", h.create)
 	g.PUT("/:id", h.update)
+	g.PUT("/:id/enabled", h.setEnabled)
 	g.DELETE("/:id", h.delete)
 	g.POST("/:id/notify", h.notify)
 }
@@ -49,7 +50,11 @@ func (h *EventHandler) create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.db.Create(&item).Error; err != nil {
+	if item.LeadDays < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "提前天数不能为负数"})
+		return
+	}
+	if err := model.CreateKeepZero(h.db, &item); err != nil {
 		logx.Error("event create failed", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -68,16 +73,27 @@ func (h *EventHandler) update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if item.LeadDays < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "提前天数不能为负数"})
+		return
+	}
 	if err := h.db.Model(&model.EventReminder{}).
 		Where("id = ?", id).
 		Select("*").
-		Omit("id", "created_at"). // payload 不带 created_at，Select("*") 会把它写成零值
+		// payload 不带 created_at / last_notified_at，Select("*") 会把它们写成零值 / NULL
+		// （last_notified_at 被清空 → 当天去重失效，手动重跑重复推送）。
+		Omit("id", "created_at", "last_notified_at").
 		Updates(item).Error; err != nil {
 		logx.Error("event update failed", "id", id, "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": item})
+}
+
+// setEnabled 卡片上的启用开关：只改 enabled，不回写整条（列表里的记录可能已过期）。
+func (h *EventHandler) setEnabled(c *gin.Context) {
+	setEnabledByID(c, h.db, &model.EventReminder{})
 }
 
 func (h *EventHandler) delete(c *gin.Context) {

@@ -90,7 +90,7 @@
 | `email` | Resend 邮件 | `api_key`, `from`, `to` |
 | `webhook` | Webhook | `url`（POST `application/json`，body `{title, text}`，10s 超时） |
 
-> 所有通道出站均包裹「重试 3 次，2s/4s 退避」逻辑；多通道并存时单路失败不影响其余通道，全部失败时合并为 `errors.Join`。
+> 所有通道出站均包裹「重试 3 次，2s/4s 退避」逻辑；多通道并行发送，**有任一路成功即视为已送达**（失败路只记日志），全部失败时合并为 `errors.Join` 交给调用方重试。
 
 ### 可绑定模块
 
@@ -102,6 +102,7 @@
 | `scheduler_alert` | 调度任务失败告警（阈值 `SCHEDULER_ALERT_FAIL_THRESHOLD`） |
 | `ups` | UPS 状态告警（离线/电池/低电状态机） |
 | `esxi` | ESXi 阈值告警（CPU 温度 / CPU 使用率 / 内存使用率 / 磁盘温度 / datastore 使用率；差集语义） |
+| `acme` | 证书签发 / 续期失败、部署终态失败（重试用尽）、签发后自动部署未能提交 |
 
 ## CDN 加速域名 (`/api/cdnops`)
 

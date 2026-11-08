@@ -74,7 +74,7 @@ func (s *DeployConfigStore) Upsert(domainID int64, c *model.ACMEDeployConfig) (*
 		return nil, err
 	}
 	if c.ID == 0 {
-		if err := s.db.Create(c).Error; err != nil {
+		if err := model.CreateKeepZero(s.db, c); err != nil {
 			return nil, err
 		}
 		return c, nil

@@ -51,7 +51,7 @@ export function useBirthdayRecords() {
   const toggle = useCallback(async (record: Birthday, value: boolean) => {
     setRecords((prev) => prev.map((x) => (x.id === record.id ? { ...x, enabled: value } : x)))
     try {
-      await api.put(`/birthday/${record.id}`, { ...record, enabled: value })
+      await api.put(`/birthday/${record.id}/enabled`, { enabled: value })
     } catch {
       setRecords((prev) => prev.map((x) => (x.id === record.id ? record : x)))
     }

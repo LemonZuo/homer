@@ -78,6 +78,12 @@ func TestParseLunarMonthDay(t *testing.T) {
 		{"正月初一", 1, 1, true},
 		{"冬月十五", 11, 15, true},
 		{"腊月三十", 12, 30, true},
+		// 老 Java hutool 写法
+		{"一月初八", 1, 8, true},
+		{"十一月廿三", 11, 23, true},
+		{"十二月三十", 12, 30, true},
+		{"闰十一月初二", 11, 2, true},
+		{"十月十五", 10, 15, true},
 		{"", 0, 0, false},
 		{"十三月初一", 0, 0, false},
 		{"正月三十一", 0, 0, false},
@@ -87,5 +93,16 @@ func TestParseLunarMonthDay(t *testing.T) {
 		if ok != c.ok || m != c.month || d != c.day {
 			t.Errorf("parseLunarMonthDay(%q) = %d,%d,%v", c.in, m, d, ok)
 		}
+	}
+}
+
+func TestLunarBirthdayOnHutoolFormat(t *testing.T) {
+	// 2026-02-16 是农历乙巳年腊月廿九（腊月小月），hutool 写法「十二月三十」同样落到月末。
+	if !lunarBirthdayOn("十二月三十", day("2026-02-16")) {
+		t.Fatal("hutool 十二月三十 should match 2026-02-16")
+	}
+	// 2026-02-17 是丙午年正月初一。
+	if !lunarBirthdayOn("一月初一", day("2026-02-17")) {
+		t.Fatal("hutool 一月初一 should match 2026-02-17")
 	}
 }

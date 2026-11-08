@@ -61,7 +61,7 @@ func (s *DeployTargetStore) Upsert(t *model.ACMEDeployTarget) (*model.ACMEDeploy
 		return nil, err
 	}
 	if t.ID == 0 {
-		if err := s.db.Create(t).Error; err != nil {
+		if err := model.CreateKeepZero(s.db, t); err != nil {
 			return nil, err
 		}
 		return t, nil

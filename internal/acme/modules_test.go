@@ -77,7 +77,7 @@ func TestQueuedIssueAndDeployPauseAcrossDisableEnable(t *testing.T) {
 		}
 		t.Cleanup(func() { s.db.Delete(&model.ACMEIssueTask{}, task.ID) })
 		if kind == "issue" {
-			s.runIssue(task.ID, model.ACMEDomain{}, ticket)
+			s.runIssue(task.ID, kind, model.ACMEDomain{}, ticket)
 		} else if kind == "revoke" {
 			s.runRevoke(task.ID, model.ACMEDomain{}, model.ACMECert{}, ticket)
 		} else {
@@ -122,6 +122,56 @@ func TestNewIssueSupersedesOldPausedRenewal(t *testing.T) {
 	}
 	if blocked, err := s.hasOutstandingIssue(domainID); err != nil || !blocked {
 		t.Fatalf("pending issue should block: %v %v", blocked, err)
+	}
+}
+
+// paused 多半是重启 / 停用打断的：宽限期内阻止自动续期，过期后放行，避免永久跳过续期。
+func TestStalePausedRenewalStopsBlocking(t *testing.T) {
+	s, _ := moduleTestService(t)
+	domainID := time.Now().UnixNano()
+	t.Cleanup(func() { s.db.Where("domain_id = ?", domainID).Delete(&model.ACMEIssueTask{}) })
+	recent := time.Now().Add(-time.Hour)
+	paused := model.ACMEIssueTask{DomainID: domainID, Kind: "renew", Status: "paused", FinishedAt: &recent}
+	if err := s.db.Create(&paused).Error; err != nil {
+		t.Fatal(err)
+	}
+	if blocked, err := s.hasOutstandingIssue(domainID); err != nil || !blocked {
+		t.Fatalf("recent pause should block: %v %v", blocked, err)
+	}
+	stale := time.Now().Add(-pausedRenewGrace - time.Hour)
+	if err := s.db.Model(&paused).Update("finished_at", &stale).Error; err != nil {
+		t.Fatal(err)
+	}
+	if blocked, err := s.hasOutstandingIssue(domainID); err != nil || blocked {
+		t.Fatalf("stale pause must not block renewal: %v %v", blocked, err)
+	}
+}
+
+// 部署重试用尽进入终态失败时要告警；状态落库不受影响。
+func TestFinalDeployFailureAlerts(t *testing.T) {
+	s, m := moduleTestService(t)
+	out := newFakeAlertOut(true)
+	s.notifier = out
+	driver := &blockingDriver{started: make(chan struct{}), release: make(chan struct{}), fail: true}
+	close(driver.release)
+	s.deployRegistry = NewDeployRegistry(driver)
+	task := model.ACMEIssueTask{MainDomain: "alert.invalid", Kind: "deploy_test", Status: "pending", ConfigID: 1, Attempt: 2, MaxAttempt: 3}
+	if err := s.db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.db.Delete(&model.ACMEIssueTask{}, task.ID) })
+	ticket, _ := m.Ticket("acme")
+	s.runDeploy(task.ID, model.ACMEDomain{MainDomain: "alert.invalid"}, model.ACMECert{},
+		model.ACMEDeployTarget{Name: "nas"}, model.ACMEDeployConfig{ID: 1, Kind: "test", Name: "cfg"}, ticket)
+	if err := s.db.First(&task, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != "failed" || task.Attempt != 3 {
+		t.Fatalf("unexpected final state: %+v", task)
+	}
+	msg := out.wait(t)
+	if msg.Title != "证书部署失败" || !strings.Contains(msg.Text, "已尝试 3/3 次") || !strings.Contains(msg.Text, "simulated deployment failure") {
+		t.Fatalf("unexpected alert: %+v", msg)
 	}
 }
 

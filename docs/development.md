@@ -48,7 +48,7 @@ homer/
 │   ├── sshlike/、sshx/      # 公共 SSH 拨号 / 跳板工具（acme/upsmon/esximon 三方共享）
 │   ├── upsmon/             # UPS 监控：sampler(SSH+upsc) + hoststore/credstore（独立表）+ service(状态机/SSE) + handler
 │   └── esximon/            # ESXi 监控：client(esxcli/vsish/vim-cmd 重试+合并) + sampler + alert(阈值差集) + service(SSE) + hoststore/credstore + handler
-├── sql/                    # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 19）
+├── sql/                    # 00 全量建表 + 0X_* 增量迁移（幂等存储过程，当前到 21）
 ├── frontend/               # React 19 + Vite + TS + Tailwind v4
 │   ├── dist/               # vite 产物，被 //go:embed all:frontend/dist 引用
 │   └── src/
@@ -166,7 +166,7 @@ cp .env.example .env
 
 ### 通知通道（DB 维护，不在 env）
 
-企业微信 / Resend 邮件 / Webhook 三种通道、4 个模块（`birthday` / `event` / `bypass` / `scheduler_alert`）的配置与绑定全部走 `/api/notify/*` 或 UI 操作，运行时实时查 DB，**改动即时生效**。字段清单见 [api.md#支持的-channel-type](api.md#支持的-channel-type)。
+通道（企业微信 / Resend 邮件 / Webhook / Bark / ntfy）与模块绑定全部走 `/api/notify/*` 或 UI 操作，运行时实时查 DB，**改动即时生效**。通道字段与可绑定模块清单见 [api.md#支持的-channel-type](api.md#支持的-channel-type)。
 
 ## 启动顺序
 
@@ -218,8 +218,10 @@ Schema 变更采取**双轨并行**：GORM `AutoMigrate` + `sql/` 增量脚本�
 | `17_esxi_alert_state.sql` | ESXi 阈值告警差集状态 |
 | `18_esxi_sample_usage.sql` | `esxi_sample` 历史曲线 3 项指标：`cpu_usage_percent` / `memory_used_bytes` / `disk_usage_json` |
 | `19_module_settings.sql` | `module_setting` 业务模块开关、版本号与更新时间；重复执行保留原开关 |
+| `20_birthday_lunar_normalize.sql` | 农历生日老 hutool 写法「一月 / 十一月 / 十二月」规范为「正月 / 冬月 / 腊月」（纯数据 UPDATE） |
+| `21_acme_domain_created_at_backfill.sql` | 回填被编辑清零的 `acme_domain.created_at`（取最早任务 / 证书 / 更新时间近似；纯数据 UPDATE） |
 
-`0X_*.sql` 全部通过存储过程实现幂等保护，重复执行无副作用。新库按编号依次执行即可（也可仅执行 00，跳过 0X，因 00 已包含最新列）。已有数据的库仅执行 0X 增量脚本。
+`0X_*.sql` 的 DDL 全部通过存储过程实现幂等保护（纯数据脚本靠 WHERE 条件幂等），重复执行无副作用。新库按编号依次执行即可（也可仅执行 00，跳过 0X，因 00 已包含最新列）。已有数据的库仅执行 0X 增量脚本。
 
 启动时 AutoMigrate 只会按 GORM tag 进行加列/加索引等**追加式**变更，不会 drop。因此 `sql/00_schema.sql` 不应放入启动流程，需手动执行。
 

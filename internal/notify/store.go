@@ -66,7 +66,7 @@ func (s *Store) UpsertChannel(c *model.NotifyChannel) (*model.NotifyChannel, err
 		return nil, fmt.Errorf("config_json 必须是 {\"KEY\":\"VALUE\"} 形式：%w", err)
 	}
 	if c.ID == 0 {
-		if err := s.db.Create(c).Error; err != nil {
+		if err := model.CreateKeepZero(s.db, c); err != nil {
 			return nil, err
 		}
 		return c, nil

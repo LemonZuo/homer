@@ -28,6 +28,7 @@ func (h *BirthdayHandler) Register(api *gin.RouterGroup) {
 	g.GET("", h.list)
 	g.POST("", h.create)
 	g.PUT("/:id", h.update)
+	g.PUT("/:id/enabled", h.setEnabled)
 	g.DELETE("/:id", h.delete)
 	g.POST("/:id/notify", h.notify)
 }
@@ -52,7 +53,7 @@ func (h *BirthdayHandler) create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.db.Create(&item).Error; err != nil {
+	if err := model.CreateKeepZero(h.db, &item); err != nil {
 		logx.Error("birthday create failed", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -86,6 +87,11 @@ func (h *BirthdayHandler) update(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": item})
+}
+
+// setEnabled 卡片上的启用开关：只改 enabled，不回写整条（列表里的记录可能已过期）。
+func (h *BirthdayHandler) setEnabled(c *gin.Context) {
+	setEnabledByID(c, h.db, &model.BirthdayRemind{})
 }
 
 func (h *BirthdayHandler) delete(c *gin.Context) {

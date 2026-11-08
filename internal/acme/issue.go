@@ -46,12 +46,12 @@ func (s *Service) issueAsyncWithTicket(domainID int64, kind string, ticket modul
 	if err := s.db.Create(task).Error; err != nil {
 		return 0, err
 	}
-	go s.runIssue(task.ID, d, ticket)
+	go s.runIssue(task.ID, kind, d, ticket)
 	return task.ID, nil
 }
 
-// runIssue 在 goroutine 里跑实际签发流程。
-func (s *Service) runIssue(taskID int64, d model.ACMEDomain, ticket modulecontrol.Ticket) {
+// runIssue 在 goroutine 里跑实际签发流程；kind 为 issue / renew，只用于失败告警文案。
+func (s *Service) runIssue(taskID int64, kind string, d model.ACMEDomain, ticket modulecontrol.Ticket) {
 	s.issueMu.Lock()
 	defer s.issueMu.Unlock()
 	finishOperation, err := ticket.Begin()
@@ -115,6 +115,7 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain, ticket modulecontro
 		upd["error_msg"] = truncate(err.Error(), 1000)
 		// 重新写一次 log_text 以包含错误
 		upd["log_text"] = logBuf.String()
+		s.alertIssueFailed(taskID, kind, d, err)
 	} else {
 		logf(logw, "签发完成")
 		logx.Info("acme issue done", "task", taskID, "domain", d.MainDomain)

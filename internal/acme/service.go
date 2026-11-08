@@ -1,10 +1,11 @@
 package acme
 
 import (
-	"github.com/LemonZuo/homer/internal/modulecontrol"
 	"sync"
 	"time"
 
+	"github.com/LemonZuo/homer/internal/modulecontrol"
+	"github.com/LemonZuo/homer/internal/notify"
 	"gorm.io/gorm"
 )
 
@@ -20,6 +21,7 @@ type Service struct {
 	deployConfigs  *DeployConfigStore
 	deployRegistry *DeployRegistry
 	hub            *SSEHub
+	notifier       notify.Notifier // 签发/部署终态失败告警；nil 不告警
 	dataDir        string
 	renewDays      int
 

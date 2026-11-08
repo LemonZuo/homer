@@ -26,10 +26,12 @@ export function useEventRecords() {
 
   const save = useCallback(
     async (target: EventItem | null, form: EventForm) => {
+      // 提前天数清空 = 用默认 5 天（与输入框 placeholder 一致），不能当 0 发出去。
+      const payload = { ...form, lead_days: form.lead_days ?? 5 }
       if (target) {
-        await api.put(`/event/${target.id}`, form)
+        await api.put(`/event/${target.id}`, payload)
       } else {
-        await api.post('/event', form)
+        await api.post('/event', payload)
       }
       await load()
     },
@@ -51,7 +53,7 @@ export function useEventRecords() {
   const toggle = useCallback(async (record: EventItem, value: boolean) => {
     setRecords((prev) => prev.map((x) => (x.id === record.id ? { ...x, enabled: value } : x)))
     try {
-      await api.put(`/event/${record.id}`, { ...record, enabled: value })
+      await api.put(`/event/${record.id}/enabled`, { enabled: value })
     } catch {
       setRecords((prev) => prev.map((x) => (x.id === record.id ? record : x)))
     }

@@ -119,7 +119,7 @@ func (s *HostStore) Upsert(in HostInput) (*model.UPSHost, error) {
 			ConfigJSON: cfgJSON,
 			Enabled:    boolFlagFromPtr(in.Enabled, true),
 		}
-		if err := s.db.Create(&row).Error; err != nil {
+		if err := model.CreateKeepZero(s.db, &row); err != nil {
 			return nil, err
 		}
 		return &row, nil

@@ -1,6 +1,9 @@
 package email
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestResendEnabled(t *testing.T) {
 	var nilClient *ResendClient
@@ -19,7 +22,7 @@ func TestResendEnabled(t *testing.T) {
 }
 
 func TestSendTextNotConfigured(t *testing.T) {
-	if err := NewResend("", "").SendText("to@x.com", "s", "t"); err == nil {
+	if err := NewResend("", "").SendText(context.Background(), "to@x.com", "s", "t"); err == nil {
 		t.Fatal("unconfigured SendText must error without HTTP call")
 	}
 }

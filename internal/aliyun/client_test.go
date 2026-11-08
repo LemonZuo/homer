@@ -25,3 +25,11 @@ func TestNewClientsConfigured(t *testing.T) {
 		t.Fatalf("CDN = %v, %v", got, err)
 	}
 }
+
+// SDK 默认超时为 0（永不超时），必须显式设置。
+func TestNewConfigTimeouts(t *testing.T) {
+	cfg := newConfig("ak", "sk", "cas.aliyuncs.com")
+	if cfg.ConnectTimeout == nil || *cfg.ConnectTimeout <= 0 || cfg.ReadTimeout == nil || *cfg.ReadTimeout <= 0 {
+		t.Fatalf("timeouts not set: connect=%v read=%v", cfg.ConnectTimeout, cfg.ReadTimeout)
+	}
+}

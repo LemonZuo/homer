@@ -42,13 +42,21 @@ func lunarDayOf(t time.Time) lunarDay {
 	return ld
 }
 
-// parseLunarMonthDay 把「腊月三十」解析成 (12, 30)；「闰」字忽略。
+// hutoolMonthAlias 老 Java（hutool ChineseDate.getChineseMonth）写入的月份别名：
+// 它把 1/11/12 月写成「一月 / 十一月 / 十二月」，lunar-go 是「正月 / 冬月 / 腊月」，其余月份两边一致。
+// 迁移来的老数据仍是 hutool 写法，解析时兼容；日的写法两边相同（初一…廿九、三十）。
+var hutoolMonthAlias = map[string]int{"一": 1, "十一": 11, "十二": 12}
+
+// parseLunarMonthDay 把「腊月三十」解析成 (12, 30)；「闰」字忽略；兼容 hutool 的「十二月三十」写法。
 func parseLunarMonthDay(s string) (month, day int, ok bool) {
 	mText, dText, found := strings.Cut(strings.ReplaceAll(strings.TrimSpace(s), "闰", ""), "月")
 	if !found {
 		return 0, 0, false
 	}
 	month = slices.Index(LunarUtil.MONTH, mText)
+	if alias, ok := hutoolMonthAlias[mText]; ok {
+		month = alias
+	}
 	day = slices.Index(LunarUtil.DAY, dText)
 	if month < 1 || day < 1 {
 		return 0, 0, false

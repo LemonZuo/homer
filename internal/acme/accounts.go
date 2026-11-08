@@ -83,7 +83,7 @@ func (s *AccountStore) Upsert(a *model.ACMEAccount) (*model.ACMEAccount, error) 
 		return nil, err
 	}
 	if a.ID == 0 {
-		if err := s.db.Create(a).Error; err != nil {
+		if err := model.CreateKeepZero(s.db, a); err != nil {
 			return nil, err
 		}
 		return a, nil

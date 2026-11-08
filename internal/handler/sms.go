@@ -52,7 +52,7 @@ func (h *SMSHandler) forwarderCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.DB.Create(&item).Error; err != nil {
+	if err := model.CreateKeepZero(h.DB, &item); err != nil {
 		logx.Error("sms forwarder create failed", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

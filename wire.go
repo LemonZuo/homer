@@ -86,6 +86,7 @@ func buildServer(cfg *config.Config, frontend fs.FS) (*gin.Engine, func(), error
 	certstoreSvc := certstore.NewService(cfg.AliyunCASAccessKeyID, cfg.AliyunCASAccessKeySecret)
 	acmeSvc := buildACMEService(gormDB, cfg)
 	acmeSvc.SetModules(modules)
+	acmeSvc.SetNotifier(hub.For(notify.ModuleACME))
 	if err := acmeSvc.PauseInterruptedTasks(); err != nil {
 		return nil, nil, err
 	}

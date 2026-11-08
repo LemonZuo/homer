@@ -103,12 +103,16 @@ func (s *Service) submitAutoDeploy(logw *teeWriter, d model.ACMEDomain, cert mod
 	cfgs, err := s.deployConfigs.ListAutoByDomain(d.ID, "")
 	if err != nil {
 		logf(logw, "查询自动部署配置失败：%v", err)
+		s.alertAutoDeploySkipped(d, []string{fmt.Sprintf("查询自动部署配置失败：%v", err)})
 		return
 	}
 	if len(cfgs) == 0 {
 		return
 	}
 	logf(logw, "发现 %d 个自动部署配置", len(cfgs))
+	// 证书已更新但没部署出去，服务器上的旧证书照样会过期：未提交的配置要告警。
+	var skipped []string
+	defer func() { s.alertAutoDeploySkipped(d, skipped) }()
 	for _, cfg := range cfgs {
 		if !ticket.Valid() {
 			logf(logw, "模块已停用，剩余自动部署未提交")
@@ -117,10 +121,12 @@ func (s *Service) submitAutoDeploy(logw *teeWriter, d model.ACMEDomain, cert mod
 		target, err := s.deployTargets.Get(cfg.TargetID)
 		if err != nil {
 			logf(logw, "跳过自动部署配置 %s：%v", deployConfigName(cfg), err)
+			skipped = append(skipped, fmt.Sprintf("%s：%v", deployConfigName(cfg), err))
 			continue
 		}
 		if target.Kind != cfg.Kind {
 			logf(logw, "跳过自动部署配置 %s：目标类型不匹配", deployConfigName(cfg))
+			skipped = append(skipped, deployConfigName(cfg)+"：目标类型不匹配")
 			continue
 		}
 		task := &model.ACMEIssueTask{
@@ -133,6 +139,7 @@ func (s *Service) submitAutoDeploy(logw *teeWriter, d model.ACMEDomain, cert mod
 		}
 		if err := s.db.Create(task).Error; err != nil {
 			logf(logw, "创建自动部署任务失败（%s）：%v", deployConfigName(cfg), err)
+			skipped = append(skipped, fmt.Sprintf("%s：创建任务失败：%v", deployConfigName(cfg), err))
 			continue
 		}
 		logf(logw, "已提交自动部署任务：%s -> %s，任务 #%d", deployConfigName(cfg), target.Name, task.ID)
@@ -271,6 +278,11 @@ func (s *Service) runDeploy(taskID int64, d model.ACMEDomain, cert model.ACMECer
 		"finished_at":   &finish,
 		"next_retry_at": nil,
 	})
+	attemptInfo := ""
+	if task.ConfigID > 0 && maxAttempt > 1 {
+		attemptInfo = fmt.Sprintf("已尝试 %d/%d 次，重试用尽", attempt, maxAttempt)
+	}
+	s.alertDeployFailed(taskID, d.MainDomain, target.Name, deployConfigName(cfg), attemptInfo, err)
 }
 
 // executeDeploy 查 driver 并执行 Deploy，成功后落盘 state_json，返回单一 err。
@@ -386,28 +398,29 @@ func (s *Service) RetryDeployTasks() (int, error) {
 		}
 		cfg, err := s.deployConfigs.Get(t.ConfigID)
 		if err != nil {
-			finish := time.Now()
-			s.writeTaskFinal(t.ID, map[string]any{
-				"status":        "failed",
-				"error_msg":     truncate(fmt.Sprintf("重试时部署配置已不可用：%v", err), 1000),
-				"finished_at":   &finish,
-				"next_retry_at": nil,
-			})
+			s.failDeployRetry(t, fmt.Sprintf("#%d", t.ConfigID), fmt.Errorf("重试时部署配置已不可用：%w", err))
 			continue
 		}
 		d, cert, target, err := s.prepareDeploy(*cfg)
 		if err != nil {
-			finish := time.Now()
-			s.writeTaskFinal(t.ID, map[string]any{
-				"status":        "failed",
-				"error_msg":     truncate(fmt.Sprintf("重试时准备部署失败：%v", err), 1000),
-				"finished_at":   &finish,
-				"next_retry_at": nil,
-			})
+			s.failDeployRetry(t, deployConfigName(*cfg), fmt.Errorf("重试时准备部署失败：%w", err))
 			continue
 		}
 		s.runDeploy(t.ID, d, *cert, *target, *cfg, ticket)
 		n++
 	}
 	return n, nil
+}
+
+// failDeployRetry 重试拉起前准备失败：任务直接终态失败并告警（不会再有下一次重试）。
+func (s *Service) failDeployRetry(t model.ACMEIssueTask, configName string, err error) {
+	logx.Error("acme deploy retry prepare failed", "task", t.ID, "domain", t.MainDomain, "config_id", t.ConfigID, "err", err)
+	finish := time.Now()
+	s.writeTaskFinal(t.ID, map[string]any{
+		"status":        "failed",
+		"error_msg":     truncate(err.Error(), 1000),
+		"finished_at":   &finish,
+		"next_retry_at": nil,
+	})
+	s.alertDeployFailed(t.ID, t.MainDomain, "", configName, fmt.Sprintf("第 %d 次重试未能开始", t.Attempt+1), err)
 }

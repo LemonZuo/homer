@@ -33,10 +33,10 @@ func (e *emailNotifier) Name() string { return "email" }
 func (e *emailNotifier) Enabled() bool {
 	return e.c != nil && e.c.Enabled() && e.to != ""
 }
-func (e *emailNotifier) Send(_ context.Context, m Message) error {
+func (e *emailNotifier) Send(ctx context.Context, m Message) error {
 	to := m.To
 	if to == "" {
 		to = e.to
 	}
-	return e.c.SendText(to, m.Title, m.Text)
+	return e.c.SendText(ctx, to, m.Title, m.Text)
 }

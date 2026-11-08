@@ -3,6 +3,7 @@ package email
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,8 +29,8 @@ func (c *ResendClient) Enabled() bool {
 	return c != nil && c.apiKey != "" && c.from != ""
 }
 
-// SendText 发送纯文本邮件。to 为单个收件人。
-func (c *ResendClient) SendText(to, subject, text string) error {
+// SendText 发送纯文本邮件。to 为单个收件人；ctx 取消/到期会中断请求。
+func (c *ResendClient) SendText(ctx context.Context, to, subject, text string) error {
 	if !c.Enabled() {
 		return fmt.Errorf("resend not configured")
 	}
@@ -40,7 +41,7 @@ func (c *ResendClient) SendText(to, subject, text string) error {
 		"text":    text,
 	}
 	buf, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(buf))
 	if err != nil {
 		return err
 	}

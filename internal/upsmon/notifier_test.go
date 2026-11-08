@@ -19,7 +19,7 @@ func TestComposeMessageBatteryAlert(t *testing.T) {
 		LastRuntimeMinutes: 42,
 		LastRawStatus:      "OB DISCHRG",
 	}
-	title, body := composeMessage("switched_to_battery", st)
+	title, body := composeMessage("switched_to_battery", st, nil)
 	if title != "UPS 切到电池供电" {
 		t.Fatalf("title = %q", title)
 	}
@@ -32,7 +32,7 @@ func TestComposeMessageBatteryAlert(t *testing.T) {
 
 func TestComposeMessageDeviceOptional(t *testing.T) {
 	st := model.UPSState{HostName: "h", UPSName: "u", LastBatteryPercent: 10, LastRawStatus: "LB"}
-	_, body := composeMessage("low_battery", st)
+	_, body := composeMessage("low_battery", st, nil)
 	if strings.Contains(body, "()") || strings.Contains(body, ":(") {
 		t.Fatalf("empty device must not render parens:\n%s", body)
 	}
@@ -40,7 +40,7 @@ func TestComposeMessageDeviceOptional(t *testing.T) {
 
 func TestComposeMessageRestoredOmitsRuntime(t *testing.T) {
 	st := model.UPSState{HostName: "h", UPSName: "u", LastBatteryPercent: 95, LastRawStatus: "OL CHRG"}
-	title, body := composeMessage("restored_mains", st)
+	title, body := composeMessage("restored_mains", st, nil)
 	if title != "UPS 已恢复市电" {
 		t.Fatalf("title = %q", title)
 	}
@@ -51,7 +51,7 @@ func TestComposeMessageRestoredOmitsRuntime(t *testing.T) {
 
 func TestComposeMessageUnknownKindFallback(t *testing.T) {
 	st := model.UPSState{LastRawStatus: "RB"}
-	title, body := composeMessage("someday_new_kind", st)
+	title, body := composeMessage("someday_new_kind", st, nil)
 	if title != "UPS 状态变化" || body != "RB" {
 		t.Fatalf("fallback = %q / %q", title, body)
 	}
@@ -184,5 +184,120 @@ func TestNotifierBaselineRetriesAndAcceptsMains(t *testing.T) {
 	n2.Process(&mains, mains)
 	if len(out.titles()) != 0 {
 		t.Fatalf("mains baseline must stay silent, got %v", out.titles())
+	}
+}
+
+func upsStateBat(src string, pct int) model.UPSState {
+	st := upsState(src)
+	st.LastBatteryPercent = pct
+	return st
+}
+
+func (f *fakeOut) bodies() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.sent))
+	for i, m := range f.sent {
+		out[i] = m.Text
+	}
+	return out
+}
+
+// 断电期间通道一直不可用(光猫没接 UPS),来电后通道恢复:必须补发"期间曾断电"汇总,而不是零通知。
+func TestNotifierOutageSummaryWhenAlertsNeverDelivered(t *testing.T) {
+	out := &fakeOut{err: errors.New("network down")}
+	clk := &fakeClock{t: time.Date(2026, 11, 7, 10, 0, 0, 0, time.Local)}
+	n := &Notifier{out: out, now: clk.now}
+
+	mains := upsStateBat(model.UPSPowerMains, 100)
+	b80, b40 := upsStateBat(model.UPSPowerBattery, 80), upsStateBat(model.UPSPowerBattery, 40)
+	n.Process(&mains, b80)
+	clk.advance(5 * time.Minute)
+	n.Process(&b80, b40)
+	clk.advance(5 * time.Minute)
+	out.err = nil // 来电,网络恢复
+	back := upsStateBat(model.UPSPowerMains, 45)
+	n.Process(&b40, back)
+
+	titles := out.titles()
+	if len(titles) != 1 || titles[0] != "UPS 期间曾断电" {
+		t.Fatalf("want one outage summary, got %v", titles)
+	}
+	body := out.bodies()[0]
+	for _, want := range []string{"10:00:00 ~ ", "10:10:00", "约 10 分钟", "期间最低电量:40%", "当前电量:45%"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("summary missing %q:\n%s", want, body)
+		}
+	}
+
+	clk.advance(alertRetryInterval)
+	n.Process(&back, back)
+	if len(out.titles()) != 1 {
+		t.Fatalf("summary must be sent once, got %v", out.titles())
+	}
+}
+
+// 汇总发送失败要继续重试,不能因为已回到市电就丢掉。
+func TestNotifierOutageSummaryRetried(t *testing.T) {
+	out := &fakeOut{err: errors.New("down")}
+	clk := &fakeClock{t: time.Date(2026, 11, 7, 10, 0, 0, 0, time.Local)}
+	n := &Notifier{out: out, now: clk.now}
+	mains, battery := upsState(model.UPSPowerMains), upsState(model.UPSPowerBattery)
+
+	n.Process(&mains, battery)
+	clk.advance(alertRetryInterval)
+	n.Process(&battery, mains) // 汇总也发不出去
+	clk.advance(alertRetryInterval)
+	out.err = nil
+	n.Process(&mains, mains)
+	if got := out.titles(); len(got) != 1 || got[0] != "UPS 期间曾断电" {
+		t.Fatalf("summary should be retried, got %v", got)
+	}
+}
+
+// 已送达"切到电池"后来电:发普通"已恢复市电"并带停电时长,不再发汇总。
+func TestNotifierRestoredIncludesDuration(t *testing.T) {
+	out := &fakeOut{}
+	clk := &fakeClock{t: time.Date(2026, 11, 7, 10, 0, 0, 0, time.Local)}
+	n := &Notifier{out: out, now: clk.now}
+	mains, battery := upsState(model.UPSPowerMains), upsState(model.UPSPowerBattery)
+
+	n.Process(&mains, battery)
+	clk.advance(75 * time.Minute)
+	n.Process(&battery, mains)
+	titles := out.titles()
+	if len(titles) != 2 || titles[0] != "UPS 切到电池供电" || titles[1] != "UPS 已恢复市电" {
+		t.Fatalf("titles = %v", titles)
+	}
+	if body := out.bodies()[1]; !strings.Contains(body, "停电时长:约 1 小时 15 分") {
+		t.Fatalf("restored body missing duration:\n%s", body)
+	}
+}
+
+// LB 在阈值附近抖动:低电告警只发一次,来电照常发"已恢复"。
+func TestNotifierLowBatteryFlapNotRepeated(t *testing.T) {
+	out := &fakeOut{}
+	n := &Notifier{out: out}
+	mains, battery, lb := upsState(model.UPSPowerMains), upsState(model.UPSPowerBattery), upsState(model.UPSPowerLowBattery)
+
+	n.Process(&mains, battery)
+	n.Process(&battery, lb)
+	n.Process(&lb, battery)
+	n.Process(&battery, lb)
+	n.Process(&lb, battery)
+	n.Process(&battery, mains)
+	want := []string{"UPS 切到电池供电", "UPS 低电量告警", "UPS 已恢复市电"}
+	if got := out.titles(); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("titles = %v, want %v", got, want)
+	}
+}
+
+func TestComposeMessageUnknownBattery(t *testing.T) {
+	st := model.UPSState{HostName: "h", UPSName: "u", LastBatteryPercent: -1, LastRuntimeMinutes: -1}
+	for _, kind := range []string{"current_battery", "switched_to_battery", "low_battery", "restored_mains", "outage_summary"} {
+		_, body := composeMessage(kind, st, &outage{minBattery: -1})
+		if strings.Contains(body, "-1%") {
+			t.Fatalf("%s: -1 battery must render as 未知:\n%s", kind, body)
+		}
 	}
 }

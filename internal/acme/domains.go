@@ -86,7 +86,7 @@ func (s *Service) CreateDomain(d *model.ACMEDomain) error {
 	if _, err := s.accountStore.Get(d.AccountID); err != nil {
 		return err
 	}
-	return s.db.Create(d).Error
+	return model.CreateKeepZero(s.db, d)
 }
 
 // UpdateDomain 更新域名（按 id）。
@@ -107,7 +107,16 @@ func (s *Service) UpdateDomain(d *model.ACMEDomain) error {
 	if _, err := s.accountStore.Get(d.AccountID); err != nil {
 		return err
 	}
-	return s.db.Save(d).Error
+	if err := s.db.Select("id").First(&model.ACMEDomain{}, d.ID).Error; err != nil {
+		return err
+	}
+	// 只写可编辑列：payload 不带 created_at，Save 整行写回会把它清成零值。
+	if err := s.db.Model(&model.ACMEDomain{}).Where("id = ?", d.ID).
+		Select("main_domain", "san_domains", "account_id", "provider", "san_providers", "enabled").
+		Updates(d).Error; err != nil {
+		return err
+	}
+	return s.db.First(d, d.ID).Error
 }
 
 // DeleteDomain 删除域名及其证书/任务流水。

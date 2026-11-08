@@ -29,13 +29,24 @@ func RunOnce(db *gorm.DB, notifier notify.Notifier) error {
 	if err := db.Where("enabled = ?", "1").Find(&items).Error; err != nil {
 		return fmt.Errorf("查询生日提醒失败：%w", err)
 	}
+	type parsed struct{ month, day int }
+	dates := make([]parsed, len(items))
+	for i, it := range items {
+		month, day, ok := parseLunarMonthDay(it.ChineseBirthday)
+		if !ok {
+			// 解析失败的记录永远不会提醒，必须留痕，不能静默跳过。
+			logx.Warn("birthday skip: unparseable chinese_birthday",
+				"id", it.ID, "name", it.Name, "chinese_birthday", it.ChineseBirthday)
+			continue
+		}
+		dates[i] = parsed{month, day}
+	}
 	today := time.Now()
 	sent, failed := 0, 0
 	for _, d := range offsets {
 		target := lunarDayOf(today.AddDate(0, 0, d))
-		for _, it := range items {
-			month, day, ok := parseLunarMonthDay(it.ChineseBirthday)
-			if !ok || !target.matches(month, day) {
+		for i, it := range items {
+			if dates[i].month == 0 || !target.matches(dates[i].month, dates[i].day) {
 				continue
 			}
 			msg := BuildMessage(&it)
