@@ -13,6 +13,7 @@ import (
 type fakeOut struct {
 	mu   sync.Mutex
 	sent []notify.Message
+	err  error // 非 nil 时模拟发送失败(不记入 sent)
 }
 
 func (f *fakeOut) Name() string  { return "fake" }
@@ -20,6 +21,9 @@ func (f *fakeOut) Enabled() bool { return true }
 func (f *fakeOut) Send(_ context.Context, m notify.Message) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
 	f.sent = append(f.sent, m)
 	return nil
 }

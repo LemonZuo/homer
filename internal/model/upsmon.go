@@ -39,9 +39,9 @@ type UPSSSHCredential struct {
 func (UPSSSHCredential) TableName() string { return "ups_ssh_credential" }
 
 // UPS 监控相关常量。供电类型枚举与 NUT 的 ups.status 映射:
-//   - mains       <- OL(on-line,市电)
-//   - battery     <- OB(on-battery)
-//   - low_battery <- LB(low-battery,任意叠加状态)
+//   - mains       <- OL(on-line,市电;带 LB 的来电充电中 "OL CHRG LB" 也算市电)
+//   - battery     <- OB(on-battery),或无 OL 时的 DISCHRG
+//   - low_battery <- 电池供电时的 LB,或只有 LB
 //   - unknown     <- 无 ups.status 或解析失败
 const (
 	UPSPowerMains      = "mains"

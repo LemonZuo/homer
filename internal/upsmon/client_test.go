@@ -133,10 +133,16 @@ func TestMapPowerSource(t *testing.T) {
 		{"OB", model.UPSPowerBattery},
 		{"DISCHRG", model.UPSPowerBattery},
 		{"OB DISCHRG", model.UPSPowerBattery},
-		// 严重度优先:LB > OB > OL
+		// 在用电池时 LB → 低电量
 		{"OB LB", model.UPSPowerLowBattery},
+		{"OB DISCHRG LB", model.UPSPowerLowBattery},
 		{"OL OB LB", model.UPSPowerLowBattery},
-		{"ol lb", model.UPSPowerLowBattery}, // 大小写不敏感
+		{"ob lb", model.UPSPowerLowBattery}, // 大小写不敏感
+		{"LB", model.UPSPowerLowBattery},    // 只有 LB 时保守按低电量
+		// 市电在线时 LB / DISCHRG 不是供电告警:来电充电中 / 自检放电
+		{"OL CHRG LB", model.UPSPowerMains},
+		{"OL LB", model.UPSPowerMains},
+		{"OL DISCHRG", model.UPSPowerMains},
 		{"", model.UPSPowerUnknown},
 		{"FSD RB", model.UPSPowerUnknown}, // 无已知 token
 	}

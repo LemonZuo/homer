@@ -12,7 +12,7 @@ import (
 func daysUntilLunar(target string, from time.Time) int {
 	for i := 0; i <= 366; i++ {
 		d := from.AddDate(0, 0, i)
-		if LunarString(d) == target {
+		if lunarBirthdayOn(target, d) {
 			return i
 		}
 	}

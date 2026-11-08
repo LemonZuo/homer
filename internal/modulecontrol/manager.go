@@ -126,6 +126,19 @@ func (m *Manager) Set(ctx context.Context, key string, enabled bool, expected ui
 	return m.snapshotLocked(), nil
 }
 
+// Version 返回模块当前的开关版本（每次启用/禁用 +1，持久化）；未知模块或 nil manager 返回 0。
+func (m *Manager) Version(key string) uint64 {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s := m.states[key]; s != nil {
+		return s.setting.Version
+	}
+	return 0
+}
+
 // Ticket 标记提交时的启用周期；先禁用再启用也不会重新放行旧队列。
 type Ticket struct {
 	manager *Manager

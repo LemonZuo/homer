@@ -58,13 +58,14 @@ func (s *Service) processThresholdAlerts(prev *model.EsxiState, cur HostResult) 
 	}
 	cfg := s.alertCfg.withDefaults()
 	if !cur.OK {
-		s.persistThresholdAlertState(cur.HostKind, cur.HostID, thresholdAlertState{})
+		// 主机本轮不可达：什么都没测到，保持上一轮状态不动（离线由可达性告警负责）。
+		// 清空会丢掉"已通知"标记，恢复后同一个持续超阈值的项会被重复推送。
 		return
 	}
 
 	currItems := thresholdAlertItems(cur.Metrics, cfg)
 	prevState := parseThresholdAlertState(prev)
-	nextState, dueItems := advanceThresholdAlertState(prevState, currItems, cfg.ConsecutiveSamples)
+	nextState, dueItems := advanceThresholdAlertState(prevState, currItems, measuredAlertKeys(cur.Metrics), cfg.ConsecutiveSamples)
 	if len(dueItems) == 0 {
 		s.persistThresholdAlertState(cur.HostKind, cur.HostID, nextState)
 		return
@@ -145,27 +146,56 @@ func parseThresholdAlertState(st *model.EsxiState) thresholdAlertState {
 	return state
 }
 
-func advanceThresholdAlertState(prev thresholdAlertState, curr []thresholdAlertItem, consecutiveSamples int) (thresholdAlertState, []thresholdAlertItem) {
+// advanceThresholdAlertState 推进一轮阈值状态。measured 是本轮实际测到值的指标 key：
+// 不在 curr 里但测到了 → 已恢复，丢弃记录；本轮没测到（单项采集失败 / 磁盘本轮缺席）
+// → 原样保留，不计数也不清零，避免一次采集抖动把"已通知"标记丢掉、随后重复告警。
+func advanceThresholdAlertState(prev thresholdAlertState, curr []thresholdAlertItem, measured map[string]bool, consecutiveSamples int) (thresholdAlertState, []thresholdAlertItem) {
 	if consecutiveSamples <= 0 {
 		consecutiveSamples = 5
-	}
-	if len(curr) == 0 {
-		return thresholdAlertState{}, nil
 	}
 	next := thresholdAlertState{Items: make(map[string]thresholdAlertRecord, len(curr))}
 	due := make([]thresholdAlertItem, 0)
 	for _, item := range curr {
-		record := thresholdAlertRecord{}
-		if prev.Items != nil {
-			record = prev.Items[item.Key]
-		}
+		record := prev.Items[item.Key]
 		record.Count++
 		if record.Count >= consecutiveSamples && !record.Notified {
 			due = append(due, item)
 		}
 		next.Items[item.Key] = record
 	}
+	for key, record := range prev.Items {
+		if _, active := next.Items[key]; active || measured[key] {
+			continue
+		}
+		next.Items[key] = record
+	}
+	if len(next.Items) == 0 {
+		return thresholdAlertState{}, due
+	}
 	return next, due
+}
+
+// measuredAlertKeys 返回本轮测到有效值（非 -1 哨兵）的阈值指标 key，与 thresholdAlertItems 的 key 一一对应。
+func measuredAlertKeys(m HostMetrics) map[string]bool {
+	keys := map[string]bool{}
+	if m.CPUTemp.MaxC >= 0 {
+		keys["cpu_temp"] = true
+	}
+	if cpuUsagePercent(m) >= 0 {
+		keys["cpu_usage"] = true
+	}
+	if memoryUsagePercent(m) >= 0 {
+		keys["memory_usage"] = true
+	}
+	for _, d := range m.Disks {
+		if d.TempC >= 0 {
+			keys["disk_temp:"+d.Device] = true
+		}
+		if diskUsagePercent(d) >= 0 {
+			keys["disk_usage:"+d.Device] = true
+		}
+	}
+	return keys
 }
 
 func (s *Service) persistThresholdAlertState(hostKind string, hostID int64, state thresholdAlertState, alertedAt ...time.Time) {

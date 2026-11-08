@@ -188,15 +188,13 @@ func startScheduler(gormDB *gorm.DB, cfg *config.Config, notifier notify.Notifie
 	}
 
 	if err := sched.Register("birthday", cfg.BirthdayRemindCron, func() error {
-		birthday.RunOnce(gormDB, notifier)
-		return nil
+		return birthday.RunOnce(gormDB, notifier)
 	}); err != nil {
 		logx.Fatal("register birthday task", "err", err)
 	}
 
 	if err := sched.Register("event", cfg.EventRemindCron, func() error {
-		event.RunOnce(gormDB, eventNotifier)
-		return nil
+		return event.RunOnce(gormDB, eventNotifier)
 	}); err != nil {
 		logx.Fatal("register event task", "err", err)
 	}

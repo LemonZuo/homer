@@ -34,7 +34,13 @@ type Service struct {
 	hostReach map[int64]bool
 }
 
-func (s *Service) SetModules(m *modulecontrol.Manager) { s.modules = m }
+// SetModules 注入模块开关，并以启动时的版本作为采样基线：只有本进程内真的发生过
+// 停用→启用（版本变化）才 rebase。进程重启本身不 rebase，持久化的告警状态继续有效，
+// 否则模块开关过一次后每次重启都会清空"已通知"标记，持续超阈值的项被重复推送。
+func (s *Service) SetModules(m *modulecontrol.Manager) {
+	s.modules = m
+	s.sampleVersion = m.Version("esxi")
+}
 
 func NewService(db *gorm.DB, sampler *Sampler, store *Store, hosts *HostStore, alertOut notify.Notifier, alertCfg AlertConfig, retention time.Duration) *Service {
 	if retention <= 0 {
@@ -69,7 +75,7 @@ func (s *Service) RunSample() error {
 		return err
 	}
 	defer finish()
-	rebase := ticket.Version() > 1 && s.sampleVersion != ticket.Version()
+	rebase := s.sampleVersion != ticket.Version()
 	if rebase {
 		s.reachMu.Lock()
 		s.hostReach = map[int64]bool{}

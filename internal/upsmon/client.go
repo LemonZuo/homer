@@ -263,30 +263,41 @@ func parseUPSCOutput(name, raw string) (upscReading, bool) {
 }
 
 // mapPowerSource 把 NUT 的 ups.status 字段映射成 4 个枚举值。
-// 状态字符串可能包含多个 token(如 "OB LB" / "OL CHRG"),按"最严重的"取:LB > OB > OL。
+// 状态字符串可能包含多个 token(如 "OB LB" / "OL CHRG"):
+//   - 先判是否在用电池:OB,或没有 OL 时的 DISCHRG;
+//   - 在用电池时 LB → 低电量,否则电池供电;
+//   - 有 OL 即市电在线,即使带 LB —— 来电后电池还没充上来时 UPS 报 "OL CHRG LB",
+//     这不是供电告警,不能映射成低电量(否则来电时误报低电、恢复告警被推迟到充过 LB 线);
+//     "OL DISCHRG" 是市电在线时的自检/校准放电,同样算市电;
+//   - 只有 LB 没有 OL/OB 时保守按低电量。
 func mapPowerSource(status string) string {
 	if status == "" {
 		return model.UPSPowerUnknown
 	}
 	tokens := strings.Fields(strings.ToUpper(status))
-	hasLB, hasOB, hasOL := false, false, false
+	hasLB, hasOB, hasOL, hasDischarge := false, false, false, false
 	for _, t := range tokens {
 		switch t {
 		case "LB":
 			hasLB = true
-		case "OB", "DISCHRG":
+		case "OB":
 			hasOB = true
+		case "DISCHRG":
+			hasDischarge = true
 		case "OL":
 			hasOL = true
 		}
 	}
+	onBattery := hasOB || (hasDischarge && !hasOL)
 	switch {
-	case hasLB:
+	case onBattery && hasLB:
 		return model.UPSPowerLowBattery
-	case hasOB:
+	case onBattery:
 		return model.UPSPowerBattery
 	case hasOL:
 		return model.UPSPowerMains
+	case hasLB:
+		return model.UPSPowerLowBattery
 	default:
 		return model.UPSPowerUnknown
 	}

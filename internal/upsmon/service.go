@@ -63,7 +63,13 @@ type Service struct {
 	nutOfflineThreshold int
 }
 
-func (s *Service) SetModules(m *modulecontrol.Manager) { s.modules = m }
+// SetModules 注入模块开关，并以启动时的版本作为采样基线：只有本进程内真的发生过
+// 停用→启用（版本变化）才 rebase。进程重启本身不 rebase，沿用持久化的上一轮供电状态，
+// 否则停机期间恢复市电的那条告警会被基线吞掉。
+func (s *Service) SetModules(m *modulecontrol.Manager) {
+	s.modules = m
+	s.sampleVersion = m.Version("ups")
+}
 
 // upsTrack 通用"计数 + 已告警"状态:用作单个 UPS 的失联去抖,也用作主机级 NUT 不可用去抖。
 // missCount 是连续触发次数,alertedDown 防止跨阈值后每轮都重复发同一条告警。
@@ -118,7 +124,7 @@ func (s *Service) RunSample() error {
 		return err
 	}
 	defer finish()
-	rebase := ticket.Version() > 1 && s.sampleVersion != ticket.Version()
+	rebase := s.sampleVersion != ticket.Version()
 	if rebase {
 		s.reachMu.Lock()
 		s.lastOK = true
@@ -126,6 +132,7 @@ func (s *Service) RunSample() error {
 		s.hostUPSNames = map[int64]map[string]upsTrack{}
 		s.hostNUTState = map[int64]upsTrack{}
 		s.reachMu.Unlock()
+		s.notifier.Reset()
 	}
 	hosts, err := s.sampler.Run()
 	if err != nil {
