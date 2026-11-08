@@ -18,7 +18,8 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
 
   const apply = useCallback((next: ModuleSnapshot) => {
     if (!next || !Array.isArray(next.modules)) throw new Error('模块配置格式错误')
-    setSnapshot((prev) => prev?.instance === next.instance && prev.revision > next.revision ? prev : next)
+    // 同实例下 revision 相同即内容相同：保留旧对象，避免轮询/重复推送引发整树重渲染。
+    setSnapshot((prev) => prev?.instance === next.instance && prev.revision >= next.revision ? prev : next)
     setError('')
     setLoading(false)
   }, [])

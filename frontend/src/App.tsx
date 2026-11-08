@@ -1,4 +1,4 @@
-import { Suspense, lazy, type ReactElement } from 'react'
+import { Suspense, lazy, useMemo, type ReactElement } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
 import { pages, getPage } from './pages'
@@ -52,12 +52,14 @@ function CustomPage() {
   const { snapshot, loading, isEnabled } = useModules()
   const def = getPage(pageKey)
   const render = def ? PAGE_COMPONENTS[def.key] : undefined
+  // 模块快照每次推送都会让本组件重渲染；页面元素保持同一引用，React 才会跳过整页重渲染。
+  const page = useMemo(() => render?.(), [render])
   if (!def || !render) return <Empty />
   if (!CORE_PAGES.includes(def.key)) {
     if (!snapshot && loading) return <PageFallback />
     if (!isEnabled(def.key)) return <Navigate to="/p/modules" replace />
   }
-  return <Suspense fallback={<PageFallback />}>{render()}</Suspense>
+  return <Suspense fallback={<PageFallback />}>{page}</Suspense>
 }
 
 export default function App() {

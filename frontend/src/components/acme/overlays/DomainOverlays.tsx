@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { DomainEditDialog } from '../dialogs/DomainEditDialog'
 import { LogDrawer } from '../LogDrawer'
@@ -24,13 +25,19 @@ export function DomainOverlays({
   onTasksReload,
   onDeployConfigsReload,
 }: DomainOverlaysProps) {
+  const editAccountID = ui.domain.edit.target?.account_id
+  // 必须稳定引用：DomainEditDialog 的重置 effect 依赖 accounts，每次渲染新数组会清空正在输入的表单。
+  const editAccounts = useMemo(
+    () => accounts.filter((a) => a.enabled || a.id === editAccountID),
+    [accounts, editAccountID],
+  )
   return (
     <>
       <DomainEditDialog
         open={ui.domain.edit.open}
         onOpenChange={ui.domain.edit.setOpen}
         target={ui.domain.edit.target}
-        accounts={accounts.filter((a) => a.enabled || a.id === ui.domain.edit.target?.account_id)}
+        accounts={editAccounts}
         providers={providers}
         onSaved={onSaved}
       />
