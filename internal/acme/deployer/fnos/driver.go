@@ -79,7 +79,7 @@ func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, _ model.ACMEDeployConf
 	return nil
 }
 
-func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) error {
+func (d *Driver) TestTarget(ctx context.Context, target model.ACMEDeployTarget) error {
 	t, err := targetFromDeployTarget(target)
 	if err != nil {
 		return err
@@ -88,7 +88,7 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	if err != nil {
 		return err
 	}
-	client, cleanup, err := sshx.Dial(nil, conn)
+	client, cleanup, err := sshx.DialContext(ctx, nil, conn)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	return nil
 }
 
-func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
+func (d *Driver) Deploy(ctx context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
 	target, args, err := d.prepareDeployArgs(req)
 	if err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 	if req.Logf != nil {
 		req.Logf("fnOS 目标：%s@%s:%d，域名：%s", target.Username, target.Host, target.Port, args.Domain)
 	}
-	client, cleanup, err := sshx.Dial(req.Logf, conn)
+	client, cleanup, err := sshx.DialContext(ctx, req.Logf, conn)
 	if err != nil {
 		return nil, err
 	}

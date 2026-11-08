@@ -71,7 +71,7 @@ func (h *EventHandler) update(c *gin.Context) {
 	if err := h.db.Model(&model.EventReminder{}).
 		Where("id = ?", id).
 		Select("*").
-		Omit("id").
+		Omit("id", "created_at"). // payload 不带 created_at，Select("*") 会把它写成零值
 		Updates(item).Error; err != nil {
 		logx.Error("event update failed", "id", id, "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

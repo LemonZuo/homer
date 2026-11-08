@@ -1,7 +1,8 @@
 -- UPS 模块从 acme_deploy_target 完全解耦：
 --   1. 新建 ups_ssh_credential —— UPS 专属凭证库（不与 ACME 共享）
 --   2. 新建 ups_host          —— UPS 自管的机器列表（含 endpoint + auth_json + 可选 bastion）
---   3. 清空 ups_sample / ups_state —— host_kind 语义从 'ssh'/'fnos' 切到 'ups'，历史数据按用户确认弃掉
+--   3. 删除 ups_sample / ups_state 中旧语义（host_kind <> 'ups'）的行 —— host_kind 从 'ssh'/'fnos' 切到 'ups'，
+--      旧历史按用户确认弃掉；只删旧行，重复执行不会清掉切换后的新数据
 --   4. 下线 acme_deploy_target.ups_monitor 列
 --
 -- 切换后：sampler 直接读 ups_host，HostKind 写常量 'ups'，HostID 写 ups_host.id。
@@ -36,9 +37,9 @@ CREATE TABLE IF NOT EXISTS `ups_host` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='UPS 监控目标机器';
 
 -- host_kind 语义从 'ssh'/'fnos' 改成 'ups'，老行没法直接更新（host_id 不再对应 acme_deploy_target.id）。
--- 个人场景只有 1 台 UPS，历史曲线清空即可。
-TRUNCATE TABLE `ups_sample`;
-TRUNCATE TABLE `ups_state`;
+-- 个人场景只有 1 台 UPS，旧历史曲线弃掉即可。不用 TRUNCATE：批量重跑迁移时会把新数据一起清空。
+DELETE FROM `ups_sample` WHERE `host_kind` <> 'ups';
+DELETE FROM `ups_state` WHERE `host_kind` <> 'ups';
 
 -- 下线 acme_deploy_target.ups_monitor 列（幂等）。
 DROP PROCEDURE IF EXISTS homer_acme_drop_ups_monitor;

@@ -1,7 +1,7 @@
 package esximon
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -100,13 +100,16 @@ func (s *Sampler) probeOne(h model.EsxiHost, prev *model.EsxiState) HostResult {
 		return res
 	}
 
-	// 给整轮采集套一个总超时(sshx.Dial 自带 15s 拨号超时,这里只罩跑命令阶段)。
+	// 给整轮采集套一个总超时(sshx 自带拨号/握手超时,这里只罩跑命令阶段)。
+	// 返回（含超时放弃）时 cancel 关闭 SSH 连接，被放弃的采集协程会尽快退出。
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct{})
 	var metrics HostMetrics
 	var probeErr error
 	go func() {
 		defer close(done)
-		client, cleanup, derr := sshx.Dial(nil, conn)
+		client, cleanup, derr := sshx.DialContext(ctx, nil, conn)
 		if derr != nil {
 			probeErr = derr
 			return
@@ -138,7 +141,10 @@ func (s *Sampler) probeOne(h model.EsxiHost, prev *model.EsxiState) HostResult {
 	select {
 	case <-done:
 	case <-time.After(s.timeout + 15*time.Second):
-		probeErr = errors.New("采集超时")
+		// 采集协程可能仍在写 metrics/probeErr，这里不能碰共享变量，直接返回。
+		res.Error = "采集超时"
+		logx.Debug("esxi probe failed", "host", h.Name, "err", res.Error)
+		return res
 	}
 
 	if probeErr != nil {

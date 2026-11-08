@@ -121,7 +121,7 @@ func (s *Service) runIssue(taskID int64, d model.ACMEDomain, ticket modulecontro
 		upd["status"] = "success"
 		upd["log_text"] = logBuf.String()
 	}
-	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(upd).Error
+	s.writeTaskFinal(taskID, upd)
 	s.hub.Close(taskID)
 }
 

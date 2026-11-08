@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LemonZuo/homer/internal/model"
 )
@@ -148,5 +149,16 @@ func TestTruncate(t *testing.T) {
 	}
 	if truncate("abcdef", 3) != "abc" {
 		t.Fatal("longer string cut")
+	}
+	// 按字符而不是字节截断，不会切出半个汉字。
+	if got := truncate("部署超时了", 2); got != "部署" {
+		t.Fatalf("rune truncate = %q", got)
+	}
+	if got := truncate("部署", 2); got != "部署" {
+		t.Fatalf("exact rune length = %q", got)
+	}
+	// 非法 UTF-8 被替换成 U+FFFD，结果始终是合法 UTF-8。
+	if got := truncate("ok\xff\xfe!", 10); !utf8.ValidString(got) || got != "ok\uFFFD!" {
+		t.Fatalf("invalid utf8 = %q", got)
 	}
 }

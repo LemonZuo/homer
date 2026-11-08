@@ -4,6 +4,7 @@ package wework
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,27 +18,41 @@ type Client struct {
 	secret  string
 	tagID   string
 
+	// 必须带超时：告警在 UPS/ESXi 采样锁内同步发送，默认 client 无超时，
+	// 断网时一次卡住的请求会让监控整体停摆。
+	http *http.Client
+
 	mu       sync.Mutex
 	token    string
 	tokenExp time.Time
 }
 
 func New(corpID, agentID, secret, tagID string) *Client {
-	return &Client{corpID: corpID, agentID: agentID, secret: secret, tagID: tagID}
+	return &Client{
+		corpID:  corpID,
+		agentID: agentID,
+		secret:  secret,
+		tagID:   tagID,
+		http:    &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 func (c *Client) Enabled() bool {
 	return c.corpID != "" && c.agentID != "" && c.secret != ""
 }
 
-func (c *Client) getToken() (string, error) {
+func (c *Client) getToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.token != "" && time.Now().Before(c.tokenExp) {
 		return c.token, nil
 	}
 	url := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=%s&corpsecret=%s", c.corpID, c.secret)
-	resp, err := http.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -60,11 +75,11 @@ func (c *Client) getToken() (string, error) {
 }
 
 // SendText 发送一条文本消息。当配置了 tagID 时按标签下发，否则发给应用可见范围全部成员。
-func (c *Client) SendText(content string) error {
+func (c *Client) SendText(ctx context.Context, content string) error {
 	if !c.Enabled() {
 		return fmt.Errorf("wework not configured")
 	}
-	token, err := c.getToken()
+	token, err := c.getToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -81,7 +96,12 @@ func (c *Client) SendText(content string) error {
 	}
 	buf, _ := json.Marshal(body)
 	url := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=%s", token)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}

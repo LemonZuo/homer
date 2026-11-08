@@ -74,7 +74,7 @@ func (h *SMSHandler) forwarderUpdate(c *gin.Context) {
 	if err := h.DB.Model(&model.SmsForwarder{}).
 		Where("id = ?", id).
 		Select("*").
-		Omit("id").
+		Omit("id", "created_at"). // payload 不带 created_at，Select("*") 会把它写成零值
 		Updates(item).Error; err != nil {
 		logx.Error("sms forwarder update failed", "id", id, "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

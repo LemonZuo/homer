@@ -51,7 +51,7 @@ func (d *Driver) ValidateConfig(_ model.ACMEDeployTarget, cfg model.ACMEDeployCo
 	return opts.validate()
 }
 
-func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) error {
+func (d *Driver) TestTarget(ctx context.Context, target model.ACMEDeployTarget) error {
 	t, err := targetFromDeployTarget(target)
 	if err != nil {
 		return err
@@ -60,7 +60,7 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	if err != nil {
 		return err
 	}
-	client, cleanup, err := sshx.Dial(nil, conn)
+	client, cleanup, err := sshx.DialContext(ctx, nil, conn)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func (d *Driver) TestTarget(_ context.Context, target model.ACMEDeployTarget) er
 	return nil
 }
 
-func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
+func (d *Driver) Deploy(ctx context.Context, req acme.DeployRequest) (*acme.DeployResult, error) {
 	target, err := targetFromDeployTarget(req.Target)
 	if err != nil {
 		return nil, err
@@ -84,7 +84,7 @@ func (d *Driver) Deploy(_ context.Context, req acme.DeployRequest) (*acme.Deploy
 	if req.Logf != nil {
 		req.Logf("SSH 目标：%s", sshlike.Summary(*target))
 	}
-	if err := d.deployCert(req.Logf, target, req.Cert, opts); err != nil {
+	if err := d.deployCert(ctx, req.Logf, target, req.Cert, opts); err != nil {
 		return nil, err
 	}
 	return &acme.DeployResult{}, nil
@@ -151,7 +151,7 @@ func (d *Driver) connFor(target *sshlike.Target) (*sshx.Conn, error) {
 	})
 }
 
-func (d *Driver) deployCert(logf func(string, ...any), target *sshlike.Target, cert model.ACMECert, opts DeployOptions) error {
+func (d *Driver) deployCert(ctx context.Context, logf func(string, ...any), target *sshlike.Target, cert model.ACMECert, opts DeployOptions) error {
 	opts.normalize()
 	if err := opts.validate(); err != nil {
 		return err
@@ -160,7 +160,7 @@ func (d *Driver) deployCert(logf func(string, ...any), target *sshlike.Target, c
 	if err != nil {
 		return err
 	}
-	client, cleanup, err := sshx.Dial(logf, conn)
+	client, cleanup, err := sshx.DialContext(ctx, logf, conn)
 	if err != nil {
 		return err
 	}

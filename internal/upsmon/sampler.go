@@ -1,6 +1,7 @@
 package upsmon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -106,9 +107,12 @@ func (s *Sampler) probeOne(h model.UPSHost) HostResult {
 		err        error
 	}
 	resultCh := make(chan probeOut, 1)
+	// 返回（含超时放弃）时关闭 SSH 连接，被放弃的采集协程不会连同连接一起泄漏。
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() {
 		var out probeOut
-		client, cleanup, err := sshx.Dial(nil, conn)
+		client, cleanup, err := sshx.DialContext(ctx, nil, conn)
 		if err != nil {
 			out.err = err
 			resultCh <- out

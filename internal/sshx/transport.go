@@ -4,11 +4,14 @@ package sshx
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"net"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -58,61 +61,142 @@ func AuthMethod(authType, password, privateKey, passphrase string) ([]ssh.AuthMe
 	}
 }
 
+const dialTimeout = 15 * time.Second
+
+// handshakeTimeout 限制单次 SSH 握手+认证（以及经跳板机打开隧道）的时长。
+// ssh.ClientConfig.Timeout 只管 TCP 建连，对端收下连接却不回包时握手会无限阻塞。
+// 用变量便于测试缩短。
+var handshakeTimeout = 30 * time.Second
+
 // Dial 拨号到 conn，返回 client 与按 LIFO 关闭所有连接的 cleanup。
+// 等价于 DialContext(context.Background(), ...)：握手有超时，但已建立的会话不受时限约束。
 func Dial(logf func(string, ...any), conn *Conn) (*ssh.Client, func(), error) {
-	cfg := &ssh.ClientConfig{
-		User:            conn.User,
-		Auth:            conn.Auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         15 * time.Second,
+	return DialContext(context.Background(), logf, conn)
+}
+
+// DialContext 同 Dial，额外绑定 ctx：ctx 结束时（握手阶段或之后）主动关闭底层连接，
+// 卡住的握手、Run/WriteFile 会因连接关闭而返回错误。调用 cleanup 会解除绑定并关闭连接。
+func DialContext(ctx context.Context, logf func(string, ...any), conn *Conn) (*ssh.Client, func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("连接 SSH 前已取消：%w", err)
 	}
+	cfg := clientConfig(conn)
 	addr := conn.addr()
 
 	if conn.Bastion == nil {
 		if logf != nil {
 			logf("连接 SSH：%s@%s", conn.User, addr)
 		}
-		client, err := ssh.Dial("tcp", addr, cfg)
+		client, err := dialClient(ctx, addr, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("连接 SSH 失败：%w", err)
 		}
-		return client, func() { _ = client.Close() }, nil
+		return client, bindContext(ctx, client), nil
 	}
 
 	b := conn.Bastion
-	bCfg := &ssh.ClientConfig{
-		User:            b.User,
-		Auth:            b.Auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         15 * time.Second,
-	}
 	bAddr := b.addr()
 	if logf != nil {
 		logf("连接跳板机：%s@%s", b.User, bAddr)
 	}
-	bClient, err := ssh.Dial("tcp", bAddr, bCfg)
+	bClient, err := dialClient(ctx, bAddr, clientConfig(b))
 	if err != nil {
 		return nil, nil, fmt.Errorf("连接跳板机失败：%w", err)
 	}
 	if logf != nil {
 		logf("经跳板机连接 SSH：%s@%s", conn.User, addr)
 	}
-	tunnel, err := bClient.Dial("tcp", addr)
-	if err != nil {
+	// 隧道是跳板机连接上的 channel，单独关闭它不一定能打断阻塞读；超时时直接关跳板机连接。
+	var tunnel net.Conn
+	if err := guard(ctx, bClient, func() error {
+		var derr error
+		tunnel, derr = bClient.Dial("tcp", addr)
+		return derr
+	}); err != nil {
 		_ = bClient.Close()
 		return nil, nil, fmt.Errorf("从跳板机连接目标失败：%w", err)
 	}
-	nc, chans, reqs, err := ssh.NewClientConn(tunnel, addr, cfg)
+	client, err := newClient(ctx, tunnel, addr, cfg, bClient)
 	if err != nil {
 		_ = tunnel.Close()
 		_ = bClient.Close()
 		return nil, nil, fmt.Errorf("通过跳板机握手 SSH 失败：%w", err)
 	}
-	client := ssh.NewClient(nc, chans, reqs)
-	return client, func() {
-		_ = client.Close()
-		_ = bClient.Close()
-	}, nil
+	return client, bindContext(ctx, client, bClient), nil
+}
+
+func clientConfig(c *Conn) *ssh.ClientConfig {
+	return &ssh.ClientConfig{
+		User:            c.User,
+		Auth:            c.Auth,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         dialTimeout,
+	}
+}
+
+// dialClient 建 TCP 连接（dialTimeout）后做带超时的 SSH 握手。
+func dialClient(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.Client, error) {
+	d := net.Dialer{Timeout: dialTimeout}
+	nc, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	client, err := newClient(ctx, nc, addr, cfg, nc)
+	if err != nil {
+		_ = nc.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
+// newClient 在 nc 上做 SSH 握手；超时或 ctx 结束时关闭 abort 以打断阻塞。
+func newClient(ctx context.Context, nc net.Conn, addr string, cfg *ssh.ClientConfig, abort io.Closer) (*ssh.Client, error) {
+	var client *ssh.Client
+	err := guard(ctx, abort, func() error {
+		c, chans, reqs, err := ssh.NewClientConn(nc, addr, cfg)
+		if err != nil {
+			return err
+		}
+		client = ssh.NewClient(c, chans, reqs)
+		return nil
+	})
+	if err != nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		return nil, err
+	}
+	return client, nil
+}
+
+// guard 执行 fn；若 handshakeTimeout 到期或 ctx 结束，关闭 c 打断 fn 内的阻塞 IO，并返回超时/取消原因。
+func guard(ctx context.Context, c io.Closer, fn func() error) error {
+	tctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+	defer cancel()
+	stop := context.AfterFunc(tctx, func() { _ = c.Close() })
+	err := fn()
+	if !stop() {
+		// 已触发关闭：即使 fn 恰好成功，连接也已不可用。
+		if perr := ctx.Err(); perr != nil {
+			return fmt.Errorf("已取消：%w", perr)
+		}
+		return fmt.Errorf("超过 %s 未完成：%w", handshakeTimeout, context.DeadlineExceeded)
+	}
+	return err
+}
+
+// bindContext 让 ctx 结束时关闭 closers（按传入顺序），返回解除绑定并关闭的 cleanup。
+func bindContext(ctx context.Context, closers ...io.Closer) func() {
+	closeAll := func() {
+		for _, c := range closers {
+			_ = c.Close()
+		}
+	}
+	stop := context.AfterFunc(ctx, closeAll)
+	return func() {
+		stop()
+		closeAll()
+	}
 }
 
 // WriteFile 把 data 写到远端 remotePath，先 mkdir -p 父目录再 chmod。
@@ -134,7 +218,8 @@ func Run(client *ssh.Client, cmd string, stdin []byte) (string, error) {
 	}
 	defer session.Close()
 
-	var out bytes.Buffer
+	// stdout/stderr 由两个 copy 协程并发写入；x/crypto/ssh 不像 os/exec 会对同一 writer 串行化，需自带锁。
+	var out syncBuffer
 	session.Stdout = &out
 	session.Stderr = &out
 	if stdin != nil {
@@ -142,6 +227,23 @@ func Run(client *ssh.Client, cmd string, stdin []byte) (string, error) {
 	}
 	err = session.Run(cmd)
 	return out.String(), err
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 // RunStreams 在远端执行 cmd，分别返回 stdout 与 stderr。

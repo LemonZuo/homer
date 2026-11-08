@@ -13,6 +13,9 @@ import (
 	"github.com/LemonZuo/homer/internal/modulecontrol"
 )
 
+// deployTimeout 是单次部署（含 SSH 拨号、上传、远端部署命令）的总时限。
+const deployTimeout = 10 * time.Minute
+
 // DeployConfigTaskAsync 异步按保存的部署配置发布当前域名最近一次证书。
 func (s *Service) DeployConfigTaskAsync(configID int64) (int64, error) {
 	ticket, err := s.modules.Ticket("acme")
@@ -277,7 +280,10 @@ func (s *Service) executeDeploy(logw *teeWriter, d model.ACMEDomain, cert model.
 		return err
 	}
 	logf(logw, "开始部署证书到%s：%s -> %s / %s", driver.Label(), d.MainDomain, target.Name, deployConfigName(cfg))
-	result, err := driver.Deploy(context.Background(), DeployRequest{
+	// runDeploy 持有 issueMu：没有总时限的话，一次卡住的远端命令会让签发/续期/吊销全部排队挂死。
+	ctx, cancel := context.WithTimeout(context.Background(), deployTimeout)
+	defer cancel()
+	result, err := driver.Deploy(ctx, DeployRequest{
 		Domain: d,
 		Cert:   cert,
 		Target: target,
@@ -287,6 +293,9 @@ func (s *Service) executeDeploy(logw *teeWriter, d model.ACMEDomain, cert model.
 		},
 	})
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("部署超时（超过 %s，已中断连接）：%w", deployTimeout, err)
+		}
 		return err
 	}
 	if result == nil || strings.TrimSpace(result.StateJSON) == "" {
@@ -301,7 +310,7 @@ func (s *Service) executeDeploy(logw *teeWriter, d model.ACMEDomain, cert model.
 // finalizeDeployTask 统一把终态字段写回 task + 关闭 hub 订阅。log_text 由 logBuf 当前快照决定。
 func (s *Service) finalizeDeployTask(taskID int64, logBuf *bytes.Buffer, fields map[string]any) {
 	fields["log_text"] = logBuf.String()
-	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(fields).Error
+	s.writeTaskFinal(taskID, fields)
 	s.hub.Close(taskID)
 }
 
@@ -378,23 +387,23 @@ func (s *Service) RetryDeployTasks() (int, error) {
 		cfg, err := s.deployConfigs.Get(t.ConfigID)
 		if err != nil {
 			finish := time.Now()
-			_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", t.ID).Updates(map[string]any{
+			s.writeTaskFinal(t.ID, map[string]any{
 				"status":        "failed",
 				"error_msg":     truncate(fmt.Sprintf("重试时部署配置已不可用：%v", err), 1000),
 				"finished_at":   &finish,
 				"next_retry_at": nil,
-			}).Error
+			})
 			continue
 		}
 		d, cert, target, err := s.prepareDeploy(*cfg)
 		if err != nil {
 			finish := time.Now()
-			_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", t.ID).Updates(map[string]any{
+			s.writeTaskFinal(t.ID, map[string]any{
 				"status":        "failed",
 				"error_msg":     truncate(fmt.Sprintf("重试时准备部署失败：%v", err), 1000),
 				"finished_at":   &finish,
 				"next_retry_at": nil,
-			}).Error
+			})
 			continue
 		}
 		s.runDeploy(t.ID, d, *cert, *target, *cfg, ticket)

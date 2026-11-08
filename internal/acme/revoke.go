@@ -112,6 +112,6 @@ func (s *Service) runRevoke(taskID int64, d model.ACMEDomain, cert model.ACMECer
 		upd["status"] = "success"
 		upd["log_text"] = logBuf.String()
 	}
-	_ = s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", taskID).Updates(upd).Error
+	s.writeTaskFinal(taskID, upd)
 	s.hub.Close(taskID)
 }

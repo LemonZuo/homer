@@ -2,6 +2,7 @@ package acme
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/LemonZuo/homer/internal/logx"
@@ -43,6 +44,31 @@ func (s *Service) pauseTask(id int64, reason string) {
 		logx.Error("pause acme task failed", "task", id, "err", res.Error)
 	}
 	s.hub.Close(id)
+}
+
+// writeTaskFinal 写任务终态。log_text 可能夹带远端命令输出的非法 UTF-8，先统一清洗；
+// 整条更新仍失败时退化为只写状态字段，避免任务永远停在 running（签发任务卡 running
+// 会让该域名的自动续期一直被跳过）。
+func (s *Service) writeTaskFinal(id int64, fields map[string]any) {
+	for k, v := range fields {
+		if str, ok := v.(string); ok {
+			fields[k] = strings.ToValidUTF8(str, "\uFFFD")
+		}
+	}
+	err := s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", id).Updates(fields).Error
+	if err == nil {
+		return
+	}
+	logx.Error("write acme task result failed, falling back to status only", "task", id, "status", fields["status"], "err", err)
+	fallback := map[string]any{"error_msg": "任务结果写库失败，详见服务端日志"}
+	for _, k := range []string{"status", "finished_at", "next_retry_at"} {
+		if v, ok := fields[k]; ok {
+			fallback[k] = v
+		}
+	}
+	if err := s.db.Model(&model.ACMEIssueTask{}).Where("id = ?", id).Updates(fallback).Error; err != nil {
+		logx.Error("write acme task status failed", "task", id, "err", err)
+	}
 }
 
 // 进程重启后原 goroutine 不存在，保留任务供手动重试，不把中断任务显示成永久运行中。

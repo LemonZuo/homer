@@ -14,8 +14,8 @@ type weworkNotifier struct{ c *wework.Client }
 
 func (w *weworkNotifier) Name() string  { return "wework" }
 func (w *weworkNotifier) Enabled() bool { return w.c != nil && w.c.Enabled() }
-func (w *weworkNotifier) Send(_ context.Context, m Message) error {
-	return w.c.SendText(m.Text)
+func (w *weworkNotifier) Send(ctx context.Context, m Message) error {
+	return w.c.SendText(ctx, m.Text)
 }
 
 // Email 把 Resend client 适配成 Notifier；defaultTo 在 Message.To 为空时兜底。

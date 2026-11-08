@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LemonZuo/homer/internal/model"
 )
@@ -66,9 +67,19 @@ func assembleFullchain(cert, chain []byte) []byte {
 	return buf.Bytes()
 }
 
+// truncate 按字符（rune）截断并替换非法 UTF-8：error_msg 是 varchar(1024) 按字符计，
+// 按字节切可能切出半个汉字，MySQL 严格模式下整条 UPDATE 会被拒。
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if utf8.RuneCountInString(s) <= n {
 		return s
 	}
-	return s[:n]
+	i := 0
+	for pos := range s {
+		if i == n {
+			return s[:pos]
+		}
+		i++
+	}
+	return s
 }
